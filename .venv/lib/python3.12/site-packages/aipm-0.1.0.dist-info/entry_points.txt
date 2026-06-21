@@ -1,0 +1,2 @@
+[console_scripts]
+aipm = aipm.cli.app:app

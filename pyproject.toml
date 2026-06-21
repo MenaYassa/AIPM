@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aipm"
+version = "0.1.0"
+description = "AI Platform Manager"
+readme = "README.md"
+requires-python = ">=3.12"
+
+authors = [
+    { name = "Mina" }
+]
+
+dependencies = [
+    "typer>=0.16",
+    "rich>=14",
+    "pyyaml>=6",
+    "docker>=7",
+    "httpx>=0.28",
+    "psutil>=7",
+]
+
+[project.scripts]
+aipm = "aipm.cli.app:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
