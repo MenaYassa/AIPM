@@ -1,0 +1,17 @@
+discovery:
+  ignore_dirs:
+  - node_modules
+  - .git
+  - venv
+  - aipm  # Add this so AIPM doesn't scan itself!
+  - .venv # Add this to ignore virtual environments
+  search_paths:
+  - /home/ubuntu/workspace
+  - /home/ubuntu/docker
+  - /home/ubuntu/projects
+  - /home/ubuntu          # <--- Add your home directory
+logging:
+  backup_count: 3
+  file: logs/aipm.log
+  level: INFO
+  max_size_mb: 10
