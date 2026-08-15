@@ -1,9 +1,9 @@
-from aipm.engines.health.analyzers.base import HealthAnalyzer
+from aipm.engines.health.analyzers.base import Analyzer
 from aipm.models.finding import Finding
 from aipm.models.project import Project
 
 
-class DockerAnalyzer(HealthAnalyzer):
+class DockerAnalyzer(Analyzer):
 
     def analyze(self, project: Project) -> list[Finding]:
 

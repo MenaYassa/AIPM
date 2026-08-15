@@ -1,10 +1,11 @@
 from aipm.models.project import Project
 from aipm.models.health import HealthCheckResult, HealthState
 from aipm.providers.compose.provider import ComposeProvider
+from aipm.engines.health.engine import HealthEngine
 
 class HealthService:
     def __init__(self):
-        self.compose = ComposeProvider()
+        self.compose = HealthEngine()
 
     def check_project(self, project: Project) -> list[HealthCheckResult]:
         """Runs a suite of health checks on a specific project."""

@@ -14,6 +14,14 @@ class HealthReport:
 
     state: HealthState
 
+    critical: int = 0
+
+    high: int = 0
+
+    warning: int = 0
+
+    info: int = 0
+
     findings: list[Finding] = field(default_factory=list)
 
     recommendations: list[Recommendation] = field(default_factory=list)

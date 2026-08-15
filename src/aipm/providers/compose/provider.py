@@ -5,6 +5,8 @@ from python_on_whales.exceptions import DockerException
 from aipm.core.exceptions import ProviderError
 from aipm.models.project import Project
 from aipm.mappers.compose import ComposeMapper
+from aipm.mappers.docker import DockerMapper
+from aipm.models.container import Container
 
 class ComposeError(ProviderError):
     pass
@@ -21,15 +23,24 @@ class ComposeProvider:
             compose_files=project.compose_files
         )
 
-    def ps(self, project: Project) -> list:
-        """Returns a list of mapped ComposeService objects for the project."""
-        try:
-            client = self._get_client(project)
-            # Add all=True to mimic `docker compose ps -a`
-            raw_services = client.compose.ps(all=True) 
-            return [ComposeMapper.map_service(s) for s in raw_services]
-        except DockerException as e:
-            raise ComposeError(f"Failed to list services for {project.name}: {e}")
+    def ps(self, project: Project) -> list[Container]:
+        """Returns runtime containers belonging to this compose project."""
+
+        from docker import from_env
+
+        client = from_env()
+
+        containers = client.containers.list(
+            all=True,
+            filters={
+                "label": f"com.docker.compose.project={project.name}"
+            },
+        )
+
+        return [
+            DockerMapper.container(container)
+            for container in containers
+        ]
 
     def up(self, project: Project, detach: bool = True):
         try:

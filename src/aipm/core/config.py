@@ -3,11 +3,26 @@ import yaml
 from pathlib import Path
 from aipm.models.config import AIPMConfig, LoggingConfig, DiscoveryConfig
 from aipm.core.exceptions import AIPMError
+from pathlib import Path
+
+# src/aipm/core/config.py
 
 class ConfigManager:
-    def __init__(self, config_path: str = "config/aipm.yaml"):
-        self.config_path = Path(config_path)
-        self.config: AIPMConfig = self._load_or_create()
+
+    def __init__(self, config_path: Path | None = None):
+
+        if config_path is None:
+
+            config_path = (
+                Path.home()
+                / ".config"
+                / "aipm"
+                / "config.yaml"
+            )
+
+        self.config_path = config_path
+
+        self.config = self._load_or_create()
 
     def _load_or_create(self) -> AIPMConfig:
         if not self.config_path.exists():

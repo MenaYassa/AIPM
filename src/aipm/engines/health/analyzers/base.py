@@ -5,7 +5,7 @@ from aipm.models.finding import Finding
 from aipm.models.project import Project
 
 
-class HealthAnalyzer(ABC):
+class Analyzer(ABC):
 
     @abstractmethod
     def analyze(self, project: Project) -> list[Finding]:

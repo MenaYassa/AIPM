@@ -23,3 +23,5 @@ class Finding:
     description: str
 
     recommendation: str
+    
+    resource: str | None = None
