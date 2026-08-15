@@ -1,45 +1,36 @@
-from datetime import datetime
-from aipm.models.container import Container
-from aipm.providers.docker.provider import DockerProvider
+from __future__ import annotations
+
 from aipm.mappers.docker import DockerMapper
+from aipm.providers.docker.provider import DockerProvider
+
 
 class DockerService:
-    def __init__(self):
-        self.provider = DockerProvider()
+    def __init__(self, provider: DockerProvider | None = None):
+        self.provider = provider or DockerProvider()
 
     def ps(self):
-        # The list comprehension is now highly readable
-        return [DockerMapper.container(c) for c in self.provider.list_containers()]
-      
+        return [DockerMapper.container(container) for container in self.provider.list_containers()]
+
     def inspect(self, name: str):
         return self.provider.inspect(name)
 
-    def start(self, name: str):
+    def start(self, name: str) -> None:
         self.provider.start(name)
 
-    def stop(self, name: str):
+    def stop(self, name: str) -> None:
         self.provider.stop(name)
 
-    def restart(self, name: str):
+    def restart(self, name: str) -> None:
         self.provider.restart(name)
 
-    def images(self):
-        return self.provider.images()
+    def images(self) -> list[dict]:
+        return [DockerMapper.image_view(image) for image in self.provider.images()]
 
-    def volumes(self):
-        return self.provider.volumes()
+    def volumes(self) -> list[dict]:
+        return [DockerMapper.volume_view(volume) for volume in self.provider.volumes()]
 
-    def networks(self):
-        return self.provider.networks()
+    def networks(self) -> list[dict]:
+        return [DockerMapper.network_view(network) for network in self.provider.networks()]
 
-    def images(self):
-        return [DockerMapper.image_view(i) for i in self.provider.images()]
-
-    def volumes(self):
-        return [DockerMapper.volume_view(v) for v in self.provider.volumes()]
-
-    def networks(self):
-        return [DockerMapper.network_view(n) for n in self.provider.networks()]
-
-    def logs(self, name: str, tail: int = 100):
+    def logs(self, name: str, tail: int = 100) -> str:
         return self.provider.logs(name, tail)

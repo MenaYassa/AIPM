@@ -1,6 +1,0 @@
-typer>=0.16
-rich>=14
-pyyaml>=6
-docker>=7
-httpx>=0.28
-psutil>=7

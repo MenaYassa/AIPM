@@ -20,6 +20,12 @@ dependencies = [
     "docker>=7",
     "httpx>=0.28",
     "psutil>=7",
+    "GitPython>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
 ]
 
 [project.scripts]

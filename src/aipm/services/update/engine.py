@@ -1,97 +1,92 @@
+from __future__ import annotations
+
 import subprocess
-import socket
+import sys
 from pathlib import Path
+from typing import Callable
+
 from rich.console import Console
-from aipm.services.project.service import ProjectService
-from aipm.services.backup.engine import BackupEngine
-from aipm.capabilities.health.diagnostics import HealthCapability
+
 from aipm.core.exceptions import UpdateError
+from aipm.providers.compose.provider import ComposeProvider
+from aipm.services.backup.engine import BackupEngine
+from aipm.services.health.service import HealthService
+from aipm.services.project.service import ProjectService
+
 
 class UpdateEngine:
-    def __init__(self):
-        self.console = Console()
-        self.project_service = ProjectService()
-        self.backup_engine = BackupEngine()
-        self.health_cap = HealthCapability()
-        # Common ports used across your AI engineering infrastructure
-        self.target_ports = [80, 443, 8080, 9000, 5432, 11434, 3000, 5678]
+    def __init__(
+        self,
+        project_service: ProjectService | None = None,
+        backup_engine: BackupEngine | None = None,
+        compose_provider: ComposeProvider | None = None,
+        health_service: HealthService | None = None,
+        console: Console | None = None,
+        runner: Callable = subprocess.run,
+    ):
+        self.console = console or Console()
+        self.project_service = project_service or ProjectService()
+        self.backup_engine = backup_engine or BackupEngine()
+        self.compose_provider = compose_provider or ComposeProvider()
+        self.health_service = health_service or HealthService()
+        self.runner = runner
 
-    def clear_port_blockers(self):
-        """Audits target ports and force-kills conflicting containers/daemons."""
-        self.console.print("[cyan]🔍 Performing pre-flight network port integrity check...[/cyan]")
-        
-        for port in self.target_ports:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                # If connect_ex returns 0, the port is occupied
-                if s.connect_ex(('127.0.0.1', port)) == 0:
-                    self.console.print(f"[yellow]⚠️ Port {port} is occupied. Clearing blocker...[/yellow]")
-                    
-                    # 1. Try to clear it via Docker filters if a container is binding it
-                    subprocess.run(
-                        f"docker rm -f $(docker ps -q --filter 'publish={port}') 2>/dev/null || true",
-                        shell=True, capture_output=True
-                    )
-                    
-                    # 2. Try to clear it via native process termination if it's a host zombie
-                    subprocess.run(f"sudo fuser -k {port}/tcp 2>/dev/null || true", shell=True)
-
-    def run_command_live(self, cmd: list, cwd: Path, step_name: str) -> str:
-        """Executes a system shell command with live console feedback."""
-        with self.console.status(f"[cyan]Executing: {' '.join(cmd)}...[/cyan]", spinner="dots"):
-            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-            
-        if result.returncode != 0:
-            raise UpdateError(f"Step '{step_name}' failed!\nError Details: {result.stderr.strip()}")
-        return result.stdout
-
-    def execute_update(self, project_name: str):
-        with self.console.status("[cyan]Loading project environment specifications...[/cyan]", spinner="dots"):
-            project = self.project_service.get_project(project_name)
-        
-        project_path = Path(project.path)
-        
-        self.console.print(f"\n[bold magenta]🚀 Starting Transactional Update for:[/bold magenta] [bold white]{project.name}[/bold white]")
-        self.console.print("[dim]------------------------------------------------------------[/dim]")
-
-        # 1. Self-Healing: Clear out directory permissions and network blockers
+    def run_command(self, command: list[str], cwd: Path, step_name: str) -> str:
         try:
-            subprocess.run(["sudo", "chown", "-R", "ubuntu:ubuntu", str(project_path / "searxng")], capture_output=True)
-            self.clear_port_blockers()
-        except Exception as e:
-            self.console.print(f"[dim][yellow]⚠️ Healing warning skipped: {e}[/dim]")
+            result = self.runner(
+                command,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise UpdateError(f"Step '{step_name}' could not start: {exc}") from exc
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip() or "unknown error"
+            raise UpdateError(f"Step '{step_name}' failed: {detail}")
+        return result.stdout.strip()
 
-        # 2. Create Configuration Safety Snapshot
-        self.console.print("[cyan]📦 Generating state safety-net configuration snapshot...[/cyan]")
+    def execute_update(self, project_name: str) -> None:
+        project = self.project_service.get_project(project_name)
+        project_path = Path(project.path)
+        self.console.print(f"[bold magenta]Starting update for:[/bold magenta] {project.name}")
+
+        if project.capabilities.has_git and project.git is not None:
+            if project.git.conflicted_files:
+                raise UpdateError("Update blocked: the project has unresolved Git conflicts.")
+            if project.git.dirty:
+                raise UpdateError("Update blocked: the project has uncommitted or untracked changes.")
+            self.console.print(f"[dim]Git branch: {project.git.branch or 'detached HEAD'}[/dim]")
+        else:
+            self.console.print("[dim]Git: not present; treating this as a static Compose project.[/dim]")
+
         try:
             archive = self.backup_engine.create_snapshot(project)
-            self.console.print(f"[green]✔ Snapshot successfully stored:[/green] [dim]{archive.archive_path}[/dim]")
-        except Exception as e:
-            raise UpdateError(f"Pre-update backup failed: {e}")
+        except Exception as exc:
+            raise UpdateError(f"Pre-update snapshot failed: {exc}") from exc
+        self.console.print(f"[green]Snapshot created:[/green] {archive.archive_path}")
 
-        # 3. Git Layer Update Transaction
-        git_status_val = getattr(project, "git_status", getattr(project, "status", "unknown"))
-        git_status_str = str(git_status_val).lower()
-        
-        # ONLY enforce Git rules if it is an actual git repository!
-        if (project_path / ".git").exists():
-            self.console.print(f"📋 Current Git State: [yellow]{git_status_val}[/yellow]")
-            if any(keyword in git_status_str for keyword in ["dirty", "unsaved", "degraded", "uncommitted"]):
-                self.console.print("\n[bold red]❌ UPDATE ABORTED:[/bold red] Project has uncommitted local file modifications.")
-                self.console.print("[yellow]💡 Advice:[/yellow] Commit or stash your changes before running an update.\n")
-                return
-        else:
-            self.console.print("📋 Current Git State: [dim white]N/A (Static Stack)[/dim white]")
+        try:
+            custom_runner = project_path / "start_services.py"
+            if custom_runner.is_file():
+                self.console.print("[cyan]Running project start_services.py...[/cyan]")
+                self.run_command([sys.executable, str(custom_runner)], cwd=project_path, step_name="Custom runtime rebuild")
+            elif project.capabilities.has_compose:
+                self.console.print("[cyan]Rebuilding Compose services...[/cyan]")
+                self.compose_provider.up(project, detach=True, build=True, remove_orphans=True)
+            else:
+                raise UpdateError("Project has neither start_services.py nor a Compose configuration.")
+        except Exception as exc:
+            rollback_note = f"The pre-update snapshot is available at {archive.archive_path}."
+            if isinstance(exc, UpdateError):
+                raise UpdateError(f"{exc} {rollback_note}") from exc
+            raise UpdateError(f"Deployment failed: {exc} {rollback_note}") from exc
 
-        # 4. Infrastructure Layer Rebuild Transaction
-        self.console.print("[cyan]🐳 Rebuilding and cycling container ecosystem layers...[/cyan]")
-        if (project_path / "start_services.py").exists():
-            self.run_command_live(["python3", "start_services.py"], cwd=project_path, step_name="Custom Runtime Rebuild")
-        else:
-            self.run_command_live(["docker", "compose", "up", "-d", "--build", "--remove-orphans"], cwd=project_path, step_name="Docker Compose Layer Build")
-        
-        self.console.print("[green]✔ Ecosystem deployed successfully.[/green]")
-
-        # 5. Final Cluster Stability Verification
-        self.console.print("[cyan]🩺 Handing over cluster context to Health Engine for target evaluation...[/cyan]\n")
-        self.health_cap.check_health(project.name)
-        self.console.print("\n[bold green]✨ Update transaction completed with no runtime faults detected![/bold green]\n")
+        refreshed = self.project_service.get_project(project.name)
+        checks = self.health_service.check_project(refreshed)
+        critical = [check for check in checks if check.state.value == "critical"]
+        if critical:
+            details = "; ".join(f"{check.component}: {check.message}" for check in critical)
+            raise UpdateError(f"Post-update health verification failed: {details}. Snapshot: {archive.archive_path}")
+        self.console.print("[bold green]Update completed and post-update checks passed.[/bold green]")
