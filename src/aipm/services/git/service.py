@@ -45,6 +45,9 @@ class GitService:
     def fetch(self, project: Project):
         self.provider.fetch(project)
 
+    def pull(self, project: Project):
+        self.provider.pull(project)
+
     def stash(self, project: Project, message: str):
         self.provider.stash(project, message)
 
@@ -103,16 +106,22 @@ class GitService:
             reasons.append(f"{repo.behind} commits available.")
 
         # Dirty state - classify modified files
-        if repo.dirty:
-            modified = repo.modified_files
+        if repo.conflicted_files:
+            review_required = True
+            reasons.append(f"Unresolved merge conflicts in {len(repo.conflicted_files)} file(s).")
+        elif repo.dirty:
+            modified = list(dict.fromkeys(repo.modified_files + repo.untracked_files))
             classification = self.conflicts.classify(modified)
             if classification["critical"]:
                 review_required = True
-                reasons.append("Critical infrastructure files modified.")
+                reasons.append(
+                    "Critical infrastructure files modified: "
+                    + ", ".join(classification["critical"])
+                    + "."
+                )
             else:
-                # Only non-critical files are dirty → we can stash
                 stash_required = True
-                reasons.append("Uncommitted changes detected (non‑critical).")
+                reasons.append("Uncommitted changes detected in non-critical files; AIPM can preserve them in a safety stash.")
 
         # Existing stashes (warn but don't block)
         if repo.stashes:
@@ -121,8 +130,8 @@ class GitService:
         return GitUpdatePlan(
             proceed=not review_required,
             stash_required=stash_required,
-            fetch_required=True,
-            pull_required=repo.behind > 0,
+            fetch_required=bool(repo.remote_url),
+            pull_required=bool(repo.remote_url) and repo.behind > 0,
             review_required=review_required,
             rollback_required=False,
             reasons=reasons,

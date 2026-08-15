@@ -43,7 +43,8 @@ AIPM_CONFIG=/path/to/config.yaml aipm discover
 | `aipm discover` | Find Git- or Compose-backed projects under configured search paths. |
 | `aipm health PROJECT` | Run Git, Compose, and Docker health analyzers for a project. |
 | `aipm backup PROJECT` | Create a compressed safety snapshot of a project. |
-| `aipm update PROJECT` | Snapshot, validate Git state, rebuild the project, and run post-update checks. |
+| `aipm update PROJECT --dry-run` | Build and display a side-effect-free update plan and write a dry-run audit record. |
+| `aipm update PROJECT --yes` | Approve and execute the planned update transaction, then verify health and write an audit record. |
 | `aipm compose ps PROJECT` | List containers belonging to a Compose project. |
 | `aipm compose up PROJECT` | Start a Compose project. |
 | `aipm compose down PROJECT` | Stop and remove a Compose project. |
@@ -85,9 +86,17 @@ Discovery is read-only and does not fetch remotes. Git snapshots report local br
 
 ## Safety behavior
 
-`aipm update` refuses to proceed when a Git project has uncommitted changes or unresolved conflicts. It creates a compressed snapshot before rebuilding a custom `start_services.py` runtime or a Compose stack. Snapshots are stored under `~/.local/state/aipm/backups` by default and can be redirected with `AIPM_BACKUP_DIR`.
+`aipm update PROJECT --dry-run` builds a plan without creating snapshots, fetching remotes, pulling changes, restarting services, or writing project state. A normal update displays the same plan and requires explicit `--yes` approval. Critical Git changes, unresolved conflicts, detached heads, and other review conditions block execution. Non-critical local changes may be preserved in a named safety stash during an approved update; if stash application conflicts, the stash is preserved and the transaction stops.
+
+Approved updates create a compressed snapshot before running a custom `start_services.py` runtime or rebuilding a Compose stack. Snapshots are stored under `~/.local/state/aipm/backups` by default and can be redirected with `AIPM_BACKUP_DIR`. Update plans and outcomes are recorded as redacted JSON under `~/.local/state/aipm/audit`, configurable with `AIPM_AUDIT_DIR`.
 
 The update workflow deliberately does not force-kill arbitrary host processes, run hard-coded privileged ownership changes, or silently overwrite local work. If deployment or post-update checks fail, the command reports the snapshot path so the operator can review and restore it using an intentional recovery procedure.
+
+## Update planning
+
+The update workflow is organized around a side-effect-free `UpdatePlanner`, a typed `UpdatePlan`, and an execution/audit boundary. Planning combines health-before analysis, Git state, runtime detection, risk classification, ordered actions, snapshot requirements, and approval requirements. The planner does not mutate the project. The executor performs state-changing operations only after `--yes`, preserves local safety stashes, verifies health afterward, and records `planned`, `blocked`, `approval_required`, `failed`, or `success` outcomes.
+
+The detailed production gap analysis and roadmap are in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md).
 
 ## Architecture
 
@@ -111,7 +120,7 @@ Run the automated tests with:
 pytest -q
 ```
 
-The tests focus on deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, and health aggregation. Docker integration tests should be added separately for environments with a disposable Docker daemon.
+The tests focus on deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, health aggregation, dry-run side-effect protection, approval gating, update execution, and audit serialization. Thirteen tests currently pass. Docker integration tests and disposable Git-remote tests should be added separately for environments that provide those fixtures.
 
 ## License
 

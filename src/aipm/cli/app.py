@@ -66,18 +66,21 @@ def backup(project_name: str):
 
 
 @app.command()
-def update(project_name: str):
-    """Execute a fully transactional, safe update on a managed repository."""
+def update(
+    project_name: str,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and make no state changes."),
+    approve: bool = typer.Option(False, "--yes", help="Approve the planned state-changing operation."),
+):
+    """Plan and, when explicitly approved, execute a safe project update."""
     try:
-        UpdateEngine().execute_update(project_name)
-    except UpdateError as ue:
-        print(f"\n[bold red]❌ TRANSACTION FAILURE:[/bold red] {ue}")
-        print("[bold yellow]⚠️ No files were modified. System safely held at backup snapshot.[/bold yellow]\n")
-        raise typer.Exit(code=1)
-    except ProviderError as pe:
-        print(f"\n[bold red]❌ CONFIGURATION ERROR:[/bold red] {pe}")
-        print("[bold cyan]💡 Advice:[/bold cyan] Use [bold white]aipm discover[/bold white] to see your valid directory stack names.\n")
-        raise typer.Exit(code=1)
+        UpdateEngine().execute_update(project_name, dry_run=dry_run, approve=approve)
+    except UpdateError as error:
+        print(f"\n[bold red]Update stopped:[/bold red] {error}")
+        raise typer.Exit(code=1) from error
+    except ProviderError as error:
+        print(f"\n[bold red]Configuration error:[/bold red] {error}")
+        print("[cyan]Use 'aipm discover' to see configured project names.\n")
+        raise typer.Exit(code=1) from error
     
 
 

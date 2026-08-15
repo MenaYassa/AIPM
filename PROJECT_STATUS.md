@@ -122,3 +122,20 @@ The completion pass addressed the release-blocking baseline issues and added reg
 ## Remaining considerations
 
 The repository is now suitable for local development and deterministic unit-level verification. The only material follow-up work is environment-dependent integration coverage: a disposable Git remote fixture, a Docker daemon with a small Compose fixture, and CI jobs that exercise those integrations. Those tests are intentionally not required for the core package to install or for filesystem/Git-only commands to run. A future release may also add explicit archive-restore tooling, because the update command currently preserves a recovery snapshot and reports its path rather than silently overwriting live project files during automatic rollback.
+
+## Production milestone update
+
+The attached production brief identified safe update planning as the first milestone. That milestone is now implemented locally without touching the real VPS.
+
+| Delivered capability | Implementation |
+|---|---|
+| Typed plan | `UpdatePlan` and `UpdateRisk` record project identity, runtime actions, Git state, health-before, snapshot requirement, risk, approval, and reasons. |
+| Side-effect-free planning | `UpdatePlanner` performs discovery, Git analysis, and health-before analysis without snapshot, fetch, pull, Compose mutation, or runtime execution. |
+| Dry-run | `aipm update PROJECT --dry-run` renders the plan, writes a `planned` audit record, and performs no state-changing operation. |
+| Approval gate | Normal execution renders the plan and stops unless `--yes` is provided. Blocked and approval-required outcomes are audited. |
+| Git safety | Untracked files are classified with modified files; critical infrastructure changes, conflicts, detached HEAD, and other review conditions prevent execution. Non-critical changes can be preserved in a named stash. Stash-apply conflicts preserve the stash and stop the transaction. |
+| Execution boundary | Approved execution snapshots first, fetches/pulls only when a configured remote exists, runs the custom runtime or Compose adapter, and verifies health afterward. |
+| Audit history | `AuditService` writes JSON records for plan, approval, blocked, failed, and successful outcomes under a configurable audit directory. |
+| Verification | Regression coverage increased from nine to thirteen tests, including dry-run side-effect protection, approval gating, approved custom-runtime execution, and audit serialization. |
+
+This milestone does not claim real-VPS readiness. The referenced VPS infrastructure and legacy scripts were absent from the sandbox, so production integration behavior remains unverified. The next milestone is read-only inspection of the real environment after credentials are rotated and the user explicitly authorizes that inspection; no state-changing VPS operation is implied by this local implementation.
