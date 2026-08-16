@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from aipm.capabilities.dashboard.api import DashboardApi
+from aipm.capabilities.dashboard.incidents_api import DashboardIncidentsApi
 from aipm.core.app import Application
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -15,9 +16,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 def create_app(
     dashboard_api: DashboardApi | None = None,
     application: Application | None = None,
+    incidents_api: DashboardIncidentsApi | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
-    api = dashboard_api or DashboardApi.from_application(application or Application.create(), include_history=True)
+    app_context = application or Application.create()
+    api = dashboard_api or DashboardApi.from_application(app_context, include_history=True)
+    event_api = incidents_api or DashboardIncidentsApi.from_application(app_context)
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -43,6 +47,39 @@ def create_app(
     @app.get("/api/history/tunnel")
     def history_tunnel(range_name: str = Query("24h", alias="range"), limit: int = 500):
         return _history_response(api, "tunnel", range_name, limit)
+
+    @app.get("/api/events")
+    def events(
+        range_name: str = Query("24h", alias="range"),
+        severity: str | None = None,
+        event_type: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        limit: int = 500,
+    ):
+        return event_api.events(range_name=range_name, severity=severity, event_type=event_type, resource_type=resource_type, resource_id=resource_id, limit=limit)
+
+    @app.get("/api/events/{event_id}")
+    def event_detail(event_id: int):
+        return event_api.event(event_id)
+
+    @app.get("/api/incidents")
+    def incidents(
+        range_name: str = Query("7d", alias="range"),
+        status: str | None = None,
+        severity: str | None = None,
+        resource_id: str | None = None,
+        limit: int = 500,
+    ):
+        return event_api.incidents(range_name=range_name, status=status, severity=severity, resource_id=resource_id, limit=limit)
+
+    @app.get("/api/incidents/{incident_id}")
+    def incident_detail(incident_id: int):
+        return event_api.incident(incident_id)
+
+    @app.post("/api/incidents/{incident_id}/acknowledge")
+    def acknowledge_incident(incident_id: int):
+        return event_api.acknowledge(incident_id)
 
     @app.get("/")
     def index() -> FileResponse:

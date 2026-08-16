@@ -44,7 +44,17 @@ class TelemetryConfig:
 
 
 @dataclass
+class EventConfig:
+    enabled: bool = True
+    interval_seconds: int = 15
+    event_retention_days: int = 30
+    incident_retention_days: int = 180
+    acknowledgement_enabled: bool = True
+
+
+@dataclass
 class AIPMConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    events: EventConfig = field(default_factory=EventConfig)

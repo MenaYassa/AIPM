@@ -20,3 +20,9 @@ telemetry:
   interval_seconds: 15
   retention_days: 1
   database_path: ~/.local/state/aipm/telemetry/mission_control.db
+events:
+  enabled: true
+  interval_seconds: 15
+  event_retention_days: 30
+  incident_retention_days: 180
+  acknowledgement_enabled: true

@@ -75,6 +75,16 @@ class TunnelHistoryPoint:
 
 
 @dataclass(slots=True, frozen=True)
+class HistoricalRun:
+    id: int
+    sampled_at: datetime
+    host_available: bool
+    docker_available: bool
+    projects_available: bool
+    tunnel_state: str
+
+
+@dataclass(slots=True, frozen=True)
 class SampleRunRecord:
     sampled_at: datetime
     host_available: bool

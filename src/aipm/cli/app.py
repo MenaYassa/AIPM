@@ -12,12 +12,15 @@ from aipm.services.update.engine import UpdateEngine  # <-- Add import
 from aipm.core.exceptions import UpdateError, ProviderError
 from aipm.dashboard.server import run as run_dashboard
 from aipm.capabilities.telemetry.commands import run as run_telemetry, sample as sample_telemetry
+from aipm.capabilities.events.commands import process as process_events, run as run_events
 
 app = typer.Typer(
     help="AI Platform Manager"
 )
 telemetry_app = typer.Typer(help="Collect and query historical telemetry")
 app.add_typer(telemetry_app, name="telemetry")
+events_app = typer.Typer(help="Derive deterministic events and incidents")
+app.add_typer(events_app, name="events")
 
 
 @telemetry_app.command("sample")
@@ -30,6 +33,18 @@ def telemetry_sample():
 def telemetry_run():
     """Run the dedicated read-only telemetry sampler until stopped."""
     run_telemetry()
+
+
+@events_app.command("process")
+def events_process(run_id: int | None = typer.Option(None, "--run-id", min=1, help="Process one persisted telemetry run; omit to process pending runs.")):
+    """Process persisted telemetry into deterministic events and incidents."""
+    process_events(run_id=run_id)
+
+
+@events_app.command("run")
+def events_run():
+    """Run the dedicated deterministic event processor until stopped."""
+    run_events()
 
 app.add_typer(
     docker_app,

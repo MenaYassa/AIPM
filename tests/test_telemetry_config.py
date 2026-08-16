@@ -4,6 +4,7 @@ import pytest
 
 from aipm.core.config import ConfigManager
 from aipm.core.exceptions import AIPMError
+from aipm.models.config import EventConfig
 
 
 def write_config(path: Path, telemetry: str) -> None:
@@ -11,6 +12,14 @@ def write_config(path: Path, telemetry: str) -> None:
         "logging: {}\ndiscovery:\n  search_paths: ['/tmp']\ntelemetry:\n" + telemetry,
         encoding="utf-8",
     )
+
+
+def test_event_defaults_are_safe():
+    config = EventConfig()
+    assert config.enabled is True
+    assert config.interval_seconds == 15
+    assert config.event_retention_days == 30
+    assert config.incident_retention_days == 180
 
 
 def test_telemetry_defaults_are_safe(tmp_path):
@@ -32,6 +41,13 @@ def test_telemetry_defaults_are_safe(tmp_path):
 def test_invalid_telemetry_config_fails_clearly(tmp_path, telemetry):
     path = tmp_path / "config.yaml"
     write_config(path, telemetry)
+    with pytest.raises(AIPMError, match="Failed to load configuration"):
+        ConfigManager(path)
+
+
+def test_invalid_event_config_fails_clearly(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("logging: {}\ndiscovery:\n  search_paths: ['/tmp']\nevents:\n  interval_seconds: 0\n", encoding="utf-8")
     with pytest.raises(AIPMError, match="Failed to load configuration"):
         ConfigManager(path)
 

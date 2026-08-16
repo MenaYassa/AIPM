@@ -8,6 +8,7 @@ from typing import Iterator, Sequence
 
 from aipm.models.history import (
     ContainerHistoryPoint,
+    HistoricalRun,
     HostHistoryPoint,
     ProjectHistoryPoint,
     SampleRunRecord,
@@ -242,6 +243,27 @@ class SQLiteHistoryRepository:
                 )
             return run_id
 
+    def get_runs(self, after_id: int | None, limit: int) -> list[HistoricalRun]:
+        conditions = "WHERE id > ?" if after_id is not None else ""
+        values = [after_id] if after_id is not None else []
+        values.append(limit)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM sample_runs {conditions} ORDER BY id ASC LIMIT ?",
+                values,
+            ).fetchall()
+        return [_run_from_row(row) for row in rows]
+
+    def get_run(self, run_id: int) -> HistoricalRun | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM sample_runs WHERE id = ?", (run_id,)).fetchone()
+        return _run_from_row(row) if row is not None else None
+
+    def get_previous_run(self, run_id: int) -> HistoricalRun | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM sample_runs WHERE id < ? ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+        return _run_from_row(row) if row is not None else None
+
     def get_host_history(self, start: datetime | None, end: datetime | None, limit: int) -> list[HostHistoryPoint]:
         rows = self._query("SELECT * FROM host_samples", start, end, limit)
         return [
@@ -269,6 +291,21 @@ class SQLiteHistoryRepository:
             )
             for row in rows
         ]
+
+    def get_containers_for_run(self, run_id: int) -> list[ContainerHistoryPoint]:
+        with self._connection() as connection:
+            rows = connection.execute("SELECT * FROM container_samples WHERE run_id = ? ORDER BY id ASC", (run_id,)).fetchall()
+        return [_container_from_row(row) for row in rows]
+
+    def get_projects_for_run(self, run_id: int) -> list[ProjectHistoryPoint]:
+        with self._connection() as connection:
+            rows = connection.execute("SELECT * FROM project_samples WHERE run_id = ? ORDER BY id ASC", (run_id,)).fetchall()
+        return [_project_from_row(row) for row in rows]
+
+    def get_tunnel_for_run(self, run_id: int) -> TunnelHistoryPoint | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM tunnel_samples WHERE run_id = ? ORDER BY id ASC LIMIT 1", (run_id,)).fetchone()
+        return _tunnel_from_row(row) if row is not None else None
 
     def get_container_history(
         self,
@@ -401,3 +438,56 @@ def _timestamp(value: datetime) -> int:
 
 def _datetime(value: int) -> datetime:
     return datetime.fromtimestamp(value, tz=timezone.utc)
+
+
+def _run_from_row(row: sqlite3.Row) -> HistoricalRun:
+    return HistoricalRun(
+        id=int(row["id"]),
+        sampled_at=_datetime(row["sampled_at"]),
+        host_available=bool(row["host_available"]),
+        docker_available=bool(row["docker_available"]),
+        projects_available=bool(row["projects_available"]),
+        tunnel_state=row["tunnel_state"],
+    )
+
+
+def _container_from_row(row: sqlite3.Row) -> ContainerHistoryPoint:
+    return ContainerHistoryPoint(
+        sampled_at=_datetime(row["sampled_at"]),
+        container_id=row["container_id"],
+        container_name=row["container_name"],
+        image=row["image"],
+        state=row["state"],
+        health=row["health"],
+        stack=row["stack"],
+        restart_count=row["restart_count"],
+        cpu_percent=row["cpu_percent"],
+        memory_used_mb=row["memory_used_mb"],
+        memory_limit_mb=row["memory_limit_mb"],
+        memory_percent=row["memory_percent"],
+        stats_available=bool(row["stats_available"]),
+    )
+
+
+def _project_from_row(row: sqlite3.Row) -> ProjectHistoryPoint:
+    return ProjectHistoryPoint(
+        sampled_at=_datetime(row["sampled_at"]),
+        name=row["name"],
+        path=row["path"],
+        branch=row["branch"],
+        has_git=bool(row["has_git"]),
+        has_compose=bool(row["has_compose"]),
+        dirty=None if row["dirty"] is None else bool(row["dirty"]),
+        ahead=row["ahead"],
+        behind=row["behind"],
+    )
+
+
+def _tunnel_from_row(row: sqlite3.Row) -> TunnelHistoryPoint:
+    return TunnelHistoryPoint(
+        sampled_at=_datetime(row["sampled_at"]),
+        state=row["state"],
+        source=row["source"],
+        systemd=row["systemd"],
+        local_containers=tuple(filter(None, (row["local_containers"] or "").split(","))),
+    )

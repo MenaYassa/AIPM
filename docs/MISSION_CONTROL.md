@@ -254,3 +254,116 @@ Supported ranges are `1h`, `6h`, `24h`, and `7d`; limits are bounded to 1–5000
 ### Minimal UI proof
 
 The existing Mission Control visual design remains intact. MC-2 adds a compact **Historical pulse** panel with CPU, memory, and disk SVG trends and `1H`, `6H`, and `24H` selectors. The panel is proof of persisted history only; it does not add Incident Room, alerting, notifications, controls, or a visual redesign.
+
+
+## MC-3 Event Engine & Incident Room
+
+MC-3 derives deterministic events and incidents from committed MC-2 telemetry facts. It does not change the telemetry sampler’s responsibility.
+
+```text
+Persisted Dashboard facts
+      ↓
+HistoricalFrameService
+      ↓
+HealthEngine evidence + EventDerivationService
+      ↓
+EventRepository
+      ↓
+IncidentEngine
+      ↓
+IncidentRepository
+      ↓
+Event/Incident API and Incident Room
+```
+
+The event processor never directly calls psutil, Docker, Compose, Git, systemd, or Cloudflare. It consumes typed historical rows and the existing Health Engine’s deterministic output. It never performs remediation.
+
+### Event processor commands
+
+Process all pending committed telemetry runs once:
+
+```bash
+aipm events process
+```
+
+Process one source telemetry run:
+
+```bash
+aipm events process --run-id 42
+```
+
+Run the dedicated event processor:
+
+```bash
+aipm events run
+```
+
+The event processor is not started by FastAPI. Production should run exactly one `aipm events run` process through systemd, separately from `aipm telemetry run`.
+
+Suggested unit template:
+
+```ini
+[Unit]
+Description=AIPM Mission Control event processor
+After=aipm-telemetry.service
+
+[Service]
+Type=simple
+User=aipm
+WorkingDirectory=/opt/AIPM
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/AIPM/.venv/bin/aipm events run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+```
+
+This unit is a template only. MC-3 implementation did not install, enable, or modify systemd on any VPS.
+
+### Initial deterministic event families
+
+MC-3 currently derives container start/restarting/restarted/stopped/recovered/health-changed events, project Git state changes, local tunnel state changes, project HealthState changes, and HealthEngine finding-set changes. It does not infer lifecycle across different container IDs, create threshold alerts, or claim causality.
+
+Repeated observations do not create repeated events. Event identity includes source run, previous run, event type, resource, and transition values. The source-run processing marker and unique event key make retries idempotent.
+
+### Incident correlation
+
+Incidents use explicit correlation keys:
+
+```text
+container:{container_id}:stability
+project:{project_path}:git
+project:{project_path}:health
+tunnel:local:availability
+```
+
+Opening events update an existing open incident with the same key. Recovery events resolve the matching incident. Acknowledgement changes only incident metadata and never executes infrastructure actions.
+
+### MC-3 API
+
+Existing MC-2 routes remain unchanged. MC-3 adds:
+
+```text
+GET /api/events
+GET /api/events/{id}
+GET /api/incidents
+GET /api/incidents/{id}
+POST /api/incidents/{id}/acknowledge
+```
+
+Event filters include `range`, `severity`, `event_type`, `resource_type`, `resource_id`, and bounded `limit`. Incident filters include `range`, `status`, `severity`, `resource_id`, and bounded `limit`. API failures return safe structured responses and do not expose SQL or tracebacks.
+
+### Incident Room
+
+The existing Mission Control visual language now includes a focused Incident Room section. It shows open incidents, severity, status, resource, start time, summary, and the latest persisted event timeline. It contains no restart, stop, start, update, rollback, shell, Docker exec, backup, restore, alerting, or AI controls.
+
+### Event/incident storage
+
+MC-3 reuses the MC-2 SQLite database. It adds `event_processing_runs`, `health_observations`, `health_findings`, `events`, `event_evidence`, `incidents`, and `incident_events`. Telemetry tables remain unchanged.
+
+Event and incident retention is independent from high-frequency telemetry retention. The schema supports a later configurable event policy, but long-term cleanup should remain disabled until representative event volume is measured. Open and acknowledged incident evidence must not be deleted by retention.

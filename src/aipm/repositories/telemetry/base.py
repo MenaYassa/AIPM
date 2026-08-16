@@ -5,6 +5,7 @@ from typing import Protocol, Sequence
 
 from aipm.models.history import (
     ContainerHistoryPoint,
+    HistoricalRun,
     HostHistoryPoint,
     ProjectHistoryPoint,
     SampleRunRecord,
@@ -24,7 +25,19 @@ class HistoryRepository(Protocol):
         tunnel: TunnelHistoryPoint | None,
     ) -> int: ...
 
+    def get_runs(self, after_id: int | None, limit: int) -> list[HistoricalRun]: ...
+
+    def get_run(self, run_id: int) -> HistoricalRun | None: ...
+
+    def get_previous_run(self, run_id: int) -> HistoricalRun | None: ...
+
     def get_host_history(self, start: datetime | None, end: datetime | None, limit: int) -> list[HostHistoryPoint]: ...
+
+    def get_containers_for_run(self, run_id: int) -> list[ContainerHistoryPoint]: ...
+
+    def get_projects_for_run(self, run_id: int) -> list[ProjectHistoryPoint]: ...
+
+    def get_tunnel_for_run(self, run_id: int) -> TunnelHistoryPoint | None: ...
 
     def get_container_history(
         self,

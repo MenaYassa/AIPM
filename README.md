@@ -41,7 +41,7 @@ AIPM now includes a read-only web dashboard that turns the VPS handbook into a l
 aipm dashboard
 ```
 
-The default listener is `127.0.0.1:8787`; keep it loopback-only when the existing cloudflared tunnel is the public ingress. The full deployment and security runbook is in [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md). Mission Control uses typed read-only telemetry services behind the existing AIPM providers and preserves the current `/api/overview` response contract. MC-2 adds a configurable SQLite sampler through `aipm telemetry sample` and `aipm telemetry run`, plus safe `/api/history/host`, `/api/history/containers`, `/api/history/projects`, and `/api/history/tunnel` endpoints. See [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md) for the schema, retention, systemd template, and read-only deployment boundary.
+The default listener is `127.0.0.1:8787`; keep it loopback-only when the existing cloudflared tunnel is the public ingress. The full deployment and security runbook is in [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md). Mission Control uses typed read-only telemetry services behind the existing AIPM providers and preserves the current `/api/overview` response contract. MC-2 adds a configurable SQLite sampler through `aipm telemetry sample` and `aipm telemetry run`, plus safe `/api/history/host`, `/api/history/containers`, `/api/history/projects`, and `/api/history/tunnel` endpoints. MC-3 adds a separate deterministic processor through `aipm events process` and `aipm events run`, with `/api/events`, `/api/incidents`, and a focused read-only Incident Room. See [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md) for the schema, retention, systemd templates, idempotency, and safety boundaries.
 
 ## Commands
 
