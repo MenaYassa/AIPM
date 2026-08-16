@@ -34,6 +34,13 @@ class DockerProvider:
     def inspect(self, name: str):
         return self._container(name)
 
+    def stats(self, container):
+        """Return a one-shot read-only stats payload for a container object."""
+        try:
+            return container.stats(stream=False)
+        except docker.errors.DockerException as exc:
+            raise DockerError("Docker stats are unavailable.") from exc
+
     def start(self, name: str) -> None:
         try:
             self._container(name).start()

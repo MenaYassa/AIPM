@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aipm.models.container import Container
+from aipm.models.telemetry import ContainerSnapshot, ResourceStats
 
 
 class DockerMapper:
@@ -38,6 +39,40 @@ class DockerMapper:
             labels=labels,
             stack=labels.get("com.docker.compose.project"),
             created=DockerMapper._created(attrs.get("Created")),
+        )
+
+    @staticmethod
+    def resource_stats(stats: dict[str, Any] | None) -> ResourceStats:
+        if not stats:
+            return ResourceStats(available=False)
+        try:
+            cpu = stats.get("cpu_stats") or {}
+            previous = stats.get("precpu_stats") or {}
+            cpu_delta = (cpu.get("cpu_usage") or {}).get("total_usage", 0) - (previous.get("cpu_usage") or {}).get("total_usage", 0)
+            system_delta = cpu.get("system_cpu_usage", 0) - previous.get("system_cpu_usage", 0)
+            online = cpu.get("online_cpus") or len((cpu.get("cpu_usage") or {}).get("percpu_usage") or []) or 1
+            cpu_percent = round((cpu_delta / system_delta) * online * 100, 1) if system_delta > 0 and cpu_delta >= 0 else None
+            memory = stats.get("memory_stats") or {}
+            usage = max(0, memory.get("usage", 0) - (memory.get("stats") or {}).get("inactive_file", 0))
+            limit = memory.get("limit", 0)
+            return ResourceStats(
+                cpu_percent=cpu_percent,
+                memory_used_mb=round(usage / (1024**2), 1),
+                memory_limit_mb=round(limit / (1024**2), 1) if limit else None,
+                memory_percent=round((usage / limit) * 100, 1) if limit else None,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError, ZeroDivisionError):
+            return ResourceStats(available=False)
+
+    @staticmethod
+    def container_snapshot(container: Any, stats: dict[str, Any] | None = None) -> ContainerSnapshot:
+        attrs = getattr(container, "attrs", {}) or {}
+        state = attrs.get("State", {}) or {}
+        return ContainerSnapshot(
+            container=DockerMapper.container(container),
+            resources=DockerMapper.resource_stats(stats),
+            restart_count=int(state.get("RestartCount", 0) or 0),
+            started_at=state.get("StartedAt"),
         )
 
     @staticmethod

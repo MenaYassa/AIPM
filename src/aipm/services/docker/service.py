@@ -1,12 +1,16 @@
-from __future__ import annotations
-
 from aipm.mappers.docker import DockerMapper
 from aipm.providers.docker.provider import DockerProvider
 
 
 class DockerService:
     def __init__(self, provider: DockerProvider | None = None):
-        self.provider = provider or DockerProvider()
+        self._provider = provider
+
+    @property
+    def provider(self) -> DockerProvider:
+        if self._provider is None:
+            self._provider = DockerProvider()
+        return self._provider
 
     def ps(self):
         return [DockerMapper.container(container) for container in self.provider.list_containers()]

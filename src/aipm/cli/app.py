@@ -10,10 +10,26 @@ from aipm.capabilities.health.diagnostics import HealthCapability
 from aipm.capabilities.backup.snapshots import BackupCapability
 from aipm.services.update.engine import UpdateEngine  # <-- Add import
 from aipm.core.exceptions import UpdateError, ProviderError
+from aipm.dashboard.server import run as run_dashboard
+from aipm.capabilities.telemetry.commands import run as run_telemetry, sample as sample_telemetry
 
 app = typer.Typer(
     help="AI Platform Manager"
 )
+telemetry_app = typer.Typer(help="Collect and query historical telemetry")
+app.add_typer(telemetry_app, name="telemetry")
+
+
+@telemetry_app.command("sample")
+def telemetry_sample():
+    """Collect and persist one read-only telemetry sample."""
+    sample_telemetry()
+
+
+@telemetry_app.command("run")
+def telemetry_run():
+    """Run the dedicated read-only telemetry sampler until stopped."""
+    run_telemetry()
 
 app.add_typer(
     docker_app,
@@ -63,6 +79,15 @@ def health(project_name: str):
 def backup(project_name: str):
     """Create a localized safety-net snapshot of a project configuration."""
     BackupCapability().snapshot(project_name)
+
+
+@app.command()
+def dashboard(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address. Keep loopback-only unless protected by a trusted proxy."),
+    port: int = typer.Option(8787, "--port", min=1, max=65535, help="HTTP port for Mission Control."),
+):
+    """Launch the read-only Mission Control dashboard."""
+    run_dashboard(host=host, port=port)
 
 
 @app.command()

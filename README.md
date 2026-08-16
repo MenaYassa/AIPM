@@ -33,6 +33,16 @@ AIPM creates a default configuration at `~/.config/aipm/config.yaml` on first us
 AIPM_CONFIG=/path/to/config.yaml aipm discover
 ```
 
+## Mission Control dashboard
+
+AIPM now includes a read-only web dashboard that turns the VPS handbook into a live operations cockpit. It reports host telemetry, Docker container state, local cloudflared visibility, and Git/Compose-backed project inventory while linking back to the handbook’s first-response workflows. Start it locally with:
+
+```bash
+aipm dashboard
+```
+
+The default listener is `127.0.0.1:8787`; keep it loopback-only when the existing cloudflared tunnel is the public ingress. The full deployment and security runbook is in [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md). Mission Control uses typed read-only telemetry services behind the existing AIPM providers and preserves the current `/api/overview` response contract. MC-2 adds a configurable SQLite sampler through `aipm telemetry sample` and `aipm telemetry run`, plus safe `/api/history/host`, `/api/history/containers`, `/api/history/projects`, and `/api/history/tunnel` endpoints. See [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md) for the schema, retention, systemd template, and read-only deployment boundary.
+
 ## Commands
 
 | Command | Purpose |

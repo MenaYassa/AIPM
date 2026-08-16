@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 from dataclasses import asdict
 from pathlib import Path
@@ -8,7 +6,7 @@ from typing import Any
 import yaml
 
 from aipm.core.exceptions import AIPMError
-from aipm.models.config import AIPMConfig, DiscoveryConfig, LoggingConfig
+from aipm.models.config import AIPMConfig, DiscoveryConfig, LoggingConfig, TelemetryConfig
 
 
 class ConfigManager:
@@ -35,28 +33,53 @@ class ConfigManager:
 
             logging_data = data.get("logging", {})
             discovery_data = data.get("discovery", {})
-            if not isinstance(logging_data, dict) or not isinstance(discovery_data, dict):
-                raise ValueError("logging and discovery must be mappings")
+            telemetry_data = dict(data.get("telemetry", {}) or {})
+            if not isinstance(logging_data, dict) or not isinstance(discovery_data, dict) or not isinstance(telemetry_data, dict):
+                raise ValueError("logging, discovery, and telemetry must be mappings")
+
+            env_database_path = os.environ.get("AIPM_TELEMETRY_DB")
+            if env_database_path:
+                telemetry_data["database_path"] = env_database_path
 
             logging_config = LoggingConfig(**logging_data)
             discovery_config = DiscoveryConfig(**discovery_data)
-            if logging_config.max_size_mb <= 0:
-                raise ValueError("logging.max_size_mb must be greater than zero")
-            if logging_config.backup_count < 0:
-                raise ValueError("logging.backup_count cannot be negative")
-            if discovery_config.max_depth < 0:
-                raise ValueError("discovery.max_depth cannot be negative")
-            if not discovery_config.search_paths:
-                raise ValueError("discovery.search_paths cannot be empty")
-
-            return AIPMConfig(logging=logging_config, discovery=discovery_config)
+            telemetry_config = TelemetryConfig(**telemetry_data)
+            self._validate(logging_config, discovery_config, telemetry_config)
+            return AIPMConfig(logging=logging_config, discovery=discovery_config, telemetry=telemetry_config)
         except (TypeError, ValueError, yaml.YAMLError) as exc:
             raise AIPMError(f"Failed to load configuration from {self.config_path}: {exc}") from exc
         except OSError as exc:
             raise AIPMError(f"Unable to read configuration from {self.config_path}: {exc}") from exc
 
+    @staticmethod
+    def _validate(logging_config: LoggingConfig, discovery_config: DiscoveryConfig, telemetry_config: TelemetryConfig) -> None:
+        if logging_config.max_size_mb <= 0:
+            raise ValueError("logging.max_size_mb must be greater than zero")
+        if logging_config.backup_count < 0:
+            raise ValueError("logging.backup_count cannot be negative")
+        if discovery_config.max_depth < 0:
+            raise ValueError("discovery.max_depth cannot be negative")
+        if not discovery_config.search_paths:
+            raise ValueError("discovery.search_paths cannot be empty")
+        if telemetry_config.interval_seconds <= 0:
+            raise ValueError("telemetry.interval_seconds must be greater than zero")
+        if telemetry_config.retention_days <= 0:
+            raise ValueError("telemetry.retention_days must be greater than zero")
+        database_path = str(telemetry_config.database_path).strip()
+        if not database_path:
+            raise ValueError("telemetry.database_path cannot be empty")
+        expanded = Path(database_path).expanduser()
+        if expanded.name in {"", ".", ".."} or expanded == expanded.parent:
+            raise ValueError("telemetry.database_path must point to a database file")
+        if expanded.exists() and expanded.is_dir():
+            raise ValueError("telemetry.database_path cannot be a directory")
+
     def _create_default(self) -> AIPMConfig:
         default_config = AIPMConfig()
+        env_database_path = os.environ.get("AIPM_TELEMETRY_DB")
+        if env_database_path:
+            default_config.telemetry.database_path = env_database_path
+        self._validate(default_config.logging, default_config.discovery, default_config.telemetry)
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with self.config_path.open("w", encoding="utf-8") as handle:

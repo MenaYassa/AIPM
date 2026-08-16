@@ -15,3 +15,8 @@ logging:
   file: logs/aipm.log
   level: INFO
   max_size_mb: 10
+telemetry:
+  enabled: true
+  interval_seconds: 15
+  retention_days: 1
+  database_path: ~/.local/state/aipm/telemetry/mission_control.db
