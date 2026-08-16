@@ -39,6 +39,26 @@ CREATE INDEX IF NOT EXISTS idx_incidents_severity_updated ON incidents(severity,
 CREATE INDEX IF NOT EXISTS idx_incidents_resource_updated ON incidents(resource_type, resource_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_incidents_correlation_status ON incidents(correlation_key, status);
 CREATE INDEX IF NOT EXISTS idx_incident_events_event ON incident_events(event_id);
+CREATE TABLE IF NOT EXISTS incident_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    incident_key TEXT NOT NULL,
+    transition TEXT NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    previous_status TEXT,
+    current_status TEXT NOT NULL,
+    previous_severity TEXT,
+    current_severity TEXT NOT NULL,
+    event_id INTEGER,
+    source_event_key TEXT,
+    correlation_key TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    resource_name TEXT,
+    project_path TEXT,
+    event_type TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_incident_transitions_incident ON incident_transitions(incident_id, occurred_at);
 """
 
 
@@ -69,6 +89,9 @@ class SQLiteIncidentRepository:
                 "SELECT * FROM incidents WHERE correlation_key = ? AND status IN (?, ?) ORDER BY id DESC LIMIT 1",
                 (event.correlation_key, IncidentStatus.OPEN.value, IncidentStatus.ACKNOWLEDGED.value),
             ).fetchone()
+            transition = ""
+            previous_status = row["status"] if row is not None else None
+            previous_severity = row["severity"] if row is not None else None
             if resolves_incident:
                 if row is None:
                     return None
@@ -77,6 +100,7 @@ class SQLiteIncidentRepository:
                     (IncidentStatus.RESOLVED.value, _timestamp(now), _timestamp(now), row["id"]),
                 )
                 incident_id = int(row["id"])
+                transition = "incident_recovered"
             elif opens_incident:
                 if row is None:
                     cursor = connection.execute(
@@ -90,11 +114,14 @@ class SQLiteIncidentRepository:
                          event.correlation_key, event.description),
                     )
                     incident_id = int(cursor.lastrowid)
+                    transition = "incident_opened"
                 else:
                     incident_id = int(row["id"])
+                    new_severity = _max_severity(row["severity"], event.severity.value)
+                    transition = "incident_escalated" if new_severity != row["severity"] else "incident_updated"
                     connection.execute(
                         "UPDATE incidents SET severity = ?, status = ?, updated_at = ?, title = ?, summary = ? WHERE id = ?",
-                        (_max_severity(row["severity"], event.severity.value), IncidentStatus.OPEN.value,
+                        (new_severity, IncidentStatus.OPEN.value,
                          _timestamp(now), event.title, event.description, incident_id),
                     )
             else:
@@ -103,14 +130,37 @@ class SQLiteIncidentRepository:
                 "INSERT OR IGNORE INTO incident_events (incident_id, event_id, attached_at) VALUES (?, ?, ?)",
                 (incident_id, event.id, _timestamp(now)),
             )
+            current = connection.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
+            connection.execute(
+                """INSERT INTO incident_transitions
+                (incident_id, incident_key, transition, occurred_at, previous_status, current_status,
+                 previous_severity, current_severity, event_id, source_event_key, correlation_key,
+                 resource_type, resource_id, resource_name, project_path, event_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (incident_id, current["incident_key"], transition, _timestamp(now), previous_status,
+                 current["status"], previous_severity, current["severity"], event.id, event.event_key,
+                 current["correlation_key"], current["resource_type"], current["resource_id"],
+                 current["resource_name"], current["project_path"], event.event_type.value),
+            )
         return self.get_incident(incident_id)
 
     def acknowledge(self, incident_id: int, acknowledged_at: datetime) -> Incident | None:
         with self._connection() as connection:
-            connection.execute(
-                "UPDATE incidents SET status = ? WHERE id = ? AND status = ?",
-                (IncidentStatus.ACKNOWLEDGED.value, incident_id, IncidentStatus.OPEN.value),
-            )
+            row = connection.execute("SELECT * FROM incidents WHERE id = ? AND status = ?", (incident_id, IncidentStatus.OPEN.value)).fetchone()
+            if row is not None:
+                connection.execute(
+                    "UPDATE incidents SET status = ?, updated_at = ? WHERE id = ?",
+                    (IncidentStatus.ACKNOWLEDGED.value, _timestamp(acknowledged_at), incident_id),
+                )
+                connection.execute(
+                    """INSERT INTO incident_transitions
+                    (incident_id, incident_key, transition, occurred_at, previous_status, current_status,
+                     previous_severity, current_severity, correlation_key, resource_type, resource_id, resource_name, project_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (incident_id, row["incident_key"], "incident_acknowledged", _timestamp(acknowledged_at),
+                     row["status"], IncidentStatus.ACKNOWLEDGED.value, row["severity"], row["severity"],
+                     row["correlation_key"], row["resource_type"], row["resource_id"], row["resource_name"], row["project_path"]),
+                )
         return self.get_incident(incident_id)
 
     def get_incidents(self, incident_filter: IncidentFilter) -> list[Incident]:

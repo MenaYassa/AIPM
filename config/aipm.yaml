@@ -26,3 +26,38 @@ events:
   event_retention_days: 30
   incident_retention_days: 180
   acknowledgement_enabled: true
+
+notifications:
+  enabled: false
+  interval_seconds: 5
+  retention_days: 180
+  default_cooldown_seconds: 900
+  default_window_seconds: 3600
+  default_max_notifications: 3
+  global_window_seconds: 3600
+  global_max_notifications: 100
+  channels:
+  - id: ops-telegram
+    name: Operations Telegram
+    channel_type: telegram
+    enabled: false
+    secret_ref: AIPM_NOTIFY_TELEGRAM_TOKEN
+    destination_ref: AIPM_NOTIFY_TELEGRAM_CHAT_ID
+    timeout_seconds: 10
+    max_attempts: 3
+  policies:
+  - id: critical-incidents
+    name: Critical incident openings
+    enabled: false
+    minimum_severity: critical
+    transitions:
+    - incident_opened
+    - incident_escalated
+    notify_recovery: true
+    notify_acknowledgement: false
+    notify_updates: false
+    cooldown_seconds: 900
+    window_seconds: 3600
+    max_notifications: 3
+    channels:
+    - ops-telegram

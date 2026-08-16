@@ -135,3 +135,12 @@ The tests focus on deterministic domain logic, configuration, discovery, backups
 ## License
 
 See [`LICENSE`](LICENSE).
+
+
+## MC-4 Alerts and Notifications
+
+MC-4 adds incident-aware notification decisions, a persistent SQLite outbox, delivery attempt audit, and a dedicated `aipm notifications run` worker. Notifications remain disabled unless explicitly enabled in configuration. Channel credentials are referenced through environment-variable names and are never stored in Git, SQLite, logs, API responses, or browser payloads.
+
+Useful commands are `aipm notifications list`, `aipm notifications retry NOTIFICATION_ID`, `aipm notifications test CHANNEL_ID`, and `aipm notifications run`. The dashboard exposes read-only notification, channel, and policy views at `/api/notifications`, `/api/notifications/{id}`, `/api/notification-channels`, and `/api/notification-policies`.
+
+MC-4 does not perform remediation and does not modify Docker, Compose, Git, systemd, Cloudflare, packages, incidents, or infrastructure state. It stops before MC-5 Guarded Operations and MC-6 AI Advisor. See [`docs/MC-4_ARCHITECTURE.md`](docs/MC-4_ARCHITECTURE.md).

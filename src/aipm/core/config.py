@@ -6,7 +6,16 @@ from typing import Any
 import yaml
 
 from aipm.core.exceptions import AIPMError
-from aipm.models.config import AIPMConfig, DiscoveryConfig, EventConfig, LoggingConfig, TelemetryConfig
+from aipm.models.config import (
+    AIPMConfig,
+    DiscoveryConfig,
+    EventConfig,
+    LoggingConfig,
+    NotificationChannelConfig,
+    NotificationConfig,
+    NotificationPolicyConfig,
+    TelemetryConfig,
+)
 
 
 class ConfigManager:
@@ -35,26 +44,36 @@ class ConfigManager:
             discovery_data = data.get("discovery", {})
             telemetry_data = dict(data.get("telemetry", {}) or {})
             events_data = dict(data.get("events", {}) or {})
-            if not isinstance(logging_data, dict) or not isinstance(discovery_data, dict) or not isinstance(telemetry_data, dict) or not isinstance(events_data, dict):
-                raise ValueError("logging, discovery, telemetry, and events must be mappings")
+            notifications_data = dict(data.get("notifications", {}) or {})
+            if not isinstance(logging_data, dict) or not isinstance(discovery_data, dict) or not isinstance(telemetry_data, dict) or not isinstance(events_data, dict) or not isinstance(notifications_data, dict):
+                raise ValueError("logging, discovery, telemetry, events, and notifications must be mappings")
 
             env_database_path = os.environ.get("AIPM_TELEMETRY_DB")
             if env_database_path:
                 telemetry_data["database_path"] = env_database_path
 
+            channel_data = notifications_data.pop("channels", []) or []
+            policy_data = notifications_data.pop("policies", []) or []
+            if not isinstance(channel_data, list) or not isinstance(policy_data, list):
+                raise ValueError("notifications.channels and notifications.policies must be lists")
+            notification_config = NotificationConfig(
+                **notifications_data,
+                channels=[NotificationChannelConfig(**item) for item in channel_data],
+                policies=[NotificationPolicyConfig(**item) for item in policy_data],
+            )
             logging_config = LoggingConfig(**logging_data)
             discovery_config = DiscoveryConfig(**discovery_data)
             telemetry_config = TelemetryConfig(**telemetry_data)
             event_config = EventConfig(**events_data)
-            self._validate(logging_config, discovery_config, telemetry_config, event_config)
-            return AIPMConfig(logging=logging_config, discovery=discovery_config, telemetry=telemetry_config, events=event_config)
+            self._validate(logging_config, discovery_config, telemetry_config, event_config, notification_config)
+            return AIPMConfig(logging=logging_config, discovery=discovery_config, telemetry=telemetry_config, events=event_config, notifications=notification_config)
         except (TypeError, ValueError, yaml.YAMLError) as exc:
             raise AIPMError(f"Failed to load configuration from {self.config_path}: {exc}") from exc
         except OSError as exc:
             raise AIPMError(f"Unable to read configuration from {self.config_path}: {exc}") from exc
 
     @staticmethod
-    def _validate(logging_config: LoggingConfig, discovery_config: DiscoveryConfig, telemetry_config: TelemetryConfig, event_config: EventConfig) -> None:
+    def _validate(logging_config: LoggingConfig, discovery_config: DiscoveryConfig, telemetry_config: TelemetryConfig, event_config: EventConfig, notification_config: NotificationConfig | None = None) -> None:
         if logging_config.max_size_mb <= 0:
             raise ValueError("logging.max_size_mb must be greater than zero")
         if logging_config.backup_count < 0:
@@ -81,13 +100,32 @@ class ConfigManager:
             raise ValueError("events.event_retention_days must be greater than zero")
         if event_config.incident_retention_days <= 0:
             raise ValueError("events.incident_retention_days must be greater than zero")
+        if notification_config is not None:
+            if notification_config.interval_seconds <= 0 or notification_config.retention_days <= 0:
+                raise ValueError("notification intervals and retention must be greater than zero")
+            if notification_config.default_cooldown_seconds < 0 or notification_config.default_window_seconds <= 0 or notification_config.default_max_notifications <= 0:
+                raise ValueError("notification defaults are invalid")
+            channel_ids = set()
+            for channel in notification_config.channels:
+                if not channel.id or channel.id in channel_ids or channel.timeout_seconds <= 0 or channel.max_attempts <= 0:
+                    raise ValueError("notification channel configuration is invalid")
+                channel_ids.add(channel.id)
+                if channel.secret_ref and ("=" in channel.secret_ref or " " in channel.secret_ref):
+                    raise ValueError("notification secrets must be environment variable references")
+            policy_ids = set()
+            for policy in notification_config.policies:
+                if not policy.id or policy.id in policy_ids or policy.cooldown_seconds < 0 or policy.window_seconds <= 0 or policy.max_notifications <= 0:
+                    raise ValueError("notification policy configuration is invalid")
+                policy_ids.add(policy.id)
+                if any(channel_id not in channel_ids for channel_id in policy.channels):
+                    raise ValueError(f"notification policy {policy.id} references an unknown channel")
 
     def _create_default(self) -> AIPMConfig:
         default_config = AIPMConfig()
         env_database_path = os.environ.get("AIPM_TELEMETRY_DB")
         if env_database_path:
             default_config.telemetry.database_path = env_database_path
-        self._validate(default_config.logging, default_config.discovery, default_config.telemetry, default_config.events)
+        self._validate(default_config.logging, default_config.discovery, default_config.telemetry, default_config.events, default_config.notifications)
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with self.config_path.open("w", encoding="utf-8") as handle:

@@ -13,6 +13,7 @@ from aipm.core.exceptions import UpdateError, ProviderError
 from aipm.dashboard.server import run as run_dashboard
 from aipm.capabilities.telemetry.commands import run as run_telemetry, sample as sample_telemetry
 from aipm.capabilities.events.commands import process as process_events, run as run_events
+from aipm.capabilities.notifications.commands import list_notifications, retry as retry_notification, run as run_notifications, test_channel
 
 app = typer.Typer(
     help="AI Platform Manager"
@@ -21,6 +22,8 @@ telemetry_app = typer.Typer(help="Collect and query historical telemetry")
 app.add_typer(telemetry_app, name="telemetry")
 events_app = typer.Typer(help="Derive deterministic events and incidents")
 app.add_typer(events_app, name="events")
+notifications_app = typer.Typer(help="Inspect and deliver incident notifications")
+app.add_typer(notifications_app, name="notifications")
 
 
 @telemetry_app.command("sample")
@@ -45,6 +48,30 @@ def events_process(run_id: int | None = typer.Option(None, "--run-id", min=1, he
 def events_run():
     """Run the dedicated deterministic event processor until stopped."""
     run_events()
+
+
+@notifications_app.command("list")
+def notifications_list():
+    """List notification audit records without sending anything."""
+    list_notifications()
+
+
+@notifications_app.command("retry")
+def notifications_retry(notification_id: int = typer.Argument(..., min=1)):
+    """Inspect a failed notification for explicit retry handling."""
+    retry_notification(notification_id)
+
+
+@notifications_app.command("test")
+def notifications_test(channel_id: str = typer.Argument(...), yes: bool = typer.Option(False, "--yes", help="Explicitly acknowledge a real external test.")):
+    """Validate the channel test boundary without sending by default."""
+    test_channel(channel_id, confirm=yes)
+
+
+@notifications_app.command("run")
+def notifications_run():
+    """Run the dedicated notification projector and delivery worker until stopped."""
+    run_notifications()
 
 app.add_typer(
     docker_app,
