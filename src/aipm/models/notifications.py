@@ -114,6 +114,7 @@ class Notification:
     next_attempt_at: datetime | None = None
     attempt_count: int = 0
     suppressed_reason: str | None = None
+    lease_token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

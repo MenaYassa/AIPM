@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from aipm.core.app import Application
@@ -49,7 +50,21 @@ class DashboardNotificationsApi:
     def channels(self) -> dict[str, Any]:
         if self.application is None:
             return self._unavailable()
-        return {"available": True, "status": "ok", "error": None, "channels": [{"id": item.id, "name": item.name, "type": item.channel_type, "enabled": item.enabled, "configured": bool(item.secret_ref and __import__("os").environ.get(item.secret_ref))} for item in (channel_from_config(config) for config in self.application.config.notifications.channels)]}
+        channels = []
+        for item in (channel_from_config(config) for config in self.application.config.notifications.channels):
+            secret_ready = not item.secret_ref or bool(os.environ.get(item.secret_ref))
+            destination_ready = not item.destination_ref or bool(os.environ.get(item.destination_ref))
+            channels.append({"id": item.id, "name": item.name, "type": item.channel_type, "enabled": item.enabled, "supported": item.channel_type in {"telegram", "webhook", "http"}, "configured": secret_ready and destination_ready})
+        return {"available": True, "status": "ok", "error": None, "channels": channels}
+
+    def metrics(self) -> dict[str, Any]:
+        if self.repository is None:
+            return self._unavailable()
+        try:
+            return {"available": True, "status": "ok", "error": None, "metrics": self.repository.metrics()}
+        except Exception as exc:
+            self._log("Notification metrics API failed", exc)
+            return self._unavailable()
 
     def policies(self) -> dict[str, Any]:
         if self.application is None:
@@ -62,7 +77,7 @@ class DashboardNotificationsApi:
 
     @staticmethod
     def _unavailable(error: str = "Notification data unavailable") -> dict[str, Any]:
-        return {"available": False, "status": "unavailable", "error": error, "notifications": []}
+        return {"available": False, "status": "unavailable", "error": error, "notifications": [], "metrics": {}}
 
     def _log(self, message: str, exc: Exception) -> None:
         if self.application is not None:

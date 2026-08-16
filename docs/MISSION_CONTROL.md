@@ -367,3 +367,8 @@ The existing Mission Control visual language now includes a focused Incident Roo
 MC-3 reuses the MC-2 SQLite database. It adds `event_processing_runs`, `health_observations`, `health_findings`, `events`, `event_evidence`, `incidents`, and `incident_events`. Telemetry tables remain unchanged.
 
 Event and incident retention is independent from high-frequency telemetry retention. The schema supports a later configurable event policy, but long-term cleanup should remain disabled until representative event volume is measured. Open and acknowledged incident evidence must not be deleted by retention.
+
+
+## MC-4.5 production hardening
+
+MC-4.5 hardens notification retries, suppression windows, delivery claims, schema integrity, retention, UNKNOWN reconciliation, metrics, and startup validation. Review [`MC-4.5_PRODUCTION_RUNBOOK.md`](MC-4.5_PRODUCTION_RUNBOOK.md) before enabling notifications. The dashboard remains loopback-only by default; public access requires independently verified authenticated Cloudflare Access or equivalent ingress. No production Cloudflare or systemd mutation is performed by this milestone.

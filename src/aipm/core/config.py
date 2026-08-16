@@ -6,6 +6,9 @@ from typing import Any
 import yaml
 
 from aipm.core.exceptions import AIPMError
+from aipm.models.events import EventType, ResourceType
+from aipm.models.finding import Severity
+from aipm.models.notifications import NotificationTrigger
 from aipm.models.config import (
     AIPMConfig,
     DiscoveryConfig,
@@ -106,19 +109,41 @@ class ConfigManager:
             if notification_config.default_cooldown_seconds < 0 or notification_config.default_window_seconds <= 0 or notification_config.default_max_notifications <= 0:
                 raise ValueError("notification defaults are invalid")
             channel_ids = set()
+            supported_channels = {"telegram", "webhook", "http"}
             for channel in notification_config.channels:
                 if not channel.id or channel.id in channel_ids or channel.timeout_seconds <= 0 or channel.max_attempts <= 0:
                     raise ValueError("notification channel configuration is invalid")
-                channel_ids.add(channel.id)
+                if channel.channel_type not in supported_channels:
+                    raise ValueError(f"notifications channel type is unsupported: {channel.channel_type}")
+                if channel.enabled and channel.destination_ref is None:
+                    raise ValueError(f"enabled notification channel {channel.id} requires destination_ref")
+                if channel.enabled and channel.destination_ref and not os.environ.get(channel.destination_ref):
+                    raise ValueError(f"enabled notification channel {channel.id} destination is not configured")
+                if channel.enabled and channel.channel_type == "telegram" and channel.secret_ref is None:
+                    raise ValueError(f"enabled Telegram channel {channel.id} requires secret_ref")
+                if channel.enabled and channel.secret_ref and not os.environ.get(channel.secret_ref):
+                    raise ValueError(f"enabled notification channel {channel.id} secret is not configured")
                 if channel.secret_ref and ("=" in channel.secret_ref or " " in channel.secret_ref):
                     raise ValueError("notification secrets must be environment variable references")
+                if channel.destination_ref and ("=" in channel.destination_ref or " " in channel.destination_ref):
+                    raise ValueError("notification destinations must be environment variable references")
+                channel_ids.add(channel.id)
             policy_ids = set()
             for policy in notification_config.policies:
                 if not policy.id or policy.id in policy_ids or policy.cooldown_seconds < 0 or policy.window_seconds <= 0 or policy.max_notifications <= 0:
                     raise ValueError("notification policy configuration is invalid")
                 policy_ids.add(policy.id)
+                try:
+                    Severity(policy.minimum_severity)
+                    [EventType(value) for value in policy.event_types]
+                    [ResourceType(value) for value in policy.resource_types]
+                    [NotificationTrigger(value) for value in policy.transitions]
+                except ValueError as exc:
+                    raise ValueError(f"notification policy {policy.id} contains an unsupported enum value") from exc
                 if any(channel_id not in channel_ids for channel_id in policy.channels):
                     raise ValueError(f"notification policy {policy.id} references an unknown channel")
+                if policy.enabled and not policy.channels:
+                    raise ValueError(f"enabled notification policy {policy.id} must select a channel")
 
     def _create_default(self) -> AIPMConfig:
         default_config = AIPMConfig()

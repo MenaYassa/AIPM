@@ -144,3 +144,10 @@ MC-4 adds incident-aware notification decisions, a persistent SQLite outbox, del
 Useful commands are `aipm notifications list`, `aipm notifications retry NOTIFICATION_ID`, `aipm notifications test CHANNEL_ID`, and `aipm notifications run`. The dashboard exposes read-only notification, channel, and policy views at `/api/notifications`, `/api/notifications/{id}`, `/api/notification-channels`, and `/api/notification-policies`.
 
 MC-4 does not perform remediation and does not modify Docker, Compose, Git, systemd, Cloudflare, packages, incidents, or infrastructure state. It stops before MC-5 Guarded Operations and MC-6 AI Advisor. See [`docs/MC-4_ARCHITECTURE.md`](docs/MC-4_ARCHITECTURE.md).
+
+
+## MC-4.5 production hardening
+
+MC-4.5 hardens the MC-4 notification subsystem with bounded channel retries, transactional incident and rate-window suppression, compare-and-set delivery claims, lease recovery, schema versioning and foreign keys, explicit UNKNOWN reconciliation, timestamp-based retention, operational metrics, and stricter startup validation. Additional commands are `aipm notifications reconcile`, `aipm notifications retain`, and `aipm notifications metrics`; the dashboard adds `GET /api/notification-metrics`.
+
+The dashboard continues to bind to `127.0.0.1` by default. Public exposure is not production-ready until an authenticated Cloudflare Access or equivalent ingress policy is independently verified. MC-4.5 does not modify Cloudflare, systemd, Docker, Compose, Git projects, packages, or VPS infrastructure. See [`docs/MC-4.5_PRODUCTION_RUNBOOK.md`](docs/MC-4.5_PRODUCTION_RUNBOOK.md).

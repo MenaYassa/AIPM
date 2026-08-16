@@ -13,7 +13,7 @@ from aipm.core.exceptions import UpdateError, ProviderError
 from aipm.dashboard.server import run as run_dashboard
 from aipm.capabilities.telemetry.commands import run as run_telemetry, sample as sample_telemetry
 from aipm.capabilities.events.commands import process as process_events, run as run_events
-from aipm.capabilities.notifications.commands import list_notifications, retry as retry_notification, run as run_notifications, test_channel
+from aipm.capabilities.notifications.commands import list_notifications, metrics as notification_metrics, reconcile as reconcile_notification, retain as retain_notifications, retry as retry_notification, run as run_notifications, test_channel
 
 app = typer.Typer(
     help="AI Platform Manager"
@@ -57,9 +57,27 @@ def notifications_list():
 
 
 @notifications_app.command("retry")
-def notifications_retry(notification_id: int = typer.Argument(..., min=1)):
-    """Inspect a failed notification for explicit retry handling."""
-    retry_notification(notification_id)
+def notifications_retry(notification_id: int = typer.Argument(..., min=1), yes: bool = typer.Option(False, "--yes", help="Confirm the bounded operator retry.")):
+    """Queue an eligible failed notification for a bounded operator retry."""
+    retry_notification(notification_id, yes=yes)
+
+
+@notifications_app.command("reconcile")
+def notifications_reconcile(notification_id: int = typer.Argument(..., min=1), delivered: bool = typer.Option(..., "--delivered/--not-delivered", help="Record the confirmed provider outcome."), yes: bool = typer.Option(False, "--yes", help="Confirm the UNKNOWN reconciliation.")):
+    """Reconcile an UNKNOWN delivery without blindly retrying it."""
+    reconcile_notification(notification_id, delivered=delivered, yes=yes)
+
+
+@notifications_app.command("retain")
+def notifications_retain():
+    """Apply configured timestamp-based notification retention."""
+    retain_notifications()
+
+
+@notifications_app.command("metrics")
+def notifications_metrics():
+    """Show safe notification delivery metrics."""
+    notification_metrics()
 
 
 @notifications_app.command("test")

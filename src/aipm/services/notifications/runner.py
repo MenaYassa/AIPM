@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import signal
 import threading
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from aipm.models.config import NotificationConfig
@@ -19,10 +20,19 @@ class NotificationRunner:
 
     def run(self) -> None:
         self._install_signal_handlers()
+        last_maintenance = datetime.now(timezone.utc) - timedelta(hours=1)
         while not self._stop_requested:
             projected = self.projector.project_once()
             delivered = self.worker.deliver_once()
-            if not projected and not delivered:
+            now = datetime.now(timezone.utc)
+            maintained = False
+            if now - last_maintenance >= timedelta(hours=1):
+                result = self.projector.repository.retain(now - timedelta(days=self.config.retention_days))
+                last_maintenance = now
+                maintained = True
+                if self.logger is not None:
+                    self.logger.info("Notification retention complete result=%s", result)
+            if not projected and not delivered and not maintained:
                 self._stop.wait(self.config.interval_seconds)
 
     def request_stop(self, signum: int | None = None, frame: Any | None = None) -> None:

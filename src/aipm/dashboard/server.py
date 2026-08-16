@@ -100,6 +100,10 @@ def create_app(
     def notification_policies():
         return notification_api.policies()
 
+    @app.get("/api/notification-metrics")
+    def notification_metrics():
+        return notification_api.metrics()
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")

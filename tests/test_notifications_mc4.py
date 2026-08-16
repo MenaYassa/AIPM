@@ -12,7 +12,7 @@ from aipm.models.notifications import NotificationChannel, NotificationPolicy
 
 
 def transition(transition_type=NotificationTrigger.INCIDENT_OPENED):
-    return IncidentTransition(1, 7, "incident:container:x", transition_type, datetime.now(timezone.utc), None, IncidentStatus.OPEN if transition_type is not NotificationTrigger.INCIDENT_RECOVERED else IncidentStatus.RESOLVED, None, Severity.CRITICAL, 4, "event-key", "corr", ResourceRef(ResourceType.CONTAINER, "container-x", "container-x"), EventType.CONTAINER_RESTARTING)
+    return IncidentTransition(1, 7, "incident:container:x", transition_type, datetime.now(timezone.utc), None, IncidentStatus.OPEN if transition_type is not NotificationTrigger.INCIDENT_RECOVERED else IncidentStatus.RESOLVED, None, Severity.CRITICAL, None, None, "corr", ResourceRef(ResourceType.CONTAINER, "container-x", "container-x"), EventType.CONTAINER_RESTARTING)
 
 
 def test_policy_matches_critical_opening():
@@ -31,6 +31,8 @@ def test_policy_suppresses_recovery_when_disabled():
 
 def test_projector_is_idempotent_and_worker_uses_mock_adapter(tmp_path):
     repository = SQLiteNotificationRepository(tmp_path / "mc.db")
+    with repository._connection() as connection:
+        connection.execute("INSERT INTO incidents (id, incident_key, title, severity, status, started_at, updated_at, resource_type, resource_id, correlation_key, summary) VALUES (7, 'incident:container:x', 'test', 'critical', 'open', 1, 1, 'container', 'container-x', 'corr', 'test')")
     repository.add_transition(transition())
     channel = NotificationChannel("mock", "Mock", "mock", True)
     policy = NotificationPolicy("critical", "Critical", True, Severity.CRITICAL, (), (), (), (NotificationTrigger.INCIDENT_OPENED,), False, False, False, 10, 60, 3, ("mock",))
@@ -53,6 +55,8 @@ def test_projector_is_idempotent_and_worker_uses_mock_adapter(tmp_path):
 
 def test_worker_records_retryable_failure(tmp_path):
     repository = SQLiteNotificationRepository(tmp_path / "mc.db")
+    with repository._connection() as connection:
+        connection.execute("INSERT INTO incidents (id, incident_key, title, severity, status, started_at, updated_at, resource_type, resource_id, correlation_key, summary) VALUES (7, 'incident:container:x', 'test', 'critical', 'open', 1, 1, 'container', 'container-x', 'corr', 'test')")
     repository.add_transition(transition())
     channel = NotificationChannel("mock", "Mock", "mock", True)
     policy = NotificationPolicy("critical", "Critical", True, Severity.CRITICAL, (), (), (), (NotificationTrigger.INCIDENT_OPENED,), False, False, False, 10, 60, 3, ("mock",))
