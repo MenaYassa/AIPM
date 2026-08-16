@@ -47,6 +47,9 @@ class HistoricalQueryService:
     def projects(self, query: HistoryQuery, name: str | None = None) -> HistoryResponse:
         return self._safe(lambda: self.repository.get_project_history(name, query.start, query.end, query.limit))
 
+    def resources(self, query: HistoryQuery, name: str | None = None) -> HistoryResponse:
+        return self._safe(lambda: self.repository.get_resource_history(name, query.start, query.end, query.limit))
+
     def tunnel(self, query: HistoryQuery) -> HistoryResponse:
         return self._safe(lambda: self.repository.get_tunnel_history(query.start, query.end, query.limit))
 

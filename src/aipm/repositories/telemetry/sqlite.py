@@ -67,7 +67,10 @@ CREATE TABLE IF NOT EXISTS container_samples (
     memory_used_mb REAL,
     memory_limit_mb REAL,
     memory_percent REAL,
-    stats_available INTEGER NOT NULL
+    stats_available INTEGER NOT NULL,
+    resource_sampled_at INTEGER,
+    resource_status TEXT NOT NULL DEFAULT 'never_sampled',
+    resource_age_seconds INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS project_samples (
@@ -100,6 +103,32 @@ CREATE INDEX IF NOT EXISTS idx_container_samples_identity_time ON container_samp
 CREATE INDEX IF NOT EXISTS idx_container_samples_name_time ON container_samples(container_name, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_project_samples_name_time ON project_samples(name, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_tunnel_samples_sampled_at ON tunnel_samples(sampled_at);
+
+CREATE TABLE IF NOT EXISTS resource_sample_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sampled_at INTEGER NOT NULL,
+    duration_ms INTEGER,
+    status TEXT NOT NULL,
+    error_code TEXT,
+    container_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_resource_sample_runs_sampled_at ON resource_sample_runs(sampled_at);
+
+CREATE TABLE IF NOT EXISTS container_resource_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_run_id INTEGER NOT NULL REFERENCES resource_sample_runs(id) ON DELETE CASCADE,
+    sampled_at INTEGER NOT NULL,
+    container_id TEXT NOT NULL,
+    container_name TEXT NOT NULL,
+    cpu_percent REAL,
+    memory_used_mb REAL,
+    memory_limit_mb REAL,
+    memory_percent REAL,
+    available INTEGER NOT NULL,
+    error_code TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_container_resource_samples_identity_time ON container_resource_samples(container_id, sampled_at);
+CREATE INDEX IF NOT EXISTS idx_container_resource_samples_name_time ON container_resource_samples(container_name, sampled_at);
 """
 
 
@@ -116,6 +145,13 @@ class SQLiteHistoryRepository:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as connection:
             connection.executescript(SCHEMA)
+            self._migrate_columns(connection)
+
+    def _migrate_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(container_samples)").fetchall()}
+        for name, definition in (("resource_sampled_at", "INTEGER"), ("resource_status", "TEXT NOT NULL DEFAULT 'never_sampled'"), ("resource_age_seconds", "INTEGER")):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE container_samples ADD COLUMN {name} {definition}")
 
     def save_sample(
         self,
@@ -181,8 +217,9 @@ class SQLiteHistoryRepository:
                 """
                 INSERT INTO container_samples (
                     run_id, sampled_at, container_id, container_name, image, state, health, stack,
-                    restart_count, cpu_percent, memory_used_mb, memory_limit_mb, memory_percent, stats_available
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    restart_count, cpu_percent, memory_used_mb, memory_limit_mb, memory_percent, stats_available,
+                    resource_sampled_at, resource_status, resource_age_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -200,6 +237,9 @@ class SQLiteHistoryRepository:
                         item.memory_limit_mb,
                         item.memory_percent,
                         int(item.stats_available),
+                        _timestamp(item.resource_sampled_at) if item.resource_sampled_at else None,
+                        item.resource_status,
+                        item.resource_age_seconds,
                     )
                     for item in containers
                 ],
@@ -242,6 +282,34 @@ class SQLiteHistoryRepository:
                     ),
                 )
             return run_id
+
+    def save_resource_sample(self, sampled_at: datetime, containers: Sequence[ContainerHistoryPoint], *, duration_ms: int | None, status: str, error_code: str | None = None) -> int:
+        with self._connection() as connection:
+            cursor = connection.execute("INSERT INTO resource_sample_runs (sampled_at, duration_ms, status, error_code, container_count) VALUES (?, ?, ?, ?, ?)", (_timestamp(sampled_at), duration_ms, status, error_code, len(containers)))
+            run_id = int(cursor.lastrowid)
+            connection.executemany(
+                """INSERT INTO container_resource_samples
+                (resource_run_id, sampled_at, container_id, container_name, cpu_percent, memory_used_mb, memory_limit_mb, memory_percent, available, error_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [(run_id, _timestamp(item.resource_sampled_at or sampled_at), item.container_id, item.container_name, item.cpu_percent, item.memory_used_mb, item.memory_limit_mb, item.memory_percent, int(item.stats_available), None if item.stats_available else "RESOURCE_UNAVAILABLE") for item in containers],
+            )
+            return run_id
+
+    def get_latest_resource_samples(self) -> list[ContainerHistoryPoint]:
+        with self._connection() as connection:
+            rows = connection.execute("SELECT * FROM container_resource_samples ORDER BY sampled_at DESC, id DESC").fetchall()
+        latest: dict[str, ContainerHistoryPoint] = {}
+        for row in rows:
+            if row["container_id"] not in latest:
+                sampled_at = _datetime(row["sampled_at"])
+                latest[row["container_id"]] = ContainerHistoryPoint(sampled_at=sampled_at, container_id=row["container_id"], container_name=row["container_name"], image=None, state=None, health=None, stack=None, restart_count=None, cpu_percent=row["cpu_percent"], memory_used_mb=row["memory_used_mb"], memory_limit_mb=row["memory_limit_mb"], memory_percent=row["memory_percent"], stats_available=bool(row["available"]), resource_sampled_at=sampled_at, resource_status="fresh" if row["available"] else "unavailable", resource_age_seconds=0)
+        return list(latest.values())
+
+    def get_resource_history(self, name: str | None, start: datetime | None, end: datetime | None, limit: int) -> list[ContainerHistoryPoint]:
+        extra = "container_name = ?" if name else None
+        values = [name] if name else []
+        rows = self._query("SELECT * FROM container_resource_samples", start, end, limit, extra, values)
+        return [ContainerHistoryPoint(sampled_at=_datetime(row["sampled_at"]), container_id=row["container_id"], container_name=row["container_name"], image=None, state=None, health=None, stack=None, restart_count=None, cpu_percent=row["cpu_percent"], memory_used_mb=row["memory_used_mb"], memory_limit_mb=row["memory_limit_mb"], memory_percent=row["memory_percent"], stats_available=bool(row["available"]), resource_sampled_at=_datetime(row["sampled_at"]), resource_status="fresh" if row["available"] else "unavailable", resource_age_seconds=0) for row in rows]
 
     def get_runs(self, after_id: int | None, limit: int) -> list[HistoricalRun]:
         conditions = "WHERE id > ?" if after_id is not None else ""
@@ -331,6 +399,9 @@ class SQLiteHistoryRepository:
                 memory_limit_mb=row["memory_limit_mb"],
                 memory_percent=row["memory_percent"],
                 stats_available=bool(row["stats_available"]),
+                resource_sampled_at=_datetime(row["resource_sampled_at"]) if row["resource_sampled_at"] else None,
+                resource_status=row["resource_status"] if row["resource_status"] else ("fresh" if row["stats_available"] else "unavailable"),
+                resource_age_seconds=row["resource_age_seconds"],
             )
             for row in rows
         ]
@@ -376,7 +447,7 @@ class SQLiteHistoryRepository:
         cutoff_ts = _timestamp(cutoff)
         with self._connection() as connection:
             total = 0
-            for table in ("host_samples", "container_samples", "project_samples", "tunnel_samples", "sample_runs"):
+            for table in ("host_samples", "container_samples", "project_samples", "tunnel_samples", "container_resource_samples", "resource_sample_runs", "sample_runs"):
                 cursor = connection.execute(f"DELETE FROM {table} WHERE sampled_at < ?", (cutoff_ts,))
                 total += cursor.rowcount if cursor.rowcount >= 0 else 0
             return total
@@ -466,6 +537,9 @@ def _container_from_row(row: sqlite3.Row) -> ContainerHistoryPoint:
         memory_limit_mb=row["memory_limit_mb"],
         memory_percent=row["memory_percent"],
         stats_available=bool(row["stats_available"]),
+        resource_sampled_at=_datetime(row["resource_sampled_at"]) if row["resource_sampled_at"] else None,
+        resource_status=row["resource_status"] if "resource_status" in row.keys() and row["resource_status"] else ("fresh" if row["stats_available"] else "unavailable"),
+        resource_age_seconds=row["resource_age_seconds"] if "resource_age_seconds" in row.keys() else None,
     )
 
 

@@ -372,3 +372,8 @@ Event and incident retention is independent from high-frequency telemetry retent
 ## MC-4.5 production hardening
 
 MC-4.5 hardens notification retries, suppression windows, delivery claims, schema integrity, retention, UNKNOWN reconciliation, metrics, and startup validation. Review [`MC-4.5_PRODUCTION_RUNBOOK.md`](MC-4.5_PRODUCTION_RUNBOOK.md) before enabling notifications. The dashboard remains loopback-only by default; public access requires independently verified authenticated Cloudflare Access or equivalent ingress. No production Cloudflare or systemd mutation is performed by this milestone.
+
+
+## MC-2.1 Telemetry Performance & Sampling
+
+MC-2.1 separates the 15-second fast state loop from independently scheduled, single-flight slow Docker resource and project refresh tasks. See [`MC-2.1_TELEMETRY_PERFORMANCE.md`](MC-2.1_TELEMETRY_PERFORMANCE.md) for configuration, freshness semantics, sparse resource history, acceptance tests, and rollback guidance.

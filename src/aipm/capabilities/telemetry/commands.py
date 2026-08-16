@@ -27,7 +27,7 @@ def build_sampler(application: Application) -> tuple[TelemetrySampler, SQLiteHis
 
 
 def sample() -> None:
-    """Collect and persist exactly one read-only telemetry sample."""
+    """Collect and persist exactly one fast read-only telemetry sample."""
     application = Application.create()
     built = build_sampler(application)
     if built is None:
@@ -35,7 +35,7 @@ def sample() -> None:
         return
     sampler, repository = built
     try:
-        result = sampler.sample_once()
+        result = sampler.sample_fast_once() if application.config.telemetry.sampling_mode == "split" else sampler.sample_once()
     finally:
         repository.close()
     if result.error:
@@ -49,6 +49,27 @@ def sample() -> None:
         f"host={result.host_rows} containers={result.container_rows} "
         f"projects={result.project_rows} retention_deleted={result.retention_deleted}"
     )
+
+
+def resource_sample() -> None:
+    """Collect one bounded aggregate Docker resource sample."""
+    application = Application.create()
+    built = build_sampler(application)
+    if built is None:
+        print("[yellow]Telemetry sampling is disabled by configuration.[/yellow]")
+        return
+    sampler, repository = built
+    try:
+        result = sampler.refresh_resource_once()
+    finally:
+        repository.close()
+    if result.error:
+        print(f"[yellow]Resource telemetry unavailable:[/yellow] {result.error}")
+        return
+    if result.skipped:
+        print("[yellow]Resource sampling skipped.[/yellow]")
+        return
+    print(f"[green]Aggregate resource sample stored.[/green] run={result.run_id} containers={result.container_rows}")
 
 
 def run() -> None:

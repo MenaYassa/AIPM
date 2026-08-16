@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from aipm.models.container import Container
 from aipm.models.project import Project
 from aipm.models.system import SystemSummary
@@ -13,6 +14,36 @@ class TelemetryError:
 
     code: str
     message: str
+
+
+class FreshnessStatus(StrEnum):
+    FRESH = "fresh"
+    STALE = "stale"
+    UNAVAILABLE = "unavailable"
+    NEVER_SAMPLED = "never_sampled"
+
+
+@dataclass(slots=True, frozen=True)
+class TelemetryFreshness:
+    sampled_at: datetime | None
+    age_seconds: int | None
+    status: FreshnessStatus
+    max_age_seconds: int
+    error: TelemetryError | None = None
+
+    @classmethod
+    def never_sampled(cls, max_age_seconds: int) -> "TelemetryFreshness":
+        return cls(None, None, FreshnessStatus.NEVER_SAMPLED, max_age_seconds)
+
+    @classmethod
+    def from_sample(cls, sampled_at: datetime | None, *, now: datetime, max_age_seconds: int, available: bool = True, error: TelemetryError | None = None) -> "TelemetryFreshness":
+        if sampled_at is None:
+            return cls(None, None, FreshnessStatus.UNAVAILABLE if error else FreshnessStatus.NEVER_SAMPLED, max_age_seconds, error)
+        age_seconds = max(0, int((now - sampled_at).total_seconds()))
+        status = FreshnessStatus.FRESH if available and age_seconds <= max_age_seconds else FreshnessStatus.STALE
+        if not available:
+            status = FreshnessStatus.UNAVAILABLE
+        return cls(sampled_at, age_seconds, status, max_age_seconds, error)
 
 
 @dataclass(slots=True, frozen=True)
@@ -69,6 +100,7 @@ class ResourceStats:
     memory_percent: float | None = None
     available: bool = True
     error: TelemetryError | None = None
+    freshness: TelemetryFreshness | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -87,6 +119,8 @@ class DockerSnapshot:
     status: str
     containers: tuple[ContainerSnapshot, ...] = ()
     error: TelemetryError | None = None
+    state_sampled_at: datetime | None = None
+    resource_freshness: TelemetryFreshness | None = None
 
     @property
     def running(self) -> int:
@@ -117,6 +151,7 @@ class ProjectInventorySnapshot:
     search_paths: tuple[str, ...] = ()
     projects: tuple[ProjectSnapshot, ...] = ()
     error: TelemetryError | None = None
+    freshness: TelemetryFreshness | None = None
 
     @classmethod
     def unavailable_snapshot(cls, error: TelemetryError) -> "ProjectInventorySnapshot":

@@ -33,6 +33,41 @@ class TelemetrySampler:
         self.monotonic = monotonic or time.monotonic
         self.logger = logger
 
+    def sample_fast_once(self) -> SampleResult:
+        """Persist one fast state snapshot without waiting for slow work."""
+        started_at = self.clock()
+        if not self.config.enabled:
+            return SampleResult(sampled_at=started_at, run_id=None, host_rows=0, container_rows=0, project_rows=0, tunnel_rows=0, retention_deleted=0, skipped=True)
+        started = self.monotonic()
+        try:
+            snapshot = self.telemetry_service.fast_snapshot()
+            mapped = self.mapper.to_sample(snapshot, duration_ms=max(0, int((self.monotonic() - started) * 1000)))
+            run_id = self.repository.save_sample(mapped.run, mapped.host, mapped.containers, mapped.projects, mapped.tunnel)
+            cutoff = mapped.run.sampled_at - timedelta(days=self.config.retention_days)
+            deleted = self.repository.delete_older_than(cutoff)
+            return SampleResult(sampled_at=mapped.run.sampled_at, run_id=run_id, host_rows=1 if mapped.host else 0, container_rows=len(mapped.containers), project_rows=len(mapped.projects), tunnel_rows=1 if mapped.tunnel else 0, retention_deleted=deleted)
+        except Exception as exc:
+            self._log("Fast telemetry sampling failed", exc)
+            return SampleResult(sampled_at=_utc(started_at), run_id=None, host_rows=0, container_rows=0, project_rows=0, tunnel_rows=0, retention_deleted=0, error="Fast telemetry sampling unavailable")
+
+    def refresh_resource_once(self) -> SampleResult:
+        """Run one aggregate slow resource refresh and persist sparse resource history."""
+        started_at = self.clock()
+        if not self.config.enabled or not self.config.resource_sampling_enabled:
+            return SampleResult(sampled_at=started_at, run_id=None, host_rows=0, container_rows=0, project_rows=0, tunnel_rows=0, retention_deleted=0, skipped=True)
+        try:
+            result = self.telemetry_service.refresh_resources(timeout_seconds=self.config.resource_timeout_seconds, now=started_at)
+            points = tuple(self.mapper._container(item, result.sampled_at) for item in result.containers)
+            run_id = self.repository.save_resource_sample(result.sampled_at, points, duration_ms=result.duration_ms, status=result.status, error_code=result.error.code if result.error else None)
+            return SampleResult(sampled_at=result.sampled_at, run_id=run_id, host_rows=0, container_rows=len(points), project_rows=0, tunnel_rows=0, retention_deleted=0, error=None if result.status == "healthy" else "Resource telemetry unavailable")
+        except Exception as exc:
+            self._log("Resource telemetry refresh failed", exc)
+            return SampleResult(sampled_at=_utc(started_at), run_id=None, host_rows=0, container_rows=0, project_rows=0, tunnel_rows=0, retention_deleted=0, error="Resource telemetry unavailable")
+
+    def refresh_project_once(self) -> None:
+        if self.config.enabled:
+            self.telemetry_service.refresh_projects()
+
     def sample_once(self) -> SampleResult:
         started_at = self.clock()
         if not self.config.enabled:

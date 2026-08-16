@@ -43,6 +43,10 @@ def create_app(
     def history_containers(name: str | None = None, range_name: str = Query("24h", alias="range"), limit: int = 500):
         return _history_response(api, "containers", range_name, limit, name=name)
 
+    @app.get("/api/history/container-resources")
+    def history_container_resources(name: str | None = None, range_name: str = Query("24h", alias="range"), limit: int = 500):
+        return _history_response(api, "resources", range_name, limit, name=name)
+
     @app.get("/api/history/projects")
     def history_projects(name: str | None = None, range_name: str = Query("24h", alias="range"), limit: int = 500):
         return _history_response(api, "projects", range_name, limit, name=name)
@@ -120,6 +124,8 @@ def _history_response(api: DashboardApi, kind: str, range_name: str, limit: int,
         return history_api.host(range_name, limit)
     if kind == "containers":
         return history_api.containers(name=name, range_name=range_name, limit=limit)
+    if kind == "resources":
+        return history_api.resources(name=name, range_name=range_name, limit=limit)
     if kind == "projects":
         return history_api.projects(name=name, range_name=range_name, limit=limit)
     return history_api.tunnel(range_name, limit)

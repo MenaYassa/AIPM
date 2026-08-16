@@ -42,6 +42,14 @@ class DiscoveryConfig:
 class TelemetryConfig:
     enabled: bool = True
     interval_seconds: int = 15
+    resource_sampling_enabled: bool = True
+    resource_interval_seconds: int = 60
+    resource_timeout_seconds: int = 15
+    resource_stale_after_seconds: int = 180
+    project_interval_seconds: int = 60
+    project_timeout_seconds: int = 15
+    slow_task_max_concurrency: int = 1
+    sampling_mode: str = "split"
     retention_days: int = 1
     database_path: str = str(Path.home() / ".local" / "state" / "aipm" / "telemetry" / "mission_control.db")
 

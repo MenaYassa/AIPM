@@ -58,3 +58,25 @@ def test_telemetry_database_environment_override(tmp_path, monkeypatch):
     override = tmp_path / "override.db"
     monkeypatch.setenv("AIPM_TELEMETRY_DB", str(override))
     assert ConfigManager(path).config.telemetry.database_path == str(override)
+
+
+def test_mc21_telemetry_defaults_are_split_and_bounded(tmp_path):
+    config = ConfigManager(tmp_path / "config.yaml").config.telemetry
+    assert config.sampling_mode == "split"
+    assert config.resource_interval_seconds == 60
+    assert config.resource_timeout_seconds == 15
+    assert config.resource_stale_after_seconds == 180
+    assert config.slow_task_max_concurrency == 1
+
+
+@pytest.mark.parametrize("telemetry", [
+    "  interval_seconds: 15\n  resource_interval_seconds: 0\n  database_path: /tmp/mc.db\n",
+    "  interval_seconds: 15\n  resource_interval_seconds: 60\n  resource_timeout_seconds: 0\n  database_path: /tmp/mc.db\n",
+    "  interval_seconds: 15\n  resource_interval_seconds: 60\n  resource_stale_after_seconds: 60\n  database_path: /tmp/mc.db\n",
+    "  interval_seconds: 15\n  sampling_mode: invalid\n  database_path: /tmp/mc.db\n",
+])
+def test_invalid_mc21_telemetry_config_fails_clearly(tmp_path, telemetry):
+    path = tmp_path / "config.yaml"
+    write_config(path, telemetry)
+    with pytest.raises(AIPMError, match="Failed to load configuration"):
+        ConfigManager(path)

@@ -50,6 +50,9 @@ class ContainerHistoryPoint:
     memory_limit_mb: float | None
     memory_percent: float | None
     stats_available: bool
+    resource_sampled_at: datetime | None = None
+    resource_status: str = "never_sampled"
+    resource_age_seconds: int | None = None
 
 
 @dataclass(slots=True, frozen=True)

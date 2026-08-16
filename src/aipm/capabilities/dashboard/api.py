@@ -12,6 +12,7 @@ from aipm.services.telemetry.docker import DockerTelemetryService
 from aipm.services.telemetry.host import HostTelemetryService
 from aipm.services.telemetry.project import ProjectTelemetryService
 from aipm.services.telemetry.tunnel import TunnelTelemetryService
+from aipm.repositories.telemetry.sqlite import SQLiteHistoryRepository
 
 
 class DashboardApi:
@@ -33,17 +34,30 @@ class DashboardApi:
             docker=DockerTelemetryService(
                 docker_service=application.docker,
                 logger=application.logger,
+                resource_stale_after_seconds=application.config.telemetry.resource_stale_after_seconds,
             ),
             projects=ProjectTelemetryService(
                 project_service=project_service,
                 logger=application.logger,
+                stale_after_seconds=application.config.telemetry.resource_stale_after_seconds,
             ),
             tunnel=TunnelTelemetryService(logger=application.logger),
             handbook=handbook_routes(),
             logger=application.logger,
         )
+        if application.config.telemetry.enabled:
+            repository = None
+            try:
+                repository = SQLiteHistoryRepository(application.config.telemetry.database_path)
+                telemetry.docker.hydrate_resources(repository.get_latest_resource_samples())
+            except Exception as exc:
+                application.logger.exception("Latest telemetry resource cache unavailable", exc_info=exc)
+            finally:
+                if repository is not None:
+                    repository.close()
         history_api = DashboardHistoryApi.from_application(application) if include_history else None
         return cls(telemetry=telemetry, mapper=DashboardResponseMapper(), history_api=history_api)
 
     def overview(self) -> dict[str, Any]:
-        return self.mapper.to_response(self.telemetry.snapshot())
+        snapshot = self.telemetry.fast_snapshot() if hasattr(self.telemetry, "fast_snapshot") else self.telemetry.snapshot()
+        return self.mapper.to_response(snapshot)

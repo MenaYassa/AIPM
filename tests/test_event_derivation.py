@@ -70,3 +70,9 @@ def test_tunnel_down_transition_emits_high_event():
     assert len(events) == 1
     assert events[0].event_type is EventType.TUNNEL_STATE_CHANGED
     assert events[0].severity.value == "high"
+
+
+def test_resource_only_change_does_not_emit_lifecycle_event():
+    previous = container("running")
+    current = ContainerHistoryPoint(NOW, "cid", "app", "app:latest", "running", "healthy", "stack", 0, 99.0, 99.0, 100.0, 99.0, True, NOW, "stale", 181)
+    assert EventDerivationService().derive(frame(previous, current)) == ()

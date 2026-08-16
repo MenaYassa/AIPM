@@ -87,6 +87,10 @@ class TelemetryHistoryMapper:
 
     @staticmethod
     def _container(item, sampled_at: datetime) -> ContainerHistoryPoint:
+        freshness = item.resources.freshness
+        resource_sampled_at = freshness.sampled_at if freshness else (sampled_at if item.resources.available else None)
+        resource_status = freshness.status.value if freshness else ("fresh" if item.resources.available else "unavailable")
+        resource_age_seconds = freshness.age_seconds if freshness else (0 if item.resources.available else None)
         return ContainerHistoryPoint(
             sampled_at=sampled_at,
             container_id=item.container.id,
@@ -101,6 +105,9 @@ class TelemetryHistoryMapper:
             memory_limit_mb=item.resources.memory_limit_mb,
             memory_percent=item.resources.memory_percent,
             stats_available=item.resources.available,
+            resource_sampled_at=resource_sampled_at,
+            resource_status=resource_status,
+            resource_age_seconds=resource_age_seconds,
         )
 
 

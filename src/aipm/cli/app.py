@@ -11,7 +11,7 @@ from aipm.capabilities.backup.snapshots import BackupCapability
 from aipm.services.update.engine import UpdateEngine  # <-- Add import
 from aipm.core.exceptions import UpdateError, ProviderError
 from aipm.dashboard.server import run as run_dashboard
-from aipm.capabilities.telemetry.commands import run as run_telemetry, sample as sample_telemetry
+from aipm.capabilities.telemetry.commands import resource_sample as resource_sample_telemetry, run as run_telemetry, sample as sample_telemetry
 from aipm.capabilities.events.commands import process as process_events, run as run_events
 from aipm.capabilities.notifications.commands import list_notifications, metrics as notification_metrics, reconcile as reconcile_notification, retain as retain_notifications, retry as retry_notification, run as run_notifications, test_channel
 
@@ -30,6 +30,12 @@ app.add_typer(notifications_app, name="notifications")
 def telemetry_sample():
     """Collect and persist one read-only telemetry sample."""
     sample_telemetry()
+
+
+@telemetry_app.command("resource-sample")
+def telemetry_resource_sample():
+    """Collect one bounded aggregate Docker resource sample."""
+    resource_sample_telemetry()
 
 
 @telemetry_app.command("run")

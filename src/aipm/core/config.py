@@ -87,6 +87,16 @@ class ConfigManager:
             raise ValueError("discovery.search_paths cannot be empty")
         if telemetry_config.interval_seconds <= 0:
             raise ValueError("telemetry.interval_seconds must be greater than zero")
+        if telemetry_config.resource_interval_seconds <= 0 or telemetry_config.project_interval_seconds <= 0:
+            raise ValueError("telemetry slow intervals must be greater than zero")
+        if telemetry_config.resource_timeout_seconds <= 0 or telemetry_config.project_timeout_seconds <= 0:
+            raise ValueError("telemetry slow timeouts must be greater than zero")
+        if telemetry_config.resource_stale_after_seconds <= telemetry_config.resource_interval_seconds:
+            raise ValueError("telemetry.resource_stale_after_seconds must exceed resource_interval_seconds")
+        if telemetry_config.slow_task_max_concurrency != 1:
+            raise ValueError("telemetry.slow_task_max_concurrency must be exactly 1")
+        if telemetry_config.sampling_mode not in {"split", "legacy"}:
+            raise ValueError("telemetry.sampling_mode must be split or legacy")
         if telemetry_config.retention_days <= 0:
             raise ValueError("telemetry.retention_days must be greater than zero")
         database_path = str(telemetry_config.database_path).strip()

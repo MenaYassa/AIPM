@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from aipm.models.telemetry import DashboardSnapshot, HostSnapshot, TelemetryError
+from aipm.models.telemetry import DashboardSnapshot, HostSnapshot, TelemetryError, TelemetryFreshness
 
 
 class DashboardResponseMapper:
@@ -103,6 +103,7 @@ class DashboardResponseMapper:
                     "stats": {
                         "available": item.resources.available,
                         "error": self._error(item.resources.error),
+                        **self._freshness(item.resources.freshness),
                     },
                 }
                 for item in docker.containers
@@ -114,6 +115,8 @@ class DashboardResponseMapper:
                 "unhealthy": docker.unhealthy,
             },
             "error": self._error(docker.error),
+            "state_sampled_at": docker.state_sampled_at.astimezone(timezone.utc).isoformat() if docker.state_sampled_at else None,
+            "resource_freshness": self._freshness(docker.resource_freshness),
         }
 
     def _projects(self, snapshot: DashboardSnapshot) -> dict[str, Any]:
@@ -122,6 +125,7 @@ class DashboardResponseMapper:
             "available": projects.available,
             "status": projects.status,
             "search_paths": list(projects.search_paths),
+            "freshness": self._freshness(projects.freshness),
             "projects": [
                 {
                     "name": item.project.name,
@@ -150,6 +154,12 @@ class DashboardResponseMapper:
             "error": self._error(tunnel.error),
             "note": "Local cloudflared visibility only. Remote Cloudflare account status is intentionally not queried from the VPS agent.",
         }
+
+    @staticmethod
+    def _freshness(freshness: TelemetryFreshness | None) -> dict[str, Any]:
+        if freshness is None:
+            return {"sampled_at": None, "age_seconds": None, "status": "never_sampled", "max_age_seconds": None, "error": None}
+        return {"sampled_at": freshness.sampled_at.astimezone(timezone.utc).isoformat() if freshness.sampled_at else None, "age_seconds": freshness.age_seconds, "status": freshness.status.value, "max_age_seconds": freshness.max_age_seconds, "error": DashboardResponseMapper._error(freshness.error)}
 
     @staticmethod
     def _error(error: TelemetryError | None) -> str | None:

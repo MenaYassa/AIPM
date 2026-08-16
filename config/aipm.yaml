@@ -18,6 +18,14 @@ logging:
 telemetry:
   enabled: true
   interval_seconds: 15
+  resource_sampling_enabled: true
+  resource_interval_seconds: 60
+  resource_timeout_seconds: 15
+  resource_stale_after_seconds: 180
+  project_interval_seconds: 60
+  project_timeout_seconds: 15
+  slow_task_max_concurrency: 1
+  sampling_mode: split
   retention_days: 1
   database_path: ~/.local/state/aipm/telemetry/mission_control.db
 events:

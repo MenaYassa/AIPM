@@ -5,6 +5,7 @@ import threading
 from typing import Any, Callable
 
 from aipm.models.config import TelemetryConfig
+from aipm.services.telemetry.coordinator import TelemetrySamplingCoordinator
 from aipm.services.telemetry.sampler import TelemetrySampler
 
 
@@ -27,6 +28,10 @@ class TelemetryRunner:
         self._stop_event = threading.Event()
 
     def run(self) -> None:
+        if self.config.sampling_mode == "split" and hasattr(self.sampler, "sample_fast_once") and hasattr(self.sampler, "refresh_resource_once"):
+            coordinator = TelemetrySamplingCoordinator(self.sampler, self.config, sleeper=self._sleeper, logger=self.logger)
+            coordinator.run()
+            return
         self._install_signal_handlers()
         while not self._stop_requested:
             result = self.sampler.sample_once()

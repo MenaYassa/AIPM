@@ -34,6 +34,9 @@ class DashboardHistoryApi:
     def containers(self, name: str | None = None, range_name: str = "24h", limit: int = 500) -> dict[str, Any]:
         return self._query("containers", range_name, limit, name=name)
 
+    def resources(self, name: str | None = None, range_name: str = "24h", limit: int = 500) -> dict[str, Any]:
+        return self._query("resources", range_name, limit, name=name)
+
     def projects(self, name: str | None = None, range_name: str = "24h", limit: int = 500) -> dict[str, Any]:
         return self._query("projects", range_name, limit, name=name)
 
@@ -49,6 +52,8 @@ class DashboardHistoryApi:
                 response = self.query_service.host(query)
             elif kind == "containers":
                 response = self.query_service.containers(query, name=name)
+            elif kind == "resources":
+                response = self.query_service.resources(query, name=name)
             elif kind == "projects":
                 response = self.query_service.projects(query, name=name)
             else:
