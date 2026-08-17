@@ -17,6 +17,11 @@ class FakeHistoryApi:
         return {"available": True, "status": "ok", "error": None, "points": [{"state": "healthy", "range": range_name, "limit": limit}]}
 
 
+class FakeServiceHealthApi:
+    def services(self):
+        return {"available": True, "status": "ok", "error": None, "overall": "healthy", "services": {"telemetry": {"state": "fresh"}, "mc3": {"state": "fresh"}}}
+
+
 class FakeDashboardApi:
     history_api = FakeHistoryApi()
 
@@ -46,7 +51,7 @@ class FakeDashboardApi:
         }
 
 
-client = TestClient(create_app(dashboard_api=FakeDashboardApi()))
+client = TestClient(create_app(dashboard_api=FakeDashboardApi(), service_health_api=FakeServiceHealthApi()))
 
 
 def test_dashboard_healthz():
@@ -76,8 +81,21 @@ def test_dashboard_history_routes_preserve_safe_contract():
     assert containers.json()["points"][0]["container_name"] == "app"
 
 
-def test_dashboard_serves_handbook_interface():
+def test_dashboard_service_health_is_read_only_get_route():
+    response = client.get("/api/services")
+    assert response.status_code == 200
+    assert response.json()["services"]["telemetry"]["state"] == "fresh"
+    assert client.post("/api/services").status_code == 405
+
+
+def test_dashboard_serves_read_only_mc5_interface():
     response = client.get("/")
     assert response.status_code == 200
     assert "AIPM Mission Control" in response.text
-    assert "Service pulse" in response.text
+    assert "Service Pulse" in response.text
+    assert "MC-3 Event Stream" in response.text
+    assert "Notification Safety" in response.text
+    assert "/api/services" in response.text
+    assert "/api/events?range=24h&limit=50" in response.text
+    assert "setInterval(loadServices,15000)" in response.text
+    assert "acknowledge_incident" not in response.text

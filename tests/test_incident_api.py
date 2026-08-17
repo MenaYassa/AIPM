@@ -95,7 +95,6 @@ def test_invalid_event_filter_is_safe():
     assert "bad severity" not in response.text
 
 
-def test_acknowledgement_is_the_only_write_route():
+def test_dashboard_does_not_expose_acknowledgement_action():
     response = client.post("/api/incidents/1/acknowledge")
-    assert response.status_code == 200
-    assert response.json()["incident"]["id"] == 1
+    assert response.status_code == 404

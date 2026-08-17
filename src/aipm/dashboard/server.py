@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from aipm.capabilities.dashboard.api import DashboardApi
 from aipm.capabilities.dashboard.incidents_api import DashboardIncidentsApi
 from aipm.capabilities.dashboard.notifications_api import DashboardNotificationsApi
+from aipm.capabilities.dashboard.service_health_api import DashboardServiceHealthApi
 from aipm.core.app import Application
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -19,12 +20,14 @@ def create_app(
     application: Application | None = None,
     incidents_api: DashboardIncidentsApi | None = None,
     notifications_api: DashboardNotificationsApi | None = None,
+    service_health_api: DashboardServiceHealthApi | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
     api = dashboard_api or DashboardApi.from_application(app_context, include_history=True)
     event_api = incidents_api or DashboardIncidentsApi.from_application(app_context)
     notification_api = notifications_api or DashboardNotificationsApi.from_application(app_context)
+    health_api = service_health_api or DashboardServiceHealthApi.from_application(app_context, dashboard_api=api, incidents_api=event_api)
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -84,10 +87,6 @@ def create_app(
     def incident_detail(incident_id: int):
         return event_api.incident(incident_id)
 
-    @app.post("/api/incidents/{incident_id}/acknowledge")
-    def acknowledge_incident(incident_id: int):
-        return event_api.acknowledge(incident_id)
-
     @app.get("/api/notifications")
     def notifications(status: str | None = None, incident_id: int | None = None, channel_id: str | None = None, include_suppressed: bool = False, limit: int = 100):
         return notification_api.notifications(status=status, incident_id=incident_id, channel_id=channel_id, include_suppressed=include_suppressed, limit=limit)
@@ -107,6 +106,10 @@ def create_app(
     @app.get("/api/notification-metrics")
     def notification_metrics():
         return notification_api.metrics()
+
+    @app.get("/api/services")
+    def services():
+        return health_api.services()
 
     @app.get("/")
     def index() -> FileResponse:
