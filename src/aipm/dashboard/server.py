@@ -14,6 +14,7 @@ from aipm.capabilities.dashboard.server_api import DashboardServerApi
 from aipm.capabilities.dashboard.docker_api import DashboardDockerApi
 from aipm.capabilities.dashboard.project_api import DashboardProjectApi
 from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
+from aipm.capabilities.dashboard.logs_api import DashboardLogsApi
 from aipm.core.app import Application
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -29,6 +30,7 @@ def create_app(
     docker_api: DashboardDockerApi | None = None,
     project_api: DashboardProjectApi | None = None,
     systemd_api: DashboardSystemdApi | None = None,
+    logs_api: DashboardLogsApi | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
@@ -40,6 +42,7 @@ def create_app(
     docker_detail_api = docker_api or DashboardDockerApi.from_application(app_context, dashboard_api=api)
     project_detail_api = project_api or DashboardProjectApi.from_application(app_context, dashboard_api=api)
     systemd_observation_api = systemd_api or DashboardSystemdApi.from_application(app_context)
+    logs_observation_api = logs_api or DashboardLogsApi.from_application(app_context)
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -101,6 +104,30 @@ def create_app(
     @app.get("/api/systemd/units/{unit_id}")
     def systemd_unit(unit_id: str):
         return systemd_observation_api.unit(unit_id)
+
+    @app.get("/api/logs")
+    def logs(
+        source: str = "aipm-dashboard",
+        since: str | None = None,
+        until: str | None = None,
+        severity: str | None = None,
+        unit: str | None = None,
+        project: str | None = None,
+        limit: int = 200,
+        max_bytes: int = 100_000,
+        cursor: str | None = None,
+    ):
+        return logs_observation_api.logs(
+            source=source,
+            since=since,
+            until=until,
+            severity=severity,
+            unit=unit,
+            project=project,
+            limit=limit,
+            max_bytes=max_bytes,
+            cursor=cursor,
+        )
 
     @app.get("/api/history/host")
     def history_host(range_name: str = Query("24h", alias="range"), limit: int = 500):
