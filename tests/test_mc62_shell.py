@@ -47,9 +47,10 @@ def test_only_dashboard_is_visible_by_default_and_placeholders_have_no_fake_metr
     assert 'data-view="notifications" hidden' in text
     assert 'data-view="settings" hidden' in text
     assert 'data-view="ai-agent" hidden' in text
-    assert text.count("Coming in MC-6.x") >= 9
+    assert text.count("Coming in MC-6.x") >= 8
     assert "Server & Host Intelligence" in text
-    assert "No Docker action or new provider is introduced in MC-6.2." in text
+    assert "Container operations" in text
+    assert "read-only detail" in text
     assert "No new history store or telemetry implementation is introduced." in text
     assert "Notifications remain disabled" in text
     assert "fake metric" not in text.lower()
