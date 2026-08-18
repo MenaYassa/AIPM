@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+from aipm.core.exceptions import AIPMError
 from aipm.models.events import EventType, ResourceRef, ResourceType
 from aipm.models.finding import Severity
 from aipm.models.incidents import IncidentStatus
@@ -19,6 +20,7 @@ from aipm.models.notifications import (
     NotificationTrigger,
 )
 from aipm.repositories.incidents.sqlite import SQLiteIncidentRepository
+from aipm.repositories.readonly import require_read_only_filesystem
 
 SCHEMA_VERSION = 2
 
@@ -123,17 +125,27 @@ CREATE INDEX IF NOT EXISTS idx_notification_actions_notification ON notification
 
 
 class SQLiteNotificationRepository:
-    def __init__(self, database_path: str | Path):
+    def __init__(self, database_path: str | Path, *, read_only: bool = False):
         self.database_path = Path(database_path).expanduser()
-        self.initialize()
+        self.read_only = read_only
+        if self.read_only:
+            require_read_only_filesystem(self.database_path)
+        else:
+            self.initialize()
+
+    def _assert_writable(self) -> None:
+        if self.read_only:
+            raise AIPMError("Notification repository is read-only")
 
     def initialize(self) -> None:
+        self._assert_writable()
         SQLiteIncidentRepository(self.database_path).initialize()
         with self._connection() as connection:
             connection.executescript(SCHEMA)
             self._migrate(connection)
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
+        self._assert_writable()
         now = _timestamp(datetime.now(timezone.utc))
         row = connection.execute("SELECT schema_version FROM notification_schema_meta WHERE schema_name = 'notifications'").fetchone()
         version = int(row[0]) if row else 0
@@ -159,8 +171,8 @@ class SQLiteNotificationRepository:
                 return True
         return False
 
-    @staticmethod
-    def _rebuild_legacy_tables(connection: sqlite3.Connection) -> None:
+    def _rebuild_legacy_tables(self, connection: sqlite3.Connection) -> None:
+        self._assert_writable()
         legacy_names = ("notification_attempts", "notification_deliveries", "notifications", "notification_projection_runs", "notification_dedup")
         connection.execute("PRAGMA foreign_keys = OFF")
         for table in legacy_names:
@@ -191,8 +203,8 @@ class SQLiteNotificationRepository:
         if violations:
             raise sqlite3.IntegrityError("MC-4.5 migration found orphaned notification records")
 
-    @staticmethod
-    def _add_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    def _add_column(self, connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        self._assert_writable()
         columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in columns:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
@@ -203,6 +215,7 @@ class SQLiteNotificationRepository:
         return int(row[0]) if row else 0
 
     def add_transition(self, transition: IncidentTransition) -> int:
+        self._assert_writable()
         with self._connection() as connection:
             cursor = connection.execute(
                 """INSERT INTO incident_transitions
@@ -230,6 +243,7 @@ class SQLiteNotificationRepository:
         return [self._transition(row) for row in rows]
 
     def mark_projected(self, transition_id: int, status: str = "projected") -> None:
+        self._assert_writable()
         with self._connection() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO notification_projection_runs (transition_id, projected_at, status) VALUES (?, ?, ?)",
@@ -237,6 +251,7 @@ class SQLiteNotificationRepository:
             )
 
     def record_suppression(self, *, identity_key_value: str, transition: IncidentTransition, policy_id: str, channel_id: str, reason: str, now: datetime | None = None) -> None:
+        self._assert_writable()
         now_ts = _timestamp(now or datetime.now(timezone.utc))
         with self._connection() as connection:
             connection.execute(
@@ -262,6 +277,7 @@ class SQLiteNotificationRepository:
         global_max_notifications: int = 0,
         now: datetime | None = None,
     ) -> tuple[int | None, str | None]:
+        self._assert_writable()
         now_ts = _timestamp(now or datetime.now(timezone.utc))
         with self._connection() as connection:
             if connection.execute("SELECT 1 FROM notifications WHERE identity_key = ?", (identity_key_value,)).fetchone() is not None:
@@ -334,6 +350,7 @@ class SQLiteNotificationRepository:
             return notification_id, None
 
     def create_notification(self, *, identity_key: str, transition: IncidentTransition, policy_id: str, channel_id: str, status: NotificationStatus, title: str, body: str, suppressed_reason: str | None = None) -> int:
+        self._assert_writable()
         if status is NotificationStatus.SUPPRESSED:
             self.record_suppression(identity_key_value=identity_key, transition=transition, policy_id=policy_id, channel_id=channel_id, reason=suppressed_reason or "suppressed")
             return 0
@@ -341,6 +358,7 @@ class SQLiteNotificationRepository:
         return int(notification_id or 0)
 
     def create_delivery(self, notification_id: int, channel_id: str, provider_request_key: str) -> int:
+        self._assert_writable()
         with self._connection() as connection:
             cursor = connection.execute(
                 "INSERT OR IGNORE INTO notification_deliveries (notification_id, channel_id, status, provider_request_key, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -350,6 +368,7 @@ class SQLiteNotificationRepository:
             return int(row[0]) if row else int(cursor.lastrowid)
 
     def claim_due(self, now: datetime, lease_seconds: int = 60) -> tuple[int, Notification] | None:
+        self._assert_writable()
         now_ts = _timestamp(now)
         with self._connection() as connection:
             row = connection.execute(
@@ -389,6 +408,7 @@ class SQLiteNotificationRepository:
         return int(row["delivery_id"]), self._notification(updated, lease_token=lease_token)
 
     def finish_delivery(self, delivery_id: int, result: DeliveryStatus, *, retryable: bool, max_attempts: int, lease_token: str | None = None, provider_message_id: str | None = None, provider_status_code: int | None = None, error_code: str | None = None, error_message: str | None = None, next_attempt_at: datetime | None = None) -> None:
+        self._assert_writable()
         now = datetime.now(timezone.utc)
         with self._connection() as connection:
             row = connection.execute("SELECT notification_id, attempt_count FROM notification_deliveries WHERE id = ?", (delivery_id,)).fetchone()
@@ -429,6 +449,7 @@ class SQLiteNotificationRepository:
             )
 
     def retry_delivery(self, notification_id: int, *, allow_unknown: bool = False, actor: str = "operator", reason: str = "operator retry") -> bool:
+        self._assert_writable()
         with self._connection() as connection:
             row = connection.execute(
                 """SELECT n.status AS notification_status, n.manual_retry_count, d.id AS delivery_id, d.status AS delivery_status
@@ -449,6 +470,7 @@ class SQLiteNotificationRepository:
             return True
 
     def reconcile_unknown(self, notification_id: int, *, delivered: bool, actor: str = "operator", reason: str = "provider reconciliation") -> bool:
+        self._assert_writable()
         with self._connection() as connection:
             row = connection.execute("SELECT status FROM notifications WHERE id = ?", (notification_id,)).fetchone()
             if row is None:
@@ -463,6 +485,7 @@ class SQLiteNotificationRepository:
             return True
 
     def retain(self, cutoff: datetime) -> dict[str, int]:
+        self._assert_writable()
         cutoff_ts = _timestamp(cutoff)
         result: dict[str, int] = {}
         with self._connection() as connection:
@@ -521,6 +544,21 @@ class SQLiteNotificationRepository:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        if self.read_only:
+            connection = sqlite3.connect(
+                f"{self.database_path.resolve().as_uri()}?mode=ro",
+                uri=True,
+                timeout=5,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA query_only = ON")
+                yield connection
+            finally:
+                connection.close()
+            return
+
         connection = sqlite3.connect(self.database_path, timeout=5)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")

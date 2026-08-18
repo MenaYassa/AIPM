@@ -22,7 +22,7 @@ class DashboardHistoryApi:
         query_service = None
         if application.config.telemetry.enabled:
             try:
-                repository = SQLiteHistoryRepository(application.config.telemetry.database_path)
+                repository = SQLiteHistoryRepository(application.config.telemetry.database_path, read_only=True)
                 query_service = HistoricalQueryService(repository, logger=application.logger)
             except Exception as exc:
                 application.logger.exception("Historical telemetry repository unavailable", exc_info=exc)

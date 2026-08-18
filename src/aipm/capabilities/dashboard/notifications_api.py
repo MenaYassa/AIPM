@@ -17,7 +17,7 @@ class DashboardNotificationsApi:
     @classmethod
     def from_application(cls, application: Application) -> "DashboardNotificationsApi":
         try:
-            return cls(SQLiteNotificationRepository(application.config.telemetry.database_path), application)
+            return cls(SQLiteNotificationRepository(application.config.telemetry.database_path, read_only=True), application)
         except Exception as exc:
             application.logger.exception("Notification repository unavailable", exc_info=exc)
             return cls(None, application)

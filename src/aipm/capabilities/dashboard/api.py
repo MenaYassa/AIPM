@@ -48,7 +48,7 @@ class DashboardApi:
         if application.config.telemetry.enabled:
             repository = None
             try:
-                repository = SQLiteHistoryRepository(application.config.telemetry.database_path)
+                repository = SQLiteHistoryRepository(application.config.telemetry.database_path, read_only=True)
                 telemetry.docker.hydrate_resources(repository.get_latest_resource_samples())
             except Exception as exc:
                 application.logger.exception("Latest telemetry resource cache unavailable", exc_info=exc)

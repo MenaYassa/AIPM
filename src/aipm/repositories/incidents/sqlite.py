@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+from aipm.core.exceptions import AIPMError
 from aipm.models.events import Event, EventFilter
 from aipm.models.finding import Severity
 from aipm.models.incidents import Incident, IncidentFilter, IncidentStatus
 from aipm.repositories.events.sqlite import SQLiteEventRepository
+from aipm.repositories.readonly import require_read_only_filesystem
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS incidents (
@@ -63,12 +65,25 @@ CREATE INDEX IF NOT EXISTS idx_incident_transitions_incident ON incident_transit
 
 
 class SQLiteIncidentRepository:
-    def __init__(self, database_path: str | Path):
+    def __init__(self, database_path: str | Path, *, read_only: bool = False):
         self.database_path = Path(database_path).expanduser()
-        self.event_repository = SQLiteEventRepository(self.database_path)
-        self.initialize()
+        self.read_only = read_only
+        if self.read_only:
+            require_read_only_filesystem(self.database_path)
+        self.event_repository = SQLiteEventRepository(self.database_path, read_only=read_only)
+        if not self.read_only:
+            self.initialize()
+
+    def _validate_read_only_path(self) -> None:
+        if not self.database_path.is_file():
+            raise FileNotFoundError(f"Read-only incident database does not exist: {self.database_path}")
+
+    def _assert_writable(self) -> None:
+        if self.read_only:
+            raise AIPMError("Incident repository is read-only")
 
     def initialize(self) -> None:
+        self._assert_writable()
         with self._connection() as connection:
             connection.executescript(SCHEMA)
 
@@ -81,6 +96,7 @@ class SQLiteIncidentRepository:
         return self._incident(row) if row is not None else None
 
     def apply_event(self, event: Event, *, opens_incident: bool, resolves_incident: bool) -> Incident | None:
+        self._assert_writable()
         if event.id is None:
             raise ValueError("Incident persistence requires a persisted event id.")
         now = _utc(event.occurred_at)
@@ -145,6 +161,7 @@ class SQLiteIncidentRepository:
         return self.get_incident(incident_id)
 
     def acknowledge(self, incident_id: int, acknowledged_at: datetime) -> Incident | None:
+        self._assert_writable()
         with self._connection() as connection:
             row = connection.execute("SELECT * FROM incidents WHERE id = ? AND status = ?", (incident_id, IncidentStatus.OPEN.value)).fetchone()
             if row is not None:
@@ -193,10 +210,12 @@ class SQLiteIncidentRepository:
         return self._incident(row) if row is not None else None
 
     def delete_old_resolved(self, cutoff: datetime) -> int:
+        self._assert_writable()
+        cutoff_ts = _timestamp(cutoff)
         with self._connection() as connection:
             ids = [row["id"] for row in connection.execute(
                 "SELECT id FROM incidents WHERE status = ? AND updated_at < ?",
-                (IncidentStatus.RESOLVED.value, _timestamp(cutoff)),
+                (IncidentStatus.RESOLVED.value, cutoff_ts),
             ).fetchall()]
             for incident_id in ids:
                 connection.execute("DELETE FROM incident_events WHERE incident_id = ?", (incident_id,))
@@ -231,6 +250,21 @@ class SQLiteIncidentRepository:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        if self.read_only:
+            connection = sqlite3.connect(
+                f"{self.database_path.resolve().as_uri()}?mode=ro",
+                uri=True,
+                timeout=5,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA query_only = ON")
+                yield connection
+            finally:
+                connection.close()
+            return
+
         connection = sqlite3.connect(self.database_path, timeout=5)
         connection.row_factory = sqlite3.Row
         try:

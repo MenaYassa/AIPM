@@ -28,8 +28,8 @@ class DashboardIncidentsApi:
             return cls(None, None, logger=application.logger)
         try:
             database_path = application.config.telemetry.database_path
-            event_repository = SQLiteEventRepository(database_path)
-            incident_repository = SQLiteIncidentRepository(database_path)
+            event_repository = SQLiteEventRepository(database_path, read_only=True)
+            incident_repository = SQLiteIncidentRepository(database_path, read_only=True)
             return cls(
                 EventQueryService(event_repository),
                 IncidentQueryService(incident_repository),

@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Sequence
 
+from aipm.core.exceptions import AIPMError
 from aipm.models.events import Event, EventFilter, EventSource, EventType, FindingEvidence, ResourceRef, ResourceType
 from aipm.models.finding import Severity
 from aipm.models.health import HealthState
 from aipm.models.health_observation import HealthFindingRecord, HealthObservation
+from aipm.repositories.readonly import require_read_only_filesystem
 
 
 SCHEMA = """
@@ -85,11 +87,24 @@ CREATE INDEX IF NOT EXISTS idx_health_observations_project_time ON health_observ
 
 
 class SQLiteEventRepository:
-    def __init__(self, database_path: str | Path):
+    def __init__(self, database_path: str | Path, *, read_only: bool = False):
         self.database_path = Path(database_path).expanduser()
-        self.initialize()
+        self.read_only = read_only
+        if self.read_only:
+            require_read_only_filesystem(self.database_path)
+        else:
+            self.initialize()
+
+    def _validate_read_only_path(self) -> None:
+        if not self.database_path.is_file():
+            raise FileNotFoundError(f"Read-only event database does not exist: {self.database_path}")
+
+    def _assert_writable(self) -> None:
+        if self.read_only:
+            raise AIPMError("Event repository is read-only")
 
     def initialize(self) -> None:
+        self._assert_writable()
         with self._connection() as connection:
             connection.executescript(SCHEMA)
 
@@ -100,6 +115,7 @@ class SQLiteEventRepository:
         observations: Sequence[HealthObservation],
         events: Sequence[Event],
     ) -> bool:
+        self._assert_writable()
         with self._connection() as connection:
             cursor = connection.execute(
                 "INSERT OR IGNORE INTO event_processing_runs (source_run_id, processed_at, status) VALUES (?, ?, ?)",
@@ -248,9 +264,11 @@ class SQLiteEventRepository:
             return row is not None
 
     def delete_old_events(self, cutoff: datetime) -> int:
+        self._assert_writable()
+        cutoff_ts = _timestamp(cutoff)
         with self._connection() as connection:
-            connection.execute("DELETE FROM event_evidence WHERE event_id IN (SELECT id FROM events WHERE occurred_at < ?)", (_timestamp(cutoff),))
-            cursor = connection.execute("DELETE FROM events WHERE occurred_at < ?", (_timestamp(cutoff),))
+            connection.execute("DELETE FROM event_evidence WHERE event_id IN (SELECT id FROM events WHERE occurred_at < ?)", (cutoff_ts,))
+            cursor = connection.execute("DELETE FROM events WHERE occurred_at < ?", (cutoff_ts,))
             return max(0, cursor.rowcount)
 
     def _event(self, connection: sqlite3.Connection, row: sqlite3.Row) -> Event:
@@ -314,6 +332,21 @@ class SQLiteEventRepository:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        if self.read_only:
+            connection = sqlite3.connect(
+                f"{self.database_path.resolve().as_uri()}?mode=ro",
+                uri=True,
+                timeout=5,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA query_only = ON")
+                yield connection
+            finally:
+                connection.close()
+            return
+
         connection = sqlite3.connect(self.database_path, timeout=5)
         connection.row_factory = sqlite3.Row
         try:

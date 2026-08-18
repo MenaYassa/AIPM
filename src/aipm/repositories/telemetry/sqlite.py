@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Sequence
 
+from aipm.core.exceptions import AIPMError
 from aipm.models.history import (
     ContainerHistoryPoint,
     HistoricalRun,
@@ -14,6 +15,7 @@ from aipm.models.history import (
     SampleRunRecord,
     TunnelHistoryPoint,
 )
+from aipm.repositories.readonly import require_read_only_filesystem
 
 
 SCHEMA = """
@@ -135,11 +137,24 @@ CREATE INDEX IF NOT EXISTS idx_container_resource_samples_name_time ON container
 class SQLiteHistoryRepository:
     """SQLite-backed history repository with one short-lived connection per operation."""
 
-    def __init__(self, database_path: str | Path):
+    def __init__(self, database_path: str | Path, *, read_only: bool = False):
         self.database_path = Path(database_path).expanduser()
-        self.initialize()
+        self.read_only = read_only
+        if self.read_only:
+            require_read_only_filesystem(self.database_path)
+        else:
+            self.initialize()
+
+    def _validate_read_only_path(self) -> None:
+        if not self.database_path.is_file():
+            raise FileNotFoundError(f"Read-only telemetry database does not exist: {self.database_path}")
+
+    def _assert_writable(self) -> None:
+        if self.read_only:
+            raise AIPMError("Telemetry repository is read-only")
 
     def initialize(self) -> None:
+        self._assert_writable()
         if self.database_path.exists() and self.database_path.is_dir():
             raise ValueError("Telemetry database path points to a directory.")
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +163,7 @@ class SQLiteHistoryRepository:
             self._migrate_columns(connection)
 
     def _migrate_columns(self, connection: sqlite3.Connection) -> None:
+        self._assert_writable()
         columns = {row[1] for row in connection.execute("PRAGMA table_info(container_samples)").fetchall()}
         for name, definition in (("resource_sampled_at", "INTEGER"), ("resource_status", "TEXT NOT NULL DEFAULT 'never_sampled'"), ("resource_age_seconds", "INTEGER")):
             if name not in columns:
@@ -161,6 +177,7 @@ class SQLiteHistoryRepository:
         projects: Sequence[ProjectHistoryPoint],
         tunnel: TunnelHistoryPoint | None,
     ) -> int:
+        self._assert_writable()
         with self._connection() as connection:
             cursor = connection.execute(
                 """
@@ -284,6 +301,7 @@ class SQLiteHistoryRepository:
             return run_id
 
     def save_resource_sample(self, sampled_at: datetime, containers: Sequence[ContainerHistoryPoint], *, duration_ms: int | None, status: str, error_code: str | None = None) -> int:
+        self._assert_writable()
         with self._connection() as connection:
             cursor = connection.execute("INSERT INTO resource_sample_runs (sampled_at, duration_ms, status, error_code, container_count) VALUES (?, ?, ?, ?, ?)", (_timestamp(sampled_at), duration_ms, status, error_code, len(containers)))
             run_id = int(cursor.lastrowid)
@@ -444,6 +462,7 @@ class SQLiteHistoryRepository:
         ]
 
     def delete_older_than(self, cutoff: datetime) -> int:
+        self._assert_writable()
         cutoff_ts = _timestamp(cutoff)
         with self._connection() as connection:
             total = 0
@@ -483,6 +502,21 @@ class SQLiteHistoryRepository:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        if self.read_only:
+            connection = sqlite3.connect(
+                f"{self.database_path.resolve().as_uri()}?mode=ro",
+                uri=True,
+                timeout=5,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA query_only = ON")
+                yield connection
+            finally:
+                connection.close()
+            return
+
         connection = sqlite3.connect(self.database_path, timeout=5)
         connection.row_factory = sqlite3.Row
         try:
