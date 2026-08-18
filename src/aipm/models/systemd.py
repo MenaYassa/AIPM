@@ -18,7 +18,10 @@ class SystemdUnitId(StrEnum):
     DASHBOARD = "aipm-dashboard"
     TELEMETRY = "aipm-telemetry"
     EVENTS = "aipm-events"
-    CLOUDFLARED = "cloudflared"
+    FREEBUFF_LLM_PROXY = "freebuff-llm-proxy"
+    FASTSD_WEBUI = "fastsd-webui"
+    FASTSD_WEBSERVER = "fastsd-webserver"
+    FASTSD_PROXY = "fastsd-proxy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +48,10 @@ SYSTEMD_UNIT_REGISTRY: tuple[SystemdUnitRegistryEntry, ...] = (
     SystemdUnitRegistryEntry(SystemdUnitId.DASHBOARD, "AIPM Dashboard", "aipm-dashboard.service", "user"),
     SystemdUnitRegistryEntry(SystemdUnitId.TELEMETRY, "AIPM Telemetry", "aipm-telemetry.service", "user"),
     SystemdUnitRegistryEntry(SystemdUnitId.EVENTS, "AIPM Events", "aipm-events.service", "user"),
-    SystemdUnitRegistryEntry(SystemdUnitId.CLOUDFLARED, "Cloudflared Tunnel", "cloudflared.service", "system"),
+    SystemdUnitRegistryEntry(SystemdUnitId.FREEBUFF_LLM_PROXY, "Freebuff LLM Proxy", "freebuff-llm-proxy.service", "user"),
+    SystemdUnitRegistryEntry(SystemdUnitId.FASTSD_WEBUI, "FastSD Web UI", "fastsd-webui.service", "system"),
+    SystemdUnitRegistryEntry(SystemdUnitId.FASTSD_WEBSERVER, "FastSD Web Server", "fastsd-webserver.service", "system"),
+    SystemdUnitRegistryEntry(SystemdUnitId.FASTSD_PROXY, "FastSD Proxy", "fastsd-proxy.service", "system"),
 )
 
 

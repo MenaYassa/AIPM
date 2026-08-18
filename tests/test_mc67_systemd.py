@@ -30,7 +30,8 @@ def snapshot(entry, *, active="active", sub="running", enabled=True):
 
 def test_registry_is_small_backend_owned_and_explicit() -> None:
     ids = {entry.id.value for entry in SYSTEMD_UNIT_REGISTRY}
-    assert ids == {"aipm-dashboard", "aipm-telemetry", "aipm-events", "cloudflared"}
+    assert ids == {"aipm-dashboard", "aipm-telemetry", "aipm-events", "freebuff-llm-proxy", "fastsd-webui", "fastsd-webserver", "fastsd-proxy"}
+    assert "cloudflared" not in ids
     assert all(entry.unit_name.endswith(".service") for entry in SYSTEMD_UNIT_REGISTRY)
 
 
@@ -59,10 +60,25 @@ def test_local_provider_uses_system_scope_only_for_registry_entry() -> None:
         return SimpleNamespace(stdout="LoadState=loaded\nActiveState=inactive\nSubState=dead\nUnitFileState=disabled\n", returncode=0)
 
     provider = LocalSystemdProvider(runner=runner)
-    entry = next(item for item in SYSTEMD_UNIT_REGISTRY if item.id == SystemdUnitId.CLOUDFLARED)
+    entry = next(item for item in SYSTEMD_UNIT_REGISTRY if item.id == SystemdUnitId.FASTSD_PROXY)
     result = provider.observe(entry)
     assert calls[0][0:2] == ("systemctl", "show")
     assert result.status is SystemdUnitStatus.INACTIVE
+
+
+def test_registry_manager_mapping_is_exact_for_all_entries() -> None:
+    expected = {
+        "aipm-dashboard": ("user", "aipm-dashboard.service"),
+        "aipm-telemetry": ("user", "aipm-telemetry.service"),
+        "aipm-events": ("user", "aipm-events.service"),
+        "freebuff-llm-proxy": ("user", "freebuff-llm-proxy.service"),
+        "fastsd-webui": ("system", "fastsd-webui.service"),
+        "fastsd-webserver": ("system", "fastsd-webserver.service"),
+        "fastsd-proxy": ("system", "fastsd-proxy.service"),
+    }
+    actual = {entry.id.value: (entry.manager_scope, entry.unit_name) for entry in SYSTEMD_UNIT_REGISTRY}
+    assert actual == expected
+    assert "cloudflared" not in actual
 
 
 def test_unknown_unit_id_is_rejected_before_provider_query() -> None:
