@@ -19,7 +19,6 @@ ProtectHome=read-only
 ReadOnlyPaths=/home/ubuntu/aipm /home/ubuntu/.config/aipm /home/ubuntu/.local/state/aipm/telemetry
 InaccessiblePaths=/home/ubuntu/.ssh /home/ubuntu/.config/cloudflared
 RestrictSUIDSGID=true
-CapabilityBoundingSet=
 UMask=0077
 
 [Install]

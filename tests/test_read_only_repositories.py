@@ -434,4 +434,4 @@ def test_dashboard_service_template_enforces_read_only_boundary() -> None:
     assert "ReadOnlyPaths=/home/ubuntu/aipm /home/ubuntu/.config/aipm /home/ubuntu/.local/state/aipm/telemetry" in text
     assert "ReadWritePaths=" not in text
     assert "--host 0.0.0.0" not in text
-    assert "CapabilityBoundingSet=" in text
+    assert "CapabilityBoundingSet=" not in text
