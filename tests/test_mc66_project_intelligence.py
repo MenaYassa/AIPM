@@ -81,6 +81,23 @@ def test_grouping_is_deterministic_and_preserves_runtime_only_and_ungrouped() ->
     assert ungrouped.health.status in {ProjectHealthStatus.UNKNOWN, ProjectHealthStatus.YELLOW, ProjectHealthStatus.RED}
 
 
+def test_filtered_candidates_exclude_known_dependency_paths_but_keep_real_repositories() -> None:
+    projects = [
+        Project(name=".nuget", path="/srv/.nuget"),
+        Project(name="flutter", path="/srv/flutter"),
+        Project(name="aipm", path="/srv/aipm", capabilities=ProjectCapabilities(has_git=True)),
+    ]
+    inventory = service_for(projects, []).inventory(scope="applications")
+    assert [item.display_name for item in inventory.projects] == []
+    assert {item.display_name for item in inventory.filtered_candidates} == {".nuget", "flutter"}
+    assert all(item.association_role.value == "filtered_candidate" for item in inventory.filtered_candidates)
+    assert all(item.association_explanation == "Excluded because this path does not appear to be an application root." for item in inventory.filtered_candidates)
+    assert [item.display_name for item in inventory.local_candidates] == ["aipm"]
+    assert inventory.local_candidates[0].association_explanation == "Discovered source project without runtime association."
+    filtered = service_for(projects, []).inventory(scope="filtered")
+    assert {item.display_name for item in filtered.projects} == {".nuget", "flutter"}
+
+
 def test_runtime_first_scope_separates_local_candidates_without_dropping_them() -> None:
     project = Project(name="local-only", path="/srv/local-only", capabilities=ProjectCapabilities(has_git=True))
     details = [FakeDetail("1" * 12, "runtime", "runtime-stack", "runtime", "app:latest", "running", "healthy")]
@@ -137,7 +154,19 @@ def test_health_requires_evidence_and_missing_health_checks_are_warning() -> Non
     health = service_for(projects, details).inventory().projects[0].health
     assert health.status is ProjectHealthStatus.YELLOW
     assert health.counts["missing_health_check"] == 1
-    assert any(item.code == "MISSING_HEALTH_CHECK" for item in health.evidence)
+    assert any(item.code == "MISSING_HEALTH_CHECKS" and item.message == "1 containers missing health checks" for item in health.evidence)
+
+
+def test_health_evidence_aggregates_repeated_missing_checks() -> None:
+    project = Project(name="platform", path="/srv/platform", capabilities=ProjectCapabilities(has_compose=True), compose_files=["/srv/platform/compose.yml"])
+    details = [FakeDetail(str(index) * 12, f"service-{index}", "platform", f"service-{index}", "app:latest", "running", None) for index in range(1, 9)]
+    health = service_for([project], details).inventory().projects[0].health
+    assert health.counts["running"] == 8
+    assert health.counts["healthy"] == 0
+    assert health.counts["missing_health_check"] == 8
+    assert [item.code for item in health.evidence].count("MISSING_HEALTH_CHECKS") == 1
+    assert any(item.message == "8 containers missing health checks" for item in health.evidence)
+    assert not any(item.code == "MISSING_HEALTH_CHECK" for item in health.evidence)
 
 
 def test_stopped_or_unhealthy_components_are_red() -> None:
@@ -191,9 +220,11 @@ def test_project_frontend_uses_static_module_and_inventory_contract() -> None:
     module = (STATIC / "mission-control-projects.js").read_text(encoding="utf-8")
     assert '/static/mission-control-projects.js' in html
     assert 'data-view="projects"' in html
+    for marker in ("Application Inventory", "Runtime Groups", "Local Projects", "Filtered Candidates", "project-secondary-section"):
+        assert marker in html
     for marker in ("projectCards", "projectDetail", "projectInventoryState", "scheduler.register('projects'"):
         assert marker in html
-    for marker in ("/api/projects?scope=applications&limit=200", "/api/projects/", "/containers", "/health", "createProjectController", "localCandidateCards", "association_role"):
+    for marker in ("/api/projects?scope=applications&limit=200", "/api/projects/", "/containers", "/health", "createProjectController", "runtimeGroupCards", "localProjectCards", "filteredCandidateCards", "association_role", "filtered_candidate", "association_explanation", "healthCounts", "healthEvidenceHtml", "Health evidence", "Running containers:", "Healthy containers:", "Missing health checks:", "Unknown:"):
         assert marker in module
     assert 'method="post"' not in module.lower()
     assert "fetch(" in module

@@ -34,6 +34,11 @@ class ProjectIntelligenceService:
     MAX_COMPONENTS = 200
     MAX_EVIDENCE = 24
     STALE_AFTER_SECONDS = 180
+    FILTERED_BASENAMES = frozenset({
+        ".nuget", ".pub-cache", ".gradle", ".m2", ".npm", ".cargo", ".rustup", ".cache", ".local",
+        ".dart_tool", ".gradle", ".pytest_cache", ".tox", "__pycache__", "node_modules", "build", "dist",
+        "target", "coverage", "generated", "gen", "vendor", "packages", "flutter",
+    })
 
     def __init__(
         self,
@@ -63,6 +68,7 @@ class ProjectIntelligenceService:
             applications = [item for item in applications if item.health.status.value == status]
         applications = sorted(applications, key=lambda item: item.display_name.lower())
         local_candidates = tuple(replace(item, inventory_scope=scope_value) for item in applications if item.association_role is AssociationRole.LOCAL_CANDIDATE)
+        filtered_candidates = tuple(replace(item, inventory_scope=scope_value) for item in applications if item.association_role is AssociationRole.FILTERED_CANDIDATE)
         selected = tuple(replace(item, inventory_scope=scope_value) for item in applications if self._in_scope(item, scope_value))[:bounded]
         freshness = self._freshness(observed_at, available=not bool(runtime_error), error=runtime_error)
         errors = tuple(value for value in (project_error, runtime_error) if value)
@@ -73,6 +79,7 @@ class ProjectIntelligenceService:
             source_errors=errors,
             inventory_scope=scope_value,
             local_candidates=local_candidates[: self.MAX_PROJECTS],
+            filtered_candidates=filtered_candidates[: self.MAX_PROJECTS],
         )
 
     def detail(self, project_id: str) -> ProjectApplication | None:
@@ -139,22 +146,32 @@ class ProjectIntelligenceService:
                 explanation = "Runtime group has a local Compose project association supported by Docker project identity."
             else:
                 confidence = AssociationConfidence.UNKNOWN
-                evidence.append(ProjectEvidence("LOCAL_PROJECT_NO_RUNTIME_MATCH", "warning", "association", "Local project discovered; no trustworthy runtime group was matched"))
-                role = AssociationRole.LOCAL_CANDIDATE
-                explanation = "Local project discovered without a trustworthy runtime association; shown as a local candidate."
+                filtered_reason = self._filtered_candidate_reason(project)
+                if filtered_reason:
+                    evidence.append(ProjectEvidence("FILTERED_LOW_CONFIDENCE_PATH", "info", "discovery", filtered_reason))
+                    role = AssociationRole.FILTERED_CANDIDATE
+                    source = ProjectSource.FILTERED_CANDIDATE
+                    classification = "filtered_candidate"
+                    explanation = "Excluded because this path does not appear to be an application root."
+                else:
+                    evidence.append(ProjectEvidence("LOCAL_PROJECT_NO_RUNTIME_MATCH", "warning", "association", "Local project discovered; no trustworthy runtime group was matched"))
+                    role = AssociationRole.LOCAL_CANDIDATE
+                    source = ProjectSource.DISCOVERED
+                    classification = "local_project"
+                    explanation = "Discovered source project without runtime association."
             if project_error:
                 evidence.append(ProjectEvidence("PROJECT_DISCOVERY_UNAVAILABLE", "warning", "project", project_error))
-            app = self._application(project.name, ProjectSource.DISCOVERED, confidence, project, group, selected, observed_at, evidence, runtime_error, association_role=role, association_explanation=explanation)
+            app = self._application(project.name, source if not group else ProjectSource.DISCOVERED, confidence, project, group, selected, observed_at, evidence, runtime_error, association_role=role, association_explanation=explanation, candidate_classification=classification if not group else "application")
             result.append(app)
         runtime_groups = sorted({item.project_key for item in components if item.project_key and item.project_key not in matched_runtime})
         for group in runtime_groups:
             selected = [item for item in components if item.project_key == group]
             evidence = (ProjectEvidence("RUNTIME_ONLY_GROUP", "warning", "docker", "No discovered local project matched this runtime group"),)
-            result.append(self._application(group, ProjectSource.RUNTIME_GROUP, AssociationConfidence.UNKNOWN, None, group, selected, observed_at, evidence, runtime_error, association_role=AssociationRole.RUNTIME_ONLY, association_explanation="Runtime group observed; no trusted local project root matched."))
+            result.append(self._application(group, ProjectSource.RUNTIME_GROUP, AssociationConfidence.UNKNOWN, None, group, selected, observed_at, evidence, runtime_error, association_role=AssociationRole.RUNTIME_ONLY, association_explanation="Runtime group observed; no trusted local project root matched.", candidate_classification="runtime_group"))
         ungrouped = [item for item in components if not item.project_key]
         if ungrouped:
             evidence = (ProjectEvidence("UNGROUPED_RUNTIME", "warning", "docker", "Container has no trustworthy project association"),)
-            result.append(self._application("Ungrouped runtime", ProjectSource.UNGROUPED, AssociationConfidence.UNKNOWN, None, None, ungrouped, observed_at, evidence, runtime_error, association_role=AssociationRole.UNGROUPED, association_explanation="Runtime components lack a trustworthy Compose or project identity."))
+            result.append(self._application("Ungrouped runtime", ProjectSource.UNGROUPED, AssociationConfidence.UNKNOWN, None, None, ungrouped, observed_at, evidence, runtime_error, association_role=AssociationRole.UNGROUPED, association_explanation="Runtime components lack a trustworthy Compose or project identity.", candidate_classification="ungrouped"))
         return result
 
     def _application(
@@ -171,6 +188,7 @@ class ProjectIntelligenceService:
         *,
         association_role: AssociationRole,
         association_explanation: str,
+        candidate_classification: str,
     ) -> ProjectApplication:
         components = tuple(self._component(item) for item in values[: self.MAX_COMPONENTS])
         all_evidence = list(evidence)
@@ -205,6 +223,7 @@ class ProjectIntelligenceService:
             association_role=association_role,
             association_explanation=association_explanation,
             local_project_id=local_project_id,
+            candidate_classification=candidate_classification,
         )
 
     def _component(self, item: Any) -> ProjectComponent:
@@ -238,12 +257,17 @@ class ProjectIntelligenceService:
         counts = {
             "total": len(components),
             "running": sum(item.state == "running" for item in components),
+            "healthy": sum(item.health == "healthy" for item in components),
             "stopped": sum(item.state in {"exited", "dead", "created"} for item in components),
             "restarting": sum(item.state == "restarting" for item in components),
             "unhealthy": sum(item.health == "unhealthy" for item in components),
             "missing_health_check": sum(item.health is None for item in components),
             "restarts": sum(item.restart_count for item in components),
         }
+        missing_count = counts["missing_health_check"]
+        if missing_count:
+            evidence[:] = [item for item in evidence if item.code != "MISSING_HEALTH_CHECK"]
+            evidence.append(ProjectEvidence("MISSING_HEALTH_CHECKS", "warning", "docker", f"{missing_count} containers missing health checks"))
         if not components:
             status = ProjectHealthStatus.UNKNOWN
             summary = "No trustworthy runtime components are available"
@@ -254,7 +278,7 @@ class ProjectIntelligenceService:
         elif counts["restarting"] or counts["missing_health_check"] or counts["restarts"]:
             status = ProjectHealthStatus.YELLOW
             summary = "Runtime evidence contains warnings or incomplete health checks"
-        elif counts["running"] == counts["total"] and all(item.health == "healthy" for item in components):
+        elif counts["running"] == counts["total"] and counts["healthy"] == counts["total"]:
             status = ProjectHealthStatus.GREEN
             summary = "All observed components are running and healthy"
         else:
@@ -349,6 +373,13 @@ class ProjectIntelligenceService:
         except Exception:
             return []
 
+    @classmethod
+    def _filtered_candidate_reason(cls, project: Project) -> str | None:
+        if getattr(project, "compose_files", None) or bool(getattr(getattr(project, "capabilities", None), "has_git", False)):
+            return None
+        basename = str(getattr(project, "name", "")).strip().lower()
+        return "Excluded because this path does not appear to be an application root." if basename in cls.FILTERED_BASENAMES else None
+
     @staticmethod
     def _scope(value: str | InventoryScope) -> InventoryScope:
         try:
@@ -362,6 +393,8 @@ class ProjectIntelligenceService:
             return True
         if scope is InventoryScope.LOCAL:
             return item.association_role is AssociationRole.LOCAL_CANDIDATE
+        if scope is InventoryScope.FILTERED:
+            return item.association_role is AssociationRole.FILTERED_CANDIDATE
         if scope is InventoryScope.ASSOCIATED:
             return item.association_role is AssociationRole.ASSOCIATED_LOCAL
         return item.association_role in {AssociationRole.APPLICATION, AssociationRole.ASSOCIATED_LOCAL, AssociationRole.RUNTIME_ONLY, AssociationRole.UNGROUPED}

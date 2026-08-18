@@ -22,6 +22,7 @@ class ProjectIntelligenceMapper:
             "search_paths": list(getattr(value, "search_paths", ()))[:32],
             "projects": [cls.project(item) for item in getattr(value, "projects", ())],
             "local_candidates": [cls.project(item) for item in getattr(value, "local_candidates", ())],
+            "filtered_candidates": [cls.project(item) for item in getattr(value, "filtered_candidates", ())],
             "source_errors": list(getattr(value, "source_errors", ()))[:8],
             "truncated": False,
         }
@@ -37,6 +38,7 @@ class ProjectIntelligenceMapper:
             "association_role": value.association_role.value,
             "association_explanation": value.association_explanation[:256],
             "local_project_id": value.local_project_id,
+            "candidate_classification": value.candidate_classification,
             "local_project_name": value.local_project_name,
             "runtime_group": value.runtime_group,
             "components": [cls.component(item) for item in value.components],

@@ -18,12 +18,14 @@ class ProjectSource(str, Enum):
     DISCOVERED = "discovered"
     RUNTIME_GROUP = "runtime_group"
     UNGROUPED = "ungrouped"
+    FILTERED_CANDIDATE = "filtered_candidate"
 
 
 class AssociationRole(str, Enum):
     APPLICATION = "application"
     ASSOCIATED_LOCAL = "associated_local"
     LOCAL_CANDIDATE = "local_candidate"
+    FILTERED_CANDIDATE = "filtered_candidate"
     RUNTIME_ONLY = "runtime_only"
     UNGROUPED = "ungrouped"
 
@@ -32,6 +34,7 @@ class InventoryScope(str, Enum):
     APPLICATIONS = "applications"
     ASSOCIATED = "associated"
     LOCAL = "local"
+    FILTERED = "filtered"
     ALL = "all"
 
 
@@ -95,6 +98,7 @@ class ProjectApplication:
     association_role: AssociationRole = AssociationRole.APPLICATION
     association_explanation: str = ""
     local_project_id: str | None = None
+    candidate_classification: str = "application"
 
 
 @dataclass(frozen=True)
@@ -105,3 +109,4 @@ class ProjectInventory:
     source_errors: tuple[str, ...] = ()
     inventory_scope: InventoryScope = InventoryScope.ALL
     local_candidates: tuple[ProjectApplication, ...] = ()
+    filtered_candidates: tuple[ProjectApplication, ...] = ()
