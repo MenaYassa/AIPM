@@ -10,6 +10,14 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
   const badge = (label, state) => `<span class="badge ${stateClass(state || 'unknown')}">${escapeHtml(label)}</span>`;
   const stateLabel = state => String(state || 'unknown').replaceAll('_', ' ');
 
+  function projectCard(project, local = false) {
+    const health = project.health || {};
+    const freshness = project.freshness || {};
+    const role = project.association_role || (local ? 'local_candidate' : 'application');
+    const explanation = project.association_explanation || (local ? 'Local project discovered without a trustworthy runtime association.' : 'Runtime application observed.');
+    return `<button class="project-card ${local ? 'local-candidate-card' : ''}" type="button" data-project-id="${escapeHtml(project.id)}"><div class="project-card-head"><div><strong>${escapeHtml(project.display_name)}</strong><span>${escapeHtml(role)} · ${escapeHtml(project.confidence)}</span></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="project-card-meta"><span>${project.component_count || 0} components</span><span>${project.runtime?.running || 0} running</span><span>${escapeHtml(stateLabel(freshness.state || freshness.status))}</span></div><p>${escapeHtml(health.summary || explanation)}</p></button>`;
+  }
+
   function renderInventory(data) {
     latest = data;
     const observation = data.observation || {state: 'unknown'};
@@ -17,17 +25,18 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectInventoryState').className = `badge ${stateClass(observation.state || 'unknown')}`;
     $('projectInventoryAge').textContent = observation.age_seconds == null ? (observation.state === 'never_sampled' ? 'Never sampled' : 'Freshness unavailable') : `Sample age ${observation.age_seconds}s`;
     const projects = data.projects || [];
-    $('projectInventoryCount').textContent = `${projects.length} project${projects.length === 1 ? '' : 's'}`;
+    const localCandidates = data.local_candidates || [];
+    $('projectInventoryCount').textContent = `${projects.length} application${projects.length === 1 ? '' : 's'}`;
+    $('localCandidateCount').textContent = `${localCandidates.length} candidate${localCandidates.length === 1 ? '' : 's'}`;
     $('projectInventoryErrors').innerHTML = (data.source_errors || []).map(error => `<span>${escapeHtml(error)}</span>`).join('');
-    $('projectCards').innerHTML = projects.length ? projects.map(project => {
-      const health = project.health || {};
-      const freshness = project.freshness || {};
-      return `<button class="project-card" type="button" data-project-id="${escapeHtml(project.id)}"><div class="project-card-head"><div><strong>${escapeHtml(project.display_name)}</strong><span>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)}</span></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="project-card-meta"><span>${project.component_count || 0} components</span><span>${project.runtime?.running || 0} running</span><span>${escapeHtml(stateLabel(freshness.state || freshness.status))}</span></div><p>${escapeHtml((health.summary || project.warnings?.[0] || 'Evidence is still being collected.'))}</p></button>`;
-    }).join('') : `<div class="empty">${escapeHtml(data.error || ((observation.state === 'unavailable' || observation.state === 'never_sampled') ? 'Project inventory is not available yet.' : 'No projects or runtime groups were discovered.'))}</div>`;
+    $('projectCards').innerHTML = projects.length ? projects.map(project => projectCard(project)).join('') : `<div class="empty">${escapeHtml(data.error || ((observation.state === 'unavailable' || observation.state === 'never_sampled') ? 'Project inventory is not available yet.' : 'No runtime applications were discovered.'))}</div>`;
+    $('localCandidateCards').innerHTML = localCandidates.length ? localCandidates.map(project => projectCard(project, true)).join('') : '<div class="empty">No local candidates in this observation.</div>';
     document.querySelectorAll('[data-project-id]').forEach(button => button.addEventListener('click', () => selectProject(button.dataset.projectId)));
-    if (selectedId && projects.some(project => project.id === selectedId)) selectProject(selectedId);
+    const allProjects = projects.concat(localCandidates);
+    if (selectedId && allProjects.some(project => project.id === selectedId)) selectProject(selectedId);
     else if (!selectedId && projects[0]) selectProject(projects[0].id);
-    else if (!projects.length) clearDetail('Select a project when an observation becomes available.');
+    else if (!selectedId && localCandidates[0]) selectProject(localCandidates[0].id);
+    else if (!allProjects.length) clearDetail('Select a project when an observation becomes available.');
   }
 
   function clearDetail(message) {
@@ -67,7 +76,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
 
   async function load() {
     try {
-      const response = await fetch('/api/projects?limit=200', {cache: 'no-store'});
+      const response = await fetch('/api/projects?scope=applications&limit=200', {cache: 'no-store'});
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       renderInventory(await response.json());
     } catch (error) {

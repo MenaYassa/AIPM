@@ -20,6 +20,21 @@ class ProjectSource(str, Enum):
     UNGROUPED = "ungrouped"
 
 
+class AssociationRole(str, Enum):
+    APPLICATION = "application"
+    ASSOCIATED_LOCAL = "associated_local"
+    LOCAL_CANDIDATE = "local_candidate"
+    RUNTIME_ONLY = "runtime_only"
+    UNGROUPED = "ungrouped"
+
+
+class InventoryScope(str, Enum):
+    APPLICATIONS = "applications"
+    ASSOCIATED = "associated"
+    LOCAL = "local"
+    ALL = "all"
+
+
 class ProjectHealthStatus(str, Enum):
     GREEN = "green"
     YELLOW = "yellow"
@@ -76,6 +91,10 @@ class ProjectApplication:
     freshness: dict[str, Any]
     evidence: tuple[ProjectEvidence, ...]
     warnings: tuple[str, ...] = ()
+    inventory_scope: InventoryScope = InventoryScope.ALL
+    association_role: AssociationRole = AssociationRole.APPLICATION
+    association_explanation: str = ""
+    local_project_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,3 +103,5 @@ class ProjectInventory:
     search_paths: tuple[str, ...]
     freshness: dict[str, Any]
     source_errors: tuple[str, ...] = ()
+    inventory_scope: InventoryScope = InventoryScope.ALL
+    local_candidates: tuple[ProjectApplication, ...] = ()

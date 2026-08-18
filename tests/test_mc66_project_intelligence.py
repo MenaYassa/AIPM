@@ -63,7 +63,7 @@ def service_for(projects: list[Project], details: list[FakeDetail], compose_serv
 
 
 def test_grouping_is_deterministic_and_preserves_runtime_only_and_ungrouped() -> None:
-    projects = [Project(name="ai-platform", path="/srv/projects/ai-platform", capabilities=ProjectCapabilities(has_compose=True))]
+    projects = [Project(name="ai-platform", path="/srv/projects/ai-platform", capabilities=ProjectCapabilities(has_compose=True), compose_files=["/srv/projects/ai-platform/compose.yml"])]
     details = [
         FakeDetail("1" * 12, "ollama", "ai-platform", "ollama", "ollama:latest", "running", "healthy"),
         FakeDetail("2" * 12, "orphan", "unknown-stack", "orphan", "orphan:latest", "running", None),
@@ -79,6 +79,33 @@ def test_grouping_is_deterministic_and_preserves_runtime_only_and_ungrouped() ->
     assert runtime_only.source.value == "runtime_group"
     ungrouped = next(item for item in inventory.projects if item.source.value == "ungrouped")
     assert ungrouped.health.status in {ProjectHealthStatus.UNKNOWN, ProjectHealthStatus.YELLOW, ProjectHealthStatus.RED}
+
+
+def test_runtime_first_scope_separates_local_candidates_without_dropping_them() -> None:
+    project = Project(name="local-only", path="/srv/local-only", capabilities=ProjectCapabilities(has_git=True))
+    details = [FakeDetail("1" * 12, "runtime", "runtime-stack", "runtime", "app:latest", "running", "healthy")]
+    service = service_for([project], details)
+    applications = service.inventory(scope="applications")
+    assert [item.association_role.value for item in applications.projects] == ["runtime_only"]
+    assert [item.display_name for item in applications.local_candidates] == ["local-only"]
+    local = service.inventory(scope="local")
+    assert [item.display_name for item in local.projects] == ["local-only"]
+    assert local.inventory_scope.value == "local"
+
+
+def test_compose_name_identity_is_required_for_exact_association(tmp_path) -> None:
+    compose_file = tmp_path / "compose.yml"
+    compose_file.write_text("name: canonical-platform\nservices:\n  app:\n    image: app:latest\n", encoding="utf-8")
+    project = Project(name="directory-name", path=str(tmp_path), capabilities=ProjectCapabilities(has_compose=True), compose_files=[str(compose_file)])
+    details = [FakeDetail("1" * 12, "app", "canonical-platform", "app", "app:latest", "running", "healthy")]
+    associated = service_for([project], details).inventory(scope="applications").projects[0]
+    assert associated.association_role.value == "associated_local"
+    assert associated.confidence.value == "exact"
+    assert associated.local_project_name == "directory-name"
+
+    mismatch = service_for([project], [FakeDetail("2" * 12, "app", "other-platform", "app", "app:latest", "running", "healthy")]).inventory(scope="applications")
+    assert mismatch.projects[0].association_role.value == "runtime_only"
+    assert mismatch.local_candidates[0].display_name == "directory-name"
 
 
 def test_compose_status_is_the_only_compose_operation_used() -> None:
@@ -105,7 +132,7 @@ def test_compose_status_is_the_only_compose_operation_used() -> None:
 
 
 def test_health_requires_evidence_and_missing_health_checks_are_warning() -> None:
-    projects = [Project(name="platform", path="/srv/platform")]
+    projects = [Project(name="platform", path="/srv/platform", capabilities=ProjectCapabilities(has_compose=True), compose_files=["/srv/platform/compose.yml"])]
     details = [FakeDetail("1" * 12, "service", "platform", "service", "app:latest", "running", None)]
     health = service_for(projects, details).inventory().projects[0].health
     assert health.status is ProjectHealthStatus.YELLOW
@@ -114,7 +141,7 @@ def test_health_requires_evidence_and_missing_health_checks_are_warning() -> Non
 
 
 def test_stopped_or_unhealthy_components_are_red() -> None:
-    projects = [Project(name="platform", path="/srv/platform")]
+    projects = [Project(name="platform", path="/srv/platform", capabilities=ProjectCapabilities(has_compose=True), compose_files=["/srv/platform/compose.yml"])]
     details = [FakeDetail("1" * 12, "service", "platform", "service", "app:latest", "running", "unhealthy")]
     health = service_for(projects, details).inventory().projects[0].health
     assert health.status is ProjectHealthStatus.RED
@@ -127,6 +154,9 @@ def test_project_api_enforces_bounds_and_safe_invalid_identifiers() -> None:
     response = api.projects(limit=999999, status="invalid")
     assert response["available"] is False
     assert response["error"] == "Project status filter is invalid"
+    invalid_scope = api.projects(scope="filesystem-everywhere")
+    assert invalid_scope["available"] is False
+    assert invalid_scope["error"] == "Project inventory scope is invalid"
     invalid = api.project("../../etc/passwd")
     assert invalid["available"] is False
     assert "etc/passwd" not in str(invalid)
@@ -148,7 +178,7 @@ def test_project_api_routes_are_get_only_and_safe() -> None:
 
     app = create_app(project_api=FakeApi())
     client = TestClient(app)
-    assert client.get("/api/projects?limit=200").status_code == 200
+    assert client.get("/api/projects?scope=applications&limit=200").status_code == 200
     assert client.get("/api/projects/000000000000000000000000").status_code == 200
     assert client.get("/api/projects/000000000000000000000000/containers").status_code == 200
     assert client.get("/api/projects/000000000000000000000000/health").status_code == 200
@@ -163,7 +193,7 @@ def test_project_frontend_uses_static_module_and_inventory_contract() -> None:
     assert 'data-view="projects"' in html
     for marker in ("projectCards", "projectDetail", "projectInventoryState", "scheduler.register('projects'"):
         assert marker in html
-    for marker in ("/api/projects?limit=200", "/api/projects/", "/containers", "/health", "createProjectController"):
+    for marker in ("/api/projects?scope=applications&limit=200", "/api/projects/", "/containers", "/health", "createProjectController", "localCandidateCards", "association_role"):
         assert marker in module
     assert 'method="post"' not in module.lower()
     assert "fetch(" in module

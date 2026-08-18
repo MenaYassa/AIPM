@@ -76,8 +76,8 @@ def create_app(
         return docker_detail_api.networks(limit=limit)
 
     @app.get("/api/projects")
-    def projects(limit: int = 200, search: str | None = None, status: str | None = None):
-        return project_detail_api.projects(limit=limit, search=search, status=status)
+    def projects(limit: int = 200, search: str | None = None, status: str | None = None, scope: str = "all"):
+        return project_detail_api.projects(limit=limit, search=search, status=status, scope=scope)
 
     @app.get("/api/projects/{project_id}")
     def project_detail(project_id: str):

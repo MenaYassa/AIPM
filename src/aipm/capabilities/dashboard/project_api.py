@@ -8,6 +8,7 @@ from typing import Any, Callable
 from aipm.capabilities.dashboard.api import DashboardApi
 from aipm.mappers.project_intelligence import ProjectIntelligenceMapper
 from aipm.models.mission_control import Observation, ObservationError
+from aipm.models.project_intelligence import InventoryScope
 from aipm.services.compose.service import ComposeService
 from aipm.services.docker.observation import DockerObservationService
 from aipm.services.project.intelligence import ProjectIntelligenceService
@@ -22,6 +23,7 @@ class DashboardProjectApi:
     MAX_COMPONENTS = 200
     MAX_SEARCH = 128
     MAX_STATUS = 16
+    MAX_SCOPE = 16
 
     def __init__(self, intelligence: ProjectIntelligenceService, *, clock: Callable[[], datetime] | None = None) -> None:
         self.intelligence = intelligence
@@ -41,10 +43,13 @@ class DashboardProjectApi:
         compose_service = ComposeService() if docker_service is not None else None
         return cls(ProjectIntelligenceService(project_service, docker_observation, docker_telemetry, compose_service=compose_service))
 
-    def projects(self, *, limit: int = MAX_PROJECTS, search: str | None = None, status: str | None = None) -> dict[str, Any]:
+    def projects(self, *, limit: int = MAX_PROJECTS, search: str | None = None, status: str | None = None, scope: str = InventoryScope.ALL.value) -> dict[str, Any]:
         if not self._valid_status(status):
             return self._error("PROJECT_STATUS_INVALID", "Project status filter is invalid")
-        inventory = self.intelligence.inventory(limit=self._limit(limit, self.MAX_PROJECTS), search=self._search(search), status=status)
+        scope_value = self._scope(scope)
+        if scope_value is None:
+            return self._error("PROJECT_SCOPE_INVALID", "Project inventory scope is invalid")
+        inventory = self.intelligence.inventory(limit=self._limit(limit, self.MAX_PROJECTS), search=self._search(search), status=status, scope=scope_value)
         return ProjectIntelligenceMapper.inventory(inventory)
 
     def project(self, project_id: str) -> dict[str, Any]:
@@ -116,6 +121,14 @@ class DashboardProjectApi:
     @staticmethod
     def _valid_status(value: str | None) -> bool:
         return value is None or value in {"green", "yellow", "red", "unknown"}
+
+    @staticmethod
+    def _scope(value: str | None) -> InventoryScope | None:
+        value = str(value or "").strip().lower()[:16]
+        try:
+            return InventoryScope(value)
+        except ValueError:
+            return None
 
 
 class _UnavailableDockerTelemetry:
