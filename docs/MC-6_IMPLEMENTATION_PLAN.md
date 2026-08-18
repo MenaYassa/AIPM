@@ -1,0 +1,350 @@
+# AIPM Mission Control MC-6 Implementation Plan
+
+## Scope and delivery rule
+
+This plan is for future implementation. The current task creates design documents only. No source code, production service, runtime state, live SQLite database, Docker, Cloudflare, credentials, notification provider, telemetry, MC-3, or Gate 3 state is changed by this plan.
+
+The implementation must proceed as small, reviewable milestones. Each milestone has a narrow change set, focused tests, a full regression run, a safety review, and an explicit stop point. No milestone may quietly introduce writes into the read-only dashboard.
+
+## Milestone map
+
+| Milestone | Classification | Outcome | Write/action posture |
+|---|---|---|---|
+| MC-6.1 | NEW/EXTEND | Shared Mission Control contracts, page registry, query bounds, state semantics, and client scheduler design. | Read-only only. |
+| MC-6.2 | EXTEND | Incremental static frontend shell and navigation extraction from current `index.html`. | Read-only only. |
+| MC-6.3 | EXTEND | Dashboard, Server, History, Incidents, and Notifications pages using existing APIs. | Read-only only. |
+| MC-6.4 | EXTEND/NEW | Server detail and capacity façade/API. | Read-only only. |
+| MC-6.5 | EXTEND/NEW | Docker/container/project detail façades and APIs. | Read-only only. |
+| MC-6.6 | EXTEND | Project detail, Git posture, health, and runtime associations. | Read-only only. |
+| MC-6.7 | NEW | Allow-listed Systemd observation façade/API and page. | Read-only only; no unit mutation. |
+| MC-6.8 | NEW | Bounded, redacted Logs façade/API and page. | Read-only only; no shell/arbitrary paths. |
+| MC-6.9 | EXTEND | Incident/history evidence, comparison queries, cursor pagination, and cross-links. | Read-only only. |
+| MC-6.10 | EXTEND | Settings posture and expanded notification safety/audit views. | Read-only only; notifications remain disabled. |
+| MC-6.11 | NEW | Shared Typer/Rich TUI consuming the same façades and contracts. | Read-only only. |
+| MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Separate authorization required. |
+| MC-6.13 | FUTURE | AI Agent advisor and action planner integration. | Separate product and safety gate required. |
+
+## MC-6.1 — contracts and UI foundation
+
+### Objectives
+
+MC-6.1 establishes the minimum shared vocabulary before adding pages:
+
+- `ObservationState` and freshness semantics shared by Web UI and TUI.
+- Bounded query objects for ranges, limits, cursors, and filters.
+- Safe error and availability envelopes.
+- Page and resource registry for client scheduling.
+- Capability protocol interfaces for future TUI use.
+- Response redaction policy and secret-scan fixtures.
+- Snapshot/contract fixtures derived from current APIs.
+
+### Proposed implementation areas
+
+These are proposed paths, not files to create in this design-only task:
+
+```text
+src/aipm/models/mission_control.py
+src/aipm/capabilities/dashboard/contracts.py
+src/aipm/capabilities/dashboard/query_bounds.py
+src/aipm/capabilities/dashboard/safety.py
+src/aipm/dashboard/static/mission-control-state.js
+src/aipm/dashboard/static/mission-control-scheduler.js
+```
+
+The implementation must first prove that these abstractions reduce duplication. If they do not, retain existing typed models and add only the smallest needed helpers.
+
+### Tests and gate
+
+- Current MC-5 API contract tests remain green.
+- State classification tests cover fresh, stale, unavailable, never sampled, and unknown.
+- Query bounds reject excessive ranges and limits.
+- Secret scanner rejects credential-like keys, values, URLs, destinations, and provider payloads.
+- Scheduler tests prove one timer per resource, no overlap, and visibility behavior.
+- No application source is deployed until local tests and scope review pass.
+
+## MC-6.2 — frontend shell migration
+
+### Objectives
+
+Extract the current single-file frontend without changing its visible behavior or route contracts. Introduce navigation and component boundaries incrementally.
+
+### Sequence
+
+1. Capture current HTML/API fixtures and browser acceptance baselines.
+2. Extract CSS variables, layout primitives, escape/redaction helpers, and render-state helpers.
+3. Extract the polling scheduler and resource loaders.
+4. Add section registry and navigation anchors.
+5. Preserve all current MC-5 sections and empty/error states.
+6. Add direct section navigation only after responsive tests pass.
+
+### Gate
+
+No framework migration is allowed in this milestone. A React/Vite evaluation remains a later decision after measured UI complexity.
+
+## MC-6.3 — existing-domain cockpit pages
+
+### Objectives
+
+Turn existing MC-5 sections into navigable Dashboard, History, Incidents, and Notifications pages while reusing current APIs unchanged.
+
+### Required behavior
+
+- Overview and service pulse remain the landing summary.
+- History uses existing routes and preserves sparse/freshness semantics.
+- Incident Room contains no acknowledgement/action controls.
+- Notification Safety exposes safe metrics and metadata only.
+- No new database access path is introduced.
+
+### Gate
+
+Run the MC-5 focused tests, full suite, browser acceptance at desktop/tablet/mobile sizes, secret scans, GET-only route scans, and temporary SQLite fingerprint tests.
+
+## MC-6.4 — Server capability
+
+### Objectives
+
+Add the smallest typed server read façade that complements existing host telemetry rather than duplicating it.
+
+### Data and contract
+
+Use existing `SystemService`, host telemetry models, psutil-backed measurements, and configuration/version sources. Add only missing concepts: host identity, CPU topology, filesystem summaries, and safe capacity state.
+
+### Safety gate
+
+The façade must have explicit allow-lists for filesystem roots and fields. It must never expose arbitrary process command lines, environment values, or private path inventories. All provider calls must be bounded and failure-isolated.
+
+## MC-6.5 — Docker and container detail
+
+### Objectives
+
+Expose project-grouped container detail, inventory, and bounded resource history using existing Docker providers and models.
+
+### Required boundaries
+
+- No direct SDK usage from routes or frontend.
+- No start, stop, restart, remove, prune, exec, or Compose mutation.
+- No raw Docker inspect payloads.
+- Bounded image, volume, network, and log metadata.
+- Explicit Docker-unavailable state.
+
+### Gate
+
+Fake-provider tests must prove that every read route calls only observation methods. Static checks must reject lifecycle method names in the read-only capability package unless they are isolated in a future action package.
+
+## MC-6.6 — Projects
+
+### Objectives
+
+Add project detail and navigation from the existing project inventory, Git snapshots, health analyzers, Compose status, and telemetry.
+
+### Required boundaries
+
+The read façade may inspect local branch state, dirty/conflict state, known remote-tracking state, Compose status, and health findings. It must not fetch, pull, checkout, stash, reset, clean, update, or run arbitrary project scripts.
+
+## MC-6.7 — Systemd observation
+
+### Objectives
+
+Create a structured, read-only systemd observation adapter and page.
+
+### Implementation sequence
+
+1. Define an allow-listed unit registry.
+2. Define a provider protocol for structured unit state.
+3. Implement a local adapter with bounded command arguments and safe parsing.
+4. Add capability façade and GET routes.
+5. Add UI and TUI renderers.
+6. Add static mutation guards and fake-manager tests.
+
+### Explicit non-goals
+
+No `enable`, `disable`, `start`, `stop`, `restart`, `reload`, `reset-failed`, unit-file installation, daemon reload, or arbitrary unit name passed from the browser is allowed.
+
+## MC-6.8 — Logs
+
+### Objectives
+
+Provide bounded, redacted, read-only logs for operational diagnosis.
+
+### Implementation sequence
+
+1. Define symbolic source registry.
+2. Define maximum line, byte, time, and cursor limits.
+3. Implement journald/file adapters behind a protocol.
+4. Add redaction before mapper serialization.
+5. Add safe route and UI.
+6. Link logs to existing incident/event identifiers where possible.
+
+### Gate
+
+The log feature must fail closed on unknown source IDs, paths, units, malformed cursors, and excessive limits. Tests must prove that secret-like values, destinations, authorization material, and raw environment output never reach API or browser fixtures.
+
+## MC-6.9 — Incident and history expansion
+
+### Objectives
+
+Improve investigation without changing MC-3 event keys, incident correlation, schemas, or notification projection.
+
+### Candidate extensions
+
+- Cursor-based event/incident pagination.
+- Evidence and timeline detail projections.
+- History comparison queries.
+- Cross-links between resource, event, incident, and history views.
+- Retention-aware UI explanations.
+
+### Gate
+
+Use the existing read-only repositories and active-WAL regression fixture. No new event or history database is permitted.
+
+## MC-6.10 — Settings and notification posture
+
+### Objectives
+
+Make effective operational posture visible while notifications remain disabled.
+
+### Safe projection
+
+Expose only booleans, counts, bounded numeric values, safe enum names, version, commit, and deployment posture. Never expose raw YAML, secret references, environment variable names, destination values, or provider configuration.
+
+### Gate
+
+Test with enabled, disabled, empty, invalid, and partially configured temporary configurations. The dashboard must fail closed when configuration cannot be safely interpreted. No notification worker is started and no provider is instantiated.
+
+## MC-6.11 — TUI
+
+### Objectives
+
+Add an SSH/TUI surface after shared capability contracts stabilize.
+
+### Proposed interface
+
+```text
+aipm mission-control
+  overview
+  server
+  docker
+  projects
+  systemd
+  logs
+  incidents
+  history
+  notifications
+  settings
+```
+
+The exact command names are subject to CLI review. The TUI should use Typer for routing and Rich for rendering, matching existing repository dependencies. It should consume shared façades directly, not scrape the HTTP dashboard.
+
+### Gate
+
+TUI tests must run without a live Docker daemon, systemd mutation, provider network, credentials, or live SQLite. Terminal width, Unicode, truncation, error states, and secret scanning require coverage.
+
+## MC-6.12 — future action control plane
+
+This milestone is not part of the first MC-6 implementation. It is listed to prevent accidental coupling between read-only observation and future operations.
+
+A future action architecture would require separate packages and permissions:
+
+```text
+Intent → Plan → Risk classification → Human approval → Action executor
+       → Idempotency/lease → Audit → Verification → Rollback/result
+```
+
+Actions must not be added to existing read façades. The action executor needs distinct service accounts/permissions, explicit allow-lists, per-action timeouts, concurrency control, audit records, and tested rollback. Public access and authentication are prerequisites.
+
+## MC-6.13 — future AI Agent integration
+
+The AI Agent is not a generic “run shell” feature. A future agent should initially be an evidence-based advisor that reads the same safe projections, proposes a plan, cites observed evidence and freshness, identifies uncertainty, and waits for human approval. Execution, if ever approved, occurs through the MC-6.12 control plane rather than through browser-generated commands.
+
+## Migration and schema strategy
+
+MC-6 must avoid a second telemetry/event system. Existing telemetry, events, incidents, notifications, and history schemas remain authoritative.
+
+Schema changes are permitted only when a required additive read projection cannot be implemented from existing tables. Any schema extension must:
+
+1. Be backward-compatible with telemetry and MC-3/MC-4 writers.
+2. Have a versioned migration owned by the existing repository.
+3. Preserve read-only dashboard startup behavior.
+4. Prove active-WAL visibility and unchanged fingerprints under read-only access.
+5. Keep writer runtime behavior unchanged.
+6. Include rollback/backup and retention reasoning.
+
+The first MC-6 release should avoid schema changes entirely by composing existing projections.
+
+## Deployment sequence
+
+### Local design and implementation
+
+Use temporary configuration, seeded SQLite, fake providers, and local loopback only. Run focused tests, full suite, compileall, diff checks, browser acceptance, secret scans, and read-only fingerprint checks.
+
+### Target staging
+
+Use a new, SHA-verified operator staging procedure only after design approval. Stage against a temporary SQLite snapshot or fixture, keep the dashboard loopback-only, verify filesystem write denial, confirm telemetry/MC-3/notification invariants, and clean up automatically.
+
+### Production deployment
+
+Production deployment is a separate approval gate. It should create the persistent user-level dashboard unit only after a read-only preflight verifies commit, configuration, service state, executable, port, filesystem protection, and rollback readiness. It must not change public ingress or notifications.
+
+### Public access
+
+Public or non-loopback access is a separate future project requiring authenticated ingress, authorization, threat modeling, and explicit Cloudflare approval. It is not a consequence of MC-6 UI implementation.
+
+## Rollback strategy
+
+Each milestone has a repository rollback through a reviewed commit revert or deployment rollback. Runtime rollback must be narrow:
+
+1. Stop/disable only the MC-6 component introduced by the milestone.
+2. Remove only its persistent unit or configuration fragment if it was introduced.
+3. Reload the user manager only when explicitly approved.
+4. Restore the previous static asset or application commit.
+5. Confirm telemetry, MC-3, notifications, Docker, Cloudflare, credentials, and live SQLite are unchanged.
+6. Repeat dashboard read-only and port-closure checks.
+
+No rollback may delete the live telemetry database or checkpoint WAL as part of ordinary UI failure handling.
+
+## Implementation governance
+
+Before each milestone, the operator must approve the exact scope. The approval should identify:
+
+- Source and test files allowed to change.
+- Whether a schema migration is allowed.
+- Whether any temporary process may start.
+- Whether target-VPS staging is allowed.
+- Whether systemd unit creation/reload/start is allowed.
+- Whether any non-loopback access is allowed.
+- Whether credentials, providers, notifications, Docker, Cloudflare, or live SQLite may be touched.
+
+The default answer for all runtime and write operations is **not authorized**.
+
+## Definition of done for the first MC-6 release
+
+The first read-only MC-6 release is complete only when:
+
+- Dashboard navigation covers the approved domains.
+- Existing MC-5 routes and UI behavior remain compatible.
+- Server, Docker, project, Systemd, Logs, Incident, History, Notification, and Settings observations have explicit contracts or are clearly marked unavailable where not implemented.
+- No new write/action route is exposed.
+- Web UI and TUI share backend/core contracts where both exist.
+- Freshness and unavailable states are visible and semantically correct.
+- Secret and provider safety scans pass.
+- Active-WAL database and sidecar fingerprints remain unchanged during dashboard/TUI reads.
+- Full regression, browser, TUI, and deployment staging tests pass.
+- Loopback-only deployment and rollback are documented and verified.
+- Public ingress, credentials, notification activation, and remediation remain outside scope.
+
+## References
+
+[1]: MC-6_ARCHITECTURE.md "MC-6 architecture decisions"
+[2]: MC-6_UI_SPECIFICATION.md "MC-6 UI and navigation specification"
+[3]: MC-6_API_GAP_ANALYSIS.md "MC-6 API gap analysis"
+[4]: MISSION_CONTROL.md "Existing Mission Control implementation history"
+[5]: ../README.md "AIPM CLI and architecture"
+[6]: MC-2.1_TELEMETRY_PERFORMANCE.md "Telemetry scheduling and freshness"
+[7]: MC-4.5_PRODUCTION_RUNBOOK.md "Notification safety and production gates"
+
+## Classification summary
+
+- **EXISTS:** current read-only MC-5 dashboard and supporting telemetry/event/incident/notification capabilities.
+- **EXTEND:** frontend shell, server/project/Docker detail, history, incidents, settings, notification posture, tests, and deployment documentation.
+- **NEW:** systemd observation, bounded logs, shared scheduler, dedicated TUI, and supporting adapters.
+- **FUTURE:** writes/actions, authentication/public ingress, SSE/WebSockets, AI Agent execution, and notification activation.

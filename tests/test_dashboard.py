@@ -97,5 +97,10 @@ def test_dashboard_serves_read_only_mc5_interface():
     assert "Notification Safety" in response.text
     assert "/api/services" in response.text
     assert "/api/events?range=24h&limit=50" in response.text
-    assert "setInterval(loadServices,15000)" in response.text
+    assert "scheduler.register('overview',()=>load(true),{intervalMs:15000})" in response.text
+    assert "scheduler.register('services',loadServices,{intervalMs:15000})" in response.text
+    assert "scheduler.register('events',loadEvents,{intervalMs:15000})" in response.text
+    assert "scheduler.register('history',loadHistory,{intervalMs:60000})" in response.text
+    assert "scheduler.register('incidents',loadIncidents,{intervalMs:30000})" in response.text
+    assert "scheduler.register('notifications',loadNotifications,{intervalMs:30000})" in response.text
     assert "acknowledge_incident" not in response.text
