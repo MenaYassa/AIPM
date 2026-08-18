@@ -163,8 +163,8 @@ def test_frontend_uses_foundation_modules_without_changing_mc5_cadence_or_routes
     state = (static_dir / "mission-control-state.js").read_text(encoding="utf-8")
     scheduler = (static_dir / "mission-control-scheduler.js").read_text(encoding="utf-8")
 
-    assert "./mission-control-state.js" in html
-    assert "./mission-control-scheduler.js" in html
+    assert "/static/mission-control-state.js" in html
+    assert "/static/mission-control-scheduler.js" in html
     assert "scheduler.register('overview',()=>load(true),{intervalMs:15000})" in html
     assert "scheduler.register('services',loadServices,{intervalMs:15000})" in html
     assert "scheduler.register('events',loadEvents,{intervalMs:15000})" in html

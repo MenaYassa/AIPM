@@ -74,13 +74,13 @@ test('router falls back to Dashboard and updates selected view state', () => {
   assert.equal(header.textContent, 'Dashboard');
   assert.deepEqual(seen, ['dashboard']);
 
-  windowRef.location.hash = '#/incidents';
+  windowRef.location.hash = '#/server';
   windowRef.emit('hashchange');
-  assert.equal(links[6].classList.contains('active'), true);
+  assert.equal(links[1].classList.contains('active'), true);
   assert.equal(links[0].classList.contains('active'), false);
-  assert.equal(views[6].hidden, false);
+  assert.equal(views[1].hidden, false);
   assert.equal(views[0].hidden, true);
-  assert.equal(header.textContent, 'Incidents');
+  assert.equal(header.textContent, 'Server');
   router.navigate('history');
   assert.equal(windowRef.location.hash, '#/history');
   router.destroy();

@@ -106,9 +106,9 @@
     </div>
   </div>
 <script type="module">
-  import { stateClass as stateClassFromContract } from './mission-control-state.js';
-  import { MissionControlScheduler } from './mission-control-scheduler.js';
-  import { bindSidebar, createShellRouter } from './mission-control-shell.js';
+  import { stateClass as stateClassFromContract } from '/static/mission-control-state.js';
+  import { MissionControlScheduler } from '/static/mission-control-scheduler.js';
+  import { bindSidebar, createShellRouter } from '/static/mission-control-shell.js';
 
   const $=id=>document.getElementById(id);
   const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));

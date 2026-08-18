@@ -79,9 +79,9 @@ def test_dashboard_content_and_existing_api_routes_remain_present() -> None:
 
 def test_shell_uses_mc61_state_scheduler_and_preserves_cadence() -> None:
     text = HTML.read_text(encoding="utf-8")
-    assert "./mission-control-state.js" in text
-    assert "./mission-control-scheduler.js" in text
-    assert "./mission-control-shell.js" in text
+    assert "/static/mission-control-state.js" in text
+    assert "/static/mission-control-scheduler.js" in text
+    assert "/static/mission-control-shell.js" in text
     assert "scheduler.register('overview',()=>load(true),{intervalMs:15000})" in text
     assert "scheduler.register('services',loadServices,{intervalMs:15000})" in text
     assert "scheduler.register('events',loadEvents,{intervalMs:15000})" in text
