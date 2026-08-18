@@ -47,7 +47,10 @@ def test_only_dashboard_is_visible_by_default_and_placeholders_have_no_fake_metr
     assert 'data-view="notifications" hidden' in text
     assert 'data-view="settings" hidden' in text
     assert 'data-view="ai-agent" hidden' in text
-    assert text.count("Coming in MC-6.x") >= 8
+    assert text.count("Coming in MC-6.x") >= 7
+    assert "Applications, not just containers." in text
+    assert "projectCards" in text
+    assert "projectDetail" in text
     assert "Server & Host Intelligence" in text
     assert "Container operations" in text
     assert "read-only detail" in text
@@ -83,12 +86,14 @@ def test_shell_uses_mc61_state_scheduler_and_preserves_cadence() -> None:
     assert "/static/mission-control-state.js" in text
     assert "/static/mission-control-scheduler.js" in text
     assert "/static/mission-control-shell.js" in text
+    assert "/static/mission-control-projects.js" in text
     assert "scheduler.register('overview',()=>load(true),{intervalMs:15000})" in text
     assert "scheduler.register('services',loadServices,{intervalMs:15000})" in text
     assert "scheduler.register('events',loadEvents,{intervalMs:15000})" in text
     assert "scheduler.register('history',loadHistory,{intervalMs:60000})" in text
     assert "scheduler.register('incidents',loadIncidents,{intervalMs:30000})" in text
     assert "scheduler.register('notifications',loadNotifications,{intervalMs:30000})" in text
+    assert "scheduler.register('projects',projectController.load,{intervalMs:60000})" in text
     assert "setInterval(" not in text
     scheduler = (STATIC_DIR / "mission-control-scheduler.js").read_text(encoding="utf-8")
     assert "visibilitychange" in scheduler

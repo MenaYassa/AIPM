@@ -12,6 +12,7 @@ from aipm.capabilities.dashboard.notifications_api import DashboardNotifications
 from aipm.capabilities.dashboard.service_health_api import DashboardServiceHealthApi
 from aipm.capabilities.dashboard.server_api import DashboardServerApi
 from aipm.capabilities.dashboard.docker_api import DashboardDockerApi
+from aipm.capabilities.dashboard.project_api import DashboardProjectApi
 from aipm.core.app import Application
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -25,6 +26,7 @@ def create_app(
     service_health_api: DashboardServiceHealthApi | None = None,
     server_api: DashboardServerApi | None = None,
     docker_api: DashboardDockerApi | None = None,
+    project_api: DashboardProjectApi | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
@@ -34,6 +36,7 @@ def create_app(
     health_api = service_health_api or DashboardServiceHealthApi.from_application(app_context, dashboard_api=api, incidents_api=event_api)
     host_api = server_api or DashboardServerApi.from_application(app_context, dashboard_api=api, incidents_api=event_api, service_health_api=health_api)
     docker_detail_api = docker_api or DashboardDockerApi.from_application(app_context, dashboard_api=api)
+    project_detail_api = project_api or DashboardProjectApi.from_application(app_context, dashboard_api=api)
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -71,6 +74,22 @@ def create_app(
     @app.get("/api/docker/networks")
     def docker_networks(limit: int = 200):
         return docker_detail_api.networks(limit=limit)
+
+    @app.get("/api/projects")
+    def projects(limit: int = 200, search: str | None = None, status: str | None = None):
+        return project_detail_api.projects(limit=limit, search=search, status=status)
+
+    @app.get("/api/projects/{project_id}")
+    def project_detail(project_id: str):
+        return project_detail_api.project(project_id)
+
+    @app.get("/api/projects/{project_id}/containers")
+    def project_containers(project_id: str):
+        return project_detail_api.containers(project_id)
+
+    @app.get("/api/projects/{project_id}/health")
+    def project_health(project_id: str):
+        return project_detail_api.health(project_id)
 
     @app.get("/api/history/host")
     def history_host(range_name: str = Query("24h", alias="range"), limit: int = 500):

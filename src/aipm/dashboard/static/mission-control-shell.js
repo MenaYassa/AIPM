@@ -2,7 +2,7 @@ export const NAV_ITEMS = Object.freeze([
   ['dashboard', 'Dashboard', 'Overview and live posture'],
   ['server', 'Server', 'Host capacity and identity'],
   ['docker', 'Docker', 'Containers and resources'],
-  ['projects', 'Projects', 'Git and Compose inventory'],
+  ['projects', 'Projects', 'Project and application inventory'],
   ['systemd', 'Systemd', 'Service observations'],
   ['logs', 'Logs', 'Bounded operational logs'],
   ['incidents', 'Incidents', 'MC-3 Incident Room'],

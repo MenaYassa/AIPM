@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+
+from aipm.capabilities.dashboard.project_api import DashboardProjectApi
+from aipm.dashboard.server import create_app
+from aipm.models.project import Project, ProjectCapabilities
+from aipm.models.project_intelligence import ProjectHealthStatus
+from aipm.services.project.intelligence import ProjectIntelligenceService
+
+
+ROOT = Path(__file__).parents[1]
+STATIC = ROOT / "src" / "aipm" / "dashboard" / "static"
+
+
+@dataclass
+class FakeDetail:
+    id: str
+    name: str
+    project_key: str | None
+    service_name: str | None
+    image: str
+    state: str
+    health: str | None
+    restart_count: int = 0
+    resources: object | None = None
+    ports: tuple[str, ...] = ()
+    networks: tuple[str, ...] = ()
+    mount_kinds: tuple[str, ...] = ()
+    started_at: str | None = None
+
+
+class FakeProjectService:
+    def __init__(self, projects: list[Project]) -> None:
+        self.projects = projects
+        self.app = SimpleNamespace(config=SimpleNamespace(discovery=SimpleNamespace(search_paths=["/srv/projects"])))
+
+    def discover(self):
+        return self.projects
+
+
+class FakeTelemetry:
+    def __init__(self, details: list[FakeDetail]) -> None:
+        self.details = details
+
+    def fast_snapshot(self, *, now):
+        items = [SimpleNamespace(container=item, resources=None) for item in self.details]
+        return SimpleNamespace(containers=items, state_sampled_at=now)
+
+
+class FakeObservation:
+    def containers(self):
+        return []
+
+
+def service_for(projects: list[Project], details: list[FakeDetail], compose_service=None) -> ProjectIntelligenceService:
+    return ProjectIntelligenceService(FakeProjectService(projects), FakeObservation(), FakeTelemetry(details), compose_service=compose_service)
+
+
+def test_grouping_is_deterministic_and_preserves_runtime_only_and_ungrouped() -> None:
+    projects = [Project(name="ai-platform", path="/srv/projects/ai-platform", capabilities=ProjectCapabilities(has_compose=True))]
+    details = [
+        FakeDetail("1" * 12, "ollama", "ai-platform", "ollama", "ollama:latest", "running", "healthy"),
+        FakeDetail("2" * 12, "orphan", "unknown-stack", "orphan", "orphan:latest", "running", None),
+        FakeDetail("3" * 12, "unlabeled", None, None, "busybox:latest", "exited", None),
+    ]
+    inventory = service_for(projects, details).inventory()
+    names = [item.display_name for item in inventory.projects]
+    assert names == sorted(names, key=str.lower)
+    matched = next(item for item in inventory.projects if item.display_name == "ai-platform")
+    assert matched.confidence.value == "exact"
+    assert len(matched.components) == 1
+    runtime_only = next(item for item in inventory.projects if item.display_name == "unknown-stack")
+    assert runtime_only.source.value == "runtime_group"
+    ungrouped = next(item for item in inventory.projects if item.source.value == "ungrouped")
+    assert ungrouped.health.status in {ProjectHealthStatus.UNKNOWN, ProjectHealthStatus.YELLOW, ProjectHealthStatus.RED}
+
+
+def test_compose_status_is_the_only_compose_operation_used() -> None:
+    class ReadOnlyCompose:
+        def __init__(self):
+            self.calls = 0
+
+        def status(self, project):
+            self.calls += 1
+            return SimpleNamespace(running=1, stopped=0, restarting=0, unhealthy=0)
+
+        def up(self, *args, **kwargs):
+            raise AssertionError("Compose mutation must never be reached")
+
+        def down(self, *args, **kwargs):
+            raise AssertionError("Compose mutation must never be reached")
+
+    compose = ReadOnlyCompose()
+    project = Project(name="platform", path="/srv/platform", capabilities=ProjectCapabilities(has_compose=True), compose_files=["/srv/platform/compose.yml"])
+    inventory = service_for([project], [FakeDetail("1" * 12, "service", "platform", "service", "app:latest", "running", "healthy")], compose).inventory()
+    assert compose.calls == 1
+    assert inventory.projects[0].compose["status"] == "observed"
+    assert inventory.projects[0].compose["running"] == 1
+
+
+def test_health_requires_evidence_and_missing_health_checks_are_warning() -> None:
+    projects = [Project(name="platform", path="/srv/platform")]
+    details = [FakeDetail("1" * 12, "service", "platform", "service", "app:latest", "running", None)]
+    health = service_for(projects, details).inventory().projects[0].health
+    assert health.status is ProjectHealthStatus.YELLOW
+    assert health.counts["missing_health_check"] == 1
+    assert any(item.code == "MISSING_HEALTH_CHECK" for item in health.evidence)
+
+
+def test_stopped_or_unhealthy_components_are_red() -> None:
+    projects = [Project(name="platform", path="/srv/platform")]
+    details = [FakeDetail("1" * 12, "service", "platform", "service", "app:latest", "running", "unhealthy")]
+    health = service_for(projects, details).inventory().projects[0].health
+    assert health.status is ProjectHealthStatus.RED
+
+
+def test_project_api_enforces_bounds_and_safe_invalid_identifiers() -> None:
+    projects = [Project(name="platform", path="/srv/platform")]
+    intelligence = service_for(projects, []).inventory
+    api = DashboardProjectApi(service_for(projects, []))
+    response = api.projects(limit=999999, status="invalid")
+    assert response["available"] is False
+    assert response["error"] == "Project status filter is invalid"
+    invalid = api.project("../../etc/passwd")
+    assert invalid["available"] is False
+    assert "etc/passwd" not in str(invalid)
+
+
+def test_project_api_routes_are_get_only_and_safe() -> None:
+    class FakeApi:
+        def projects(self, **kwargs):
+            return {"available": True, "status": "ok", "projects": [], "observation": {"state": "fresh"}}
+
+        def project(self, project_id):
+            return {"available": False, "status": "error", "error": "Project is unavailable"}
+
+        def containers(self, project_id):
+            return {"available": False, "status": "error", "error": "Project is unavailable", "containers": []}
+
+        def health(self, project_id):
+            return {"available": False, "status": "error", "error": "Project is unavailable"}
+
+    app = create_app(project_api=FakeApi())
+    client = TestClient(app)
+    assert client.get("/api/projects?limit=200").status_code == 200
+    assert client.get("/api/projects/000000000000000000000000").status_code == 200
+    assert client.get("/api/projects/000000000000000000000000/containers").status_code == 200
+    assert client.get("/api/projects/000000000000000000000000/health").status_code == 200
+    assert client.post("/api/projects").status_code in {405, 404}
+    assert client.get("/api/projects/000000000000000000000000").json()["error"] == "Project is unavailable"
+
+
+def test_project_frontend_uses_static_module_and_inventory_contract() -> None:
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    module = (STATIC / "mission-control-projects.js").read_text(encoding="utf-8")
+    assert '/static/mission-control-projects.js' in html
+    assert 'data-view="projects"' in html
+    for marker in ("projectCards", "projectDetail", "projectInventoryState", "scheduler.register('projects'"):
+        assert marker in html
+    for marker in ("/api/projects?limit=200", "/api/projects/", "/containers", "/health", "createProjectController"):
+        assert marker in module
+    assert 'method="post"' not in module.lower()
+    assert "fetch(" in module
+    assert "docker start" not in module.lower()
+    assert "git fetch" not in module.lower()
+
+
+def test_project_source_does_not_expose_raw_provider_or_mutation_surface() -> None:
+    source = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "src/aipm/services/project/intelligence.py",
+            "src/aipm/capabilities/dashboard/project_api.py",
+            "src/aipm/mappers/project_intelligence.py",
+        )
+    ).lower()
+    assert "subprocess" not in source
+    assert "docker start" not in source
+    assert "docker stop" not in source
+    assert "fetch()" not in source
+    assert "pull()" not in source
+    assert "os.environ" not in source
+    assert "traceback" not in source
