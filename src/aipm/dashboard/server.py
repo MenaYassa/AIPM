@@ -13,6 +13,7 @@ from aipm.capabilities.dashboard.service_health_api import DashboardServiceHealt
 from aipm.capabilities.dashboard.server_api import DashboardServerApi
 from aipm.capabilities.dashboard.docker_api import DashboardDockerApi
 from aipm.capabilities.dashboard.project_api import DashboardProjectApi
+from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
 from aipm.core.app import Application
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -27,6 +28,7 @@ def create_app(
     server_api: DashboardServerApi | None = None,
     docker_api: DashboardDockerApi | None = None,
     project_api: DashboardProjectApi | None = None,
+    systemd_api: DashboardSystemdApi | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
@@ -37,6 +39,7 @@ def create_app(
     host_api = server_api or DashboardServerApi.from_application(app_context, dashboard_api=api, incidents_api=event_api, service_health_api=health_api)
     docker_detail_api = docker_api or DashboardDockerApi.from_application(app_context, dashboard_api=api)
     project_detail_api = project_api or DashboardProjectApi.from_application(app_context, dashboard_api=api)
+    systemd_observation_api = systemd_api or DashboardSystemdApi.from_application(app_context)
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -90,6 +93,14 @@ def create_app(
     @app.get("/api/projects/{project_id}/health")
     def project_health(project_id: str):
         return project_detail_api.health(project_id)
+
+    @app.get("/api/systemd/units")
+    def systemd_units(limit: int = Query(20, ge=1, le=20)):
+        return systemd_observation_api.units(limit=limit)
+
+    @app.get("/api/systemd/units/{unit_id}")
+    def systemd_unit(unit_id: str):
+        return systemd_observation_api.unit(unit_id)
 
     @app.get("/api/history/host")
     def history_host(range_name: str = Query("24h", alias="range"), limit: int = 500):
