@@ -43,6 +43,18 @@ class DashboardHistoryApi:
     def tunnel(self, range_name: str = "24h", limit: int = 500) -> dict[str, Any]:
         return self._query("tunnel", range_name, limit)
 
+    def compare(self, *, resource_type: str = "host", range_name: str = "24h", name: str | None = None, baseline: str | None = None, current: str | None = None) -> dict[str, Any]:
+        if self.query_service is None:
+            return {"available": False, "status": "unavailable", "error": "Historical telemetry unavailable", "resource_type": resource_type, "resource_id": name, "baseline": {}, "current": {}, "changes": [], "links": []}
+        try:
+            return self.mapper.comparison(self.query_service.compare(resource_type=resource_type, range_name=range_name, name=name, baseline=baseline, current=current))
+        except ValueError:
+            return {"available": False, "status": "error", "error": "Invalid history comparison", "resource_type": resource_type, "resource_id": name, "baseline": {}, "current": {}, "changes": [], "links": []}
+        except Exception as exc:
+            if self.logger is not None:
+                self.logger.exception("Historical comparison API failed", exc_info=exc)
+            return {"available": False, "status": "unavailable", "error": "Historical comparison unavailable", "resource_type": resource_type, "resource_id": name, "baseline": {}, "current": {}, "changes": [], "links": []}
+
     def _query(self, kind: str, range_name: str, limit: int, name: str | None = None) -> dict[str, Any]:
         if self.query_service is None:
             return self.mapper.to_response(_unavailable("Historical telemetry unavailable"))

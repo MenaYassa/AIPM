@@ -61,6 +61,7 @@ class DashboardLogsApi:
                 limit=limit,
                 max_bytes=max_bytes,
                 cursor=cursor,
+                now=self.service.now(),
             )
         except ValueError as exc:
             return self._safe_error("INVALID_LOG_QUERY", str(exc))

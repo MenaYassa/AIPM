@@ -204,6 +204,49 @@ class SQLiteIncidentRepository:
             rows = connection.execute(f"SELECT * FROM incidents{where} ORDER BY updated_at DESC, id DESC LIMIT ?", values).fetchall()
         return [self._incident(row) for row in rows]
 
+    def get_incidents_page(self, incident_filter: IncidentFilter, *, before: tuple[object, int] | None = None) -> list[Incident]:
+        conditions: list[str] = []
+        values: list[object] = []
+        if incident_filter.status:
+            conditions.append("status = ?")
+            values.append(incident_filter.status.value)
+        if incident_filter.severity:
+            conditions.append("severity = ?")
+            values.append(incident_filter.severity.value)
+        if incident_filter.resource_id:
+            conditions.append("resource_id = ?")
+            values.append(incident_filter.resource_id)
+        if incident_filter.start:
+            conditions.append("started_at >= ?")
+            values.append(_timestamp(incident_filter.start))
+        if incident_filter.end:
+            conditions.append("started_at <= ?")
+            values.append(_timestamp(incident_filter.end))
+        if before is not None:
+            before_at, before_id = before
+            conditions.append("(updated_at < ? OR (updated_at = ? AND id < ?))")
+            values.extend((_timestamp(before_at), _timestamp(before_at), before_id))
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        values.append(incident_filter.limit)
+        with self._connection() as connection:
+            rows = connection.execute(f"SELECT * FROM incidents{where} ORDER BY updated_at DESC, id DESC LIMIT ?", values).fetchall()
+        return [self._incident(row) for row in rows]
+
+    def get_timeline(self, incident_id: int, *, limit: int, after: tuple[object, int] | None = None) -> list[dict[str, object]]:
+        conditions = ["incident_id = ?"]
+        values: list[object] = [incident_id]
+        if after is not None:
+            after_at, after_id = after
+            conditions.append("(occurred_at > ? OR (occurred_at = ? AND id > ?))")
+            values.extend((_timestamp(after_at), _timestamp(after_at), after_id))
+        values.append(limit)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM incident_transitions WHERE {' AND '.join(conditions)} ORDER BY occurred_at ASC, id ASC LIMIT ?",
+                values,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_incident(self, incident_id: int) -> Incident | None:
         with self._connection() as connection:
             row = connection.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()

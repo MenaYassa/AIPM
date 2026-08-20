@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterator, Sequence
 
 from aipm.core.exceptions import AIPMError
+from aipm.models.mission_control_evidence import HistoricalPoint
 from aipm.models.history import (
     ContainerHistoryPoint,
     HistoricalRun,
@@ -377,6 +378,29 @@ class SQLiteHistoryRepository:
             )
             for row in rows
         ]
+
+    def get_latest_host_at(self, end: datetime) -> HistoricalPoint | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM host_samples WHERE sampled_at <= ? ORDER BY sampled_at DESC, id DESC LIMIT 1", (_timestamp(end),)).fetchone()
+        if row is None:
+            return None
+        point = HostHistoryPoint(sampled_at=_datetime(row["sampled_at"]), hostname=row["hostname"], cpu_percent=row["cpu_percent"], load_one=row["load_one"], load_five=row["load_five"], load_fifteen=row["load_fifteen"], memory_total_gb=row["memory_total_gb"], memory_used_gb=row["memory_used_gb"], memory_available_gb=row["memory_available_gb"], memory_percent=row["memory_percent"], swap_total_gb=row["swap_total_gb"], swap_used_gb=row["swap_used_gb"], swap_percent=row["swap_percent"], disk_total_gb=row["disk_total_gb"], disk_used_gb=row["disk_used_gb"], disk_free_gb=row["disk_free_gb"], disk_percent=row["disk_percent"], network_interfaces=row["network_interfaces"], network_established=row["network_established"], available=bool(row["available"]))
+        return HistoricalPoint(point, int(row["run_id"]) if row["run_id"] is not None else None)
+
+    def get_latest_container_at(self, name: str, end: datetime) -> HistoricalPoint | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM container_samples WHERE sampled_at <= ? AND container_name = ? ORDER BY sampled_at DESC, id DESC LIMIT 1", (_timestamp(end), name)).fetchone()
+        return HistoricalPoint(_container_from_row(row), int(row["run_id"]) if row is not None and row["run_id"] is not None else None) if row is not None else None
+
+    def get_latest_project_at(self, name: str, end: datetime) -> HistoricalPoint | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM project_samples WHERE sampled_at <= ? AND name = ? ORDER BY sampled_at DESC, id DESC LIMIT 1", (_timestamp(end), name)).fetchone()
+        return HistoricalPoint(_project_from_row(row), int(row["run_id"]) if row is not None and row["run_id"] is not None else None) if row is not None else None
+
+    def get_latest_tunnel_at(self, end: datetime) -> HistoricalPoint | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM tunnel_samples WHERE sampled_at <= ? ORDER BY sampled_at DESC, id DESC LIMIT 1", (_timestamp(end),)).fetchone()
+        return HistoricalPoint(_tunnel_from_row(row), int(row["run_id"]) if row is not None and row["run_id"] is not None else None) if row is not None else None
 
     def get_containers_for_run(self, run_id: int) -> list[ContainerHistoryPoint]:
         with self._connection() as connection:

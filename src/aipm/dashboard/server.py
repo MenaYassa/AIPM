@@ -149,6 +149,12 @@ def create_app(
     def history_tunnel(range_name: str = Query("24h", alias="range"), limit: int = 500):
         return _history_response(api, "tunnel", range_name, limit)
 
+    @app.get("/api/history/compare")
+    def history_compare(resource_type: str = "host", range_name: str = Query("24h", alias="range"), name: str | None = None, baseline: str | None = None, current: str | None = None):
+        if api.history_api is None:
+            return {"available": False, "status": "unavailable", "error": "Historical telemetry unavailable", "resource_type": resource_type, "resource_id": name, "baseline": {}, "current": {}, "changes": [], "links": []}
+        return api.history_api.compare(resource_type=resource_type, range_name=range_name, name=name, baseline=baseline, current=current)
+
     @app.get("/api/events")
     def events(
         range_name: str = Query("24h", alias="range"),
@@ -157,8 +163,9 @@ def create_app(
         resource_type: str | None = None,
         resource_id: str | None = None,
         limit: int = 500,
+        cursor: str | None = None,
     ):
-        return event_api.events(range_name=range_name, severity=severity, event_type=event_type, resource_type=resource_type, resource_id=resource_id, limit=limit)
+        return event_api.events_page(range_name=range_name, severity=severity, event_type=event_type, resource_type=resource_type, resource_id=resource_id, limit=limit, cursor=cursor)
 
     @app.get("/api/events/{event_id}")
     def event_detail(event_id: int):
@@ -171,12 +178,17 @@ def create_app(
         severity: str | None = None,
         resource_id: str | None = None,
         limit: int = 500,
+        cursor: str | None = None,
     ):
-        return event_api.incidents(range_name=range_name, status=status, severity=severity, resource_id=resource_id, limit=limit)
+        return event_api.incidents_page(range_name=range_name, status=status, severity=severity, resource_id=resource_id, limit=limit, cursor=cursor)
 
     @app.get("/api/incidents/{incident_id}")
     def incident_detail(incident_id: int):
         return event_api.incident(incident_id)
+
+    @app.get("/api/incidents/{incident_id}/timeline")
+    def incident_timeline(incident_id: int, limit: int = 200, cursor: str | None = None):
+        return event_api.timeline(incident_id, limit=limit, cursor=cursor)
 
     @app.get("/api/notifications")
     def notifications(status: str | None = None, incident_id: int | None = None, channel_id: str | None = None, include_suppressed: bool = False, limit: int = 100):

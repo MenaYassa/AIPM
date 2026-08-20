@@ -4,6 +4,7 @@ from dataclasses import fields
 from datetime import datetime, timezone
 from typing import Any
 
+from aipm.models.mission_control_evidence import HistoryComparison
 from aipm.models.history import (
     ContainerHistoryPoint,
     HistoricalSample,
@@ -121,6 +122,41 @@ class HistoryResponseMapper:
             "error": response.error,
             "points": [self._point(point) for point in response.points],
         }
+
+    def comparison(self, response: HistoryComparison) -> dict[str, Any]:
+        return {
+            "available": response.available,
+            "status": response.status,
+            "error": response.error,
+            "resource_type": response.resource_type,
+            "resource_id": response.resource_id,
+            "baseline": self._side(response.baseline),
+            "current": self._side(response.current),
+            "changes": [
+                {"name": item.name, "status": item.status.value, "before": self._value(item.before), "after": self._value(item.after), "delta": self._value(item.delta)}
+                for item in response.changes
+            ],
+            "links": [{"kind": link.kind, "identifier": link.identifier, "label": link.label, "route": link.route} for link in response.links],
+        }
+
+    def _side(self, side: object) -> dict[str, Any]:
+        return {
+            "available": side.available,
+            "status": side.status,
+            "observed_at": side.observed_at.isoformat() if side.observed_at else None,
+            "run_id": side.run_id,
+            "value": self._value(side.value),
+        }
+
+    @staticmethod
+    def _value(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return _utc(value).isoformat()
+        if isinstance(value, tuple):
+            return [HistoryResponseMapper._value(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): HistoryResponseMapper._value(item) for key, item in value.items()}
+        return value
 
     @staticmethod
     def _point(point: object) -> dict[str, Any]:

@@ -248,10 +248,54 @@ class SQLiteEventRepository:
             rows = connection.execute(f"SELECT * FROM events{where} ORDER BY occurred_at ASC, id ASC LIMIT ?", values).fetchall()
             return [self._event(connection, row) for row in rows]
 
+    def get_events_page(self, event_filter: EventFilter, *, after: tuple[object, int] | None = None) -> list[Event]:
+        conditions: list[str] = []
+        values: list[object] = []
+        if event_filter.start is not None:
+            conditions.append("occurred_at >= ?")
+            values.append(_timestamp(event_filter.start))
+        if event_filter.end is not None:
+            conditions.append("occurred_at <= ?")
+            values.append(_timestamp(event_filter.end))
+        if event_filter.severity is not None:
+            conditions.append("severity = ?")
+            values.append(event_filter.severity.value)
+        if event_filter.event_type is not None:
+            conditions.append("event_type = ?")
+            values.append(event_filter.event_type.value)
+        if event_filter.resource_type is not None:
+            conditions.append("resource_type = ?")
+            values.append(event_filter.resource_type.value)
+        if event_filter.resource_id is not None:
+            conditions.append("resource_id = ?")
+            values.append(event_filter.resource_id)
+        if after is not None:
+            after_at, after_id = after
+            conditions.append("(occurred_at > ? OR (occurred_at = ? AND id > ?))")
+            values.extend((_timestamp(after_at), _timestamp(after_at), after_id))
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        values.append(event_filter.limit)
+        with self._connection() as connection:
+            rows = connection.execute(f"SELECT * FROM events{where} ORDER BY occurred_at ASC, id ASC LIMIT ?", values).fetchall()
+            return [self._event(connection, row) for row in rows]
+
     def get_event(self, event_id: int) -> Event | None:
         with self._connection() as connection:
             row = connection.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
             return self._event(connection, row) if row is not None else None
+
+    def get_events_by_ids(self, event_ids: tuple[int, ...]) -> list[Event]:
+        bounded_ids = tuple(dict.fromkeys(int(event_id) for event_id in event_ids))
+        if not bounded_ids or len(bounded_ids) > 500:
+            raise ValueError("Event batch size is outside the supported bounds.")
+        placeholders = ",".join("?" for _ in bounded_ids)
+        with self._connection() as connection:
+            rows = connection.execute(f"SELECT * FROM events WHERE id IN ({placeholders}) ORDER BY id ASC", bounded_ids).fetchall()
+            evidence_rows = connection.execute(f"SELECT * FROM event_evidence WHERE event_id IN ({placeholders}) ORDER BY event_id ASC, id ASC", bounded_ids).fetchall()
+        evidence_by_event: dict[int, list[sqlite3.Row]] = {}
+        for evidence in evidence_rows:
+            evidence_by_event.setdefault(int(evidence["event_id"]), []).append(evidence)
+        return [self._event_from_rows(row, evidence_by_event.get(int(row["id"]), ())) for row in rows]
 
     def get_event_by_key(self, event_key: str) -> Event | None:
         with self._connection() as connection:
@@ -273,6 +317,10 @@ class SQLiteEventRepository:
 
     def _event(self, connection: sqlite3.Connection, row: sqlite3.Row) -> Event:
         evidence_rows = connection.execute("SELECT * FROM event_evidence WHERE event_id = ? ORDER BY id ASC", (row["id"],)).fetchall()
+        return self._event_from_rows(row, evidence_rows)
+
+    @staticmethod
+    def _event_from_rows(row: sqlite3.Row, evidence_rows: Sequence[sqlite3.Row]) -> Event:
         return Event(
             id=int(row["id"]),
             event_key=row["event_key"],

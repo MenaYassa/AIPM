@@ -42,19 +42,20 @@ def test_only_dashboard_is_visible_by_default_and_placeholders_have_no_fake_metr
     assert 'data-view="projects" hidden' in text
     assert 'data-view="systemd" hidden' in text
     assert 'data-view="logs" hidden' in text
-    assert 'data-view="incidents" hidden' in text
-    assert 'data-view="history" hidden' in text
+    assert 'data-view="incidents"' in text
+    assert 'data-view="history"' in text
     assert 'data-view="notifications" hidden' in text
     assert 'data-view="settings" hidden' in text
     assert 'data-view="ai-agent" hidden' in text
-    assert text.count("Coming in MC-6.x") >= 5
+    assert text.count("Coming in MC-6.x") >= 3
     assert "Applications, not just containers." in text
     assert "projectCards" in text
     assert "projectDetail" in text
     assert "Server & Host Intelligence" in text
     assert "Container operations" in text
     assert "read-only detail" in text
-    assert "No new history store or telemetry implementation is introduced." in text
+    assert "No new history store or telemetry implementation is introduced." not in text
+    assert "Observation comparison" in text
     assert "Notifications remain disabled" in text
     assert "fake metric" not in text.lower()
 
