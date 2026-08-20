@@ -47,7 +47,7 @@ def test_only_dashboard_is_visible_by_default_and_placeholders_have_no_fake_metr
     assert 'data-view="notifications" hidden' in text
     assert 'data-view="settings" hidden' in text
     assert 'data-view="ai-agent" hidden' in text
-    assert text.count("Coming in MC-6.x") >= 3
+    assert text.count("Coming in MC-6.x") >= 2
     assert "Applications, not just containers." in text
     assert "projectCards" in text
     assert "projectDetail" in text

@@ -15,6 +15,7 @@ from aipm.capabilities.dashboard.docker_api import DashboardDockerApi
 from aipm.capabilities.dashboard.project_api import DashboardProjectApi
 from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
 from aipm.capabilities.dashboard.logs_api import DashboardLogsApi
+from aipm.capabilities.dashboard.settings_api import DashboardSettingsApi
 from aipm.core.app import Application
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -31,6 +32,7 @@ def create_app(
     project_api: DashboardProjectApi | None = None,
     systemd_api: DashboardSystemdApi | None = None,
     logs_api: DashboardLogsApi | None = None,
+    settings_api: DashboardSettingsApi | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
@@ -43,6 +45,7 @@ def create_app(
     project_detail_api = project_api or DashboardProjectApi.from_application(app_context, dashboard_api=api)
     systemd_observation_api = systemd_api or DashboardSystemdApi.from_application(app_context)
     logs_observation_api = logs_api or DashboardLogsApi.from_application(app_context)
+    settings_posture_api = settings_api or DashboardSettingsApi.from_application(app_context, service_health_api=health_api)
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -189,6 +192,10 @@ def create_app(
     @app.get("/api/incidents/{incident_id}/timeline")
     def incident_timeline(incident_id: int, limit: int = 200, cursor: str | None = None):
         return event_api.timeline(incident_id, limit=limit, cursor=cursor)
+
+    @app.get("/api/settings/posture")
+    def settings_posture():
+        return settings_posture_api.posture()
 
     @app.get("/api/notifications")
     def notifications(status: str | None = None, incident_id: int | None = None, channel_id: str | None = None, include_suppressed: bool = False, limit: int = 100):
