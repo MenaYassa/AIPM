@@ -1,9 +1,10 @@
 # MC-6.8 Design: Bounded, Redacted Logs Intelligence
 
-**Status:** Design and inspection only
-**Baseline:** `2384c83ab4d6ae74005ecf98416cff946d04cf87`
-**Implementation status:** Not started
-**Scope:** Repository-grounded design for a read-only Logs façade, API, and page. No source, test, configuration, runtime, deployment, VPS, database, Docker, Cloudflare, credential, or MC-6.9 changes are authorized by this document.
+**Design review status:** Complete and approved (historical design checkpoint)
+**Design baseline:** `2384c83ab4d6ae74005ecf98416cff946d04cf87`
+**Implementation status:** Complete and pushed at `d1f692948a014197eda60616fd602e8061959316`
+**Original design scope:** Repository-grounded design for a read-only Logs façade, API, and page. The original design did not authorize source, test, configuration, runtime, deployment, VPS, database, Docker, Cloudflare, credential, or MC-6.9 changes.
+**Current status note:** The approved implementation is now recorded in the repository. MC-6.9 remains unstarted and requires a separate design/inspection approval.
 
 ## 1. Exact roadmap objective
 

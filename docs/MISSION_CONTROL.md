@@ -353,7 +353,7 @@ GET /api/events
 GET /api/events/{id}
 GET /api/incidents
 GET /api/incidents/{id}
-POST /api/incidents/{id}/acknowledge
+POST /api/incidents/{id}/acknowledge  (underlying capability only; not mounted in the current read-only dashboard)
 ```
 
 Event filters include `range`, `severity`, `event_type`, `resource_type`, `resource_id`, and bounded `limit`. Incident filters include `range`, `status`, `severity`, `resource_id`, and bounded `limit`. API failures return safe structured responses and do not expose SQL or tracebacks.
@@ -377,3 +377,27 @@ MC-4.5 hardens notification retries, suppression windows, delivery claims, schem
 ## MC-2.1 Telemetry Performance & Sampling
 
 MC-2.1 separates the 15-second fast state loop from independently scheduled, single-flight slow Docker resource and project refresh tasks. See [`MC-2.1_TELEMETRY_PERFORMANCE.md`](MC-2.1_TELEMETRY_PERFORMANCE.md) for configuration, freshness semantics, sparse resource history, acceptance tests, and rollback guidance.
+
+
+## Current Mission Control status and next steps
+
+**Updated:** 2026-08-20
+
+Mission Control is implemented through **MC-6.8** at pushed commit `d1f692948a014197eda60616fd602e8061959316`. The completed cockpit now includes the shared MC-6 foundation and vanilla shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, and the existing telemetry/history/event/incident/notification read projections.
+
+MC-6.4 was reconciled rather than duplicated because Server Intelligence was already delivered through MC-6.3. MC-6.6.1 through MC-6.6.3 refined association correctness, taxonomy, filtering, and health evidence. MC-6.7.1 reconciled the seven-entry Systemd registry: Cloudflared is Docker-owned and is not represented as Systemd unless a genuine allow-listed unit exists.
+
+The next Mission Control milestone is **MC-6.9 design/inspection only**. Its expected scope is bounded incident/history evidence, cursor pagination, comparison queries, timeline projections, and safe cross-links using existing MC-3 and read-only history repositories. MC-6.10 is planned for sanitized Settings and notification posture; MC-6.11 is planned for a shared Typer/Rich TUI; MC-6.12 and MC-6.13 remain future action-control and AI-advisor milestones.
+
+### Current operational gates
+
+The dashboard implementation has not authorized or performed permanent target-VPS deployment. Production installation remains a separate explicit approval gate requiring a read-only preflight for the exact commit, configuration, executable, loopback port, filesystem write-denial boundary, active-WAL behavior, telemetry/MC-3 state, disabled notifications, and rollback readiness. Public ingress and Cloudflare changes, credential access, Docker runtime changes, live SQLite operations, and Systemd operations remain outside this documentation checkpoint.
+
+The successful Gate 2.1 staging harness remains preserved at:
+
+```text
+ops/staging/mc5-gate2.1-staging-v2.sh
+SHA-256: 9e12cdc01f901381381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7
+```
+
+The complete current ledger is in [`MC-6_STATUS.md`](MC-6_STATUS.md), the milestone roadmap is in [`MC-6_IMPLEMENTATION_PLAN.md`](MC-6_IMPLEMENTATION_PLAN.md), and the broader AIPM update-management roadmap remains in [`../PRODUCTION_ROADMAP.md`](../PRODUCTION_ROADMAP.md).

@@ -2,27 +2,27 @@
 
 ## Scope and delivery rule
 
-This plan is for future implementation. The current task creates design documents only. No source code, production service, runtime state, live SQLite database, Docker, Cloudflare, credentials, notification provider, telemetry, MC-3, or Gate 3 state is changed by this plan.
+This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 have now been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `d1f692948a014197eda60616fd602e8061959316`.
 
-The implementation must proceed as small, reviewable milestones. Each milestone has a narrow change set, focused tests, a full regression run, a safety review, and an explicit stop point. No milestone may quietly introduce writes into the read-only dashboard.
+MC-6.9 and later remain future milestones. Each new milestone must proceed as a small, reviewable change set with focused tests, full regression, safety review, explicit scope, and an explicit stop point. No milestone may quietly introduce writes into the read-only dashboard. Production deployment, target-VPS operations, public ingress, credentials, notifications, live SQLite, Docker runtime changes, and Systemd operations require separate approval.
 
 ## Milestone map
 
-| Milestone | Classification | Outcome | Write/action posture |
-|---|---|---|---|
-| MC-6.1 | NEW/EXTEND | Shared Mission Control contracts, page registry, query bounds, state semantics, and client scheduler design. | Read-only only. |
-| MC-6.2 | EXTEND | Incremental static frontend shell and navigation extraction from current `index.html`. | Read-only only. |
-| MC-6.3 | EXTEND | Dashboard, Server, History, Incidents, and Notifications pages using existing APIs. | Read-only only. |
-| MC-6.4 | EXTEND/NEW | Server detail and capacity façade/API. | Read-only only. |
-| MC-6.5 | EXTEND/NEW | Docker/container/project detail façades and APIs. | Read-only only. |
-| MC-6.6 | EXTEND | Project detail, Git posture, health, and runtime associations. | Read-only only. |
-| MC-6.7 | NEW | Allow-listed Systemd observation façade/API and page. | Read-only only; no unit mutation. |
-| MC-6.8 | NEW | Bounded, redacted Logs façade/API and page. | Read-only only; no shell/arbitrary paths. |
-| MC-6.9 | EXTEND | Incident/history evidence, comparison queries, cursor pagination, and cross-links. | Read-only only. |
-| MC-6.10 | EXTEND | Settings posture and expanded notification safety/audit views. | Read-only only; notifications remain disabled. |
-| MC-6.11 | NEW | Shared Typer/Rich TUI consuming the same façades and contracts. | Read-only only. |
-| MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Separate authorization required. |
-| MC-6.13 | FUTURE | AI Agent advisor and action planner integration. | Separate product and safety gate required. |
+| Milestone | Classification | Outcome | Current status | Write/action posture |
+|---|---|---|---|---|
+| MC-6.1 | NEW/EXTEND | Shared contracts, page registry, query bounds, state semantics, and scheduler. | Complete | Read-only only. |
+| MC-6.2 | EXTEND | Static frontend shell and navigation extraction. | Complete | Read-only only. |
+| MC-6.3 | EXTEND | Dashboard, Server, History, Incidents, and Notifications pages using existing APIs. | Complete | Read-only only. |
+| MC-6.4 | EXTEND/NEW | Server detail and capacity façade/API. | Reconciled; already delivered through MC-6.3 | Read-only only. |
+| MC-6.5 | EXTEND/NEW | Docker/container/project detail façades and APIs. | Complete | Read-only only. |
+| MC-6.6 | EXTEND | Project detail, Git posture, health, and runtime associations. | Complete, including 6.6.1–6.6.3 refinements | Read-only only. |
+| MC-6.7 | NEW | Allow-listed Systemd observation façade/API and page. | Complete, including 6.7.1 registry reconciliation | Read-only only; no unit mutation. |
+| MC-6.8 | NEW | Bounded, redacted Logs façade/API and page. | Complete and pushed at `d1f6929` | Read-only only; no shell/arbitrary paths. |
+| MC-6.9 | EXTEND | Incident/history evidence, comparison queries, cursor pagination, and cross-links. | Next: design/inspection only | Read-only only. |
+| MC-6.10 | EXTEND | Settings posture and expanded notification safety/audit views. | Planned | Read-only only; notifications remain disabled. |
+| MC-6.11 | NEW | Shared Typer/Rich TUI consuming the same façades and contracts. | Planned | Read-only only. |
+| MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Future, separate gate | Separate authorization required. |
+| MC-6.13 | FUTURE | AI Agent advisor and action planner integration. | Future, separate product gate | Separate product and safety gate required. |
 
 ## MC-6.1 — contracts and UI foundation
 
@@ -162,6 +162,8 @@ No `enable`, `disable`, `start`, `stop`, `restart`, `reload`, `reset-failed`, un
 
 ## MC-6.8 — Logs
 
+**Status: COMPLETE.** The bounded, redacted, read-only Logs façade/API/page was implemented and pushed at `d1f692948a014197eda60616fd602e8061959316`. The preserved Gate 2.1 harness remains SHA-256 `9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7`.
+
 ### Objectives
 
 Provide bounded, redacted, read-only logs for operational diagnosis.
@@ -181,6 +183,8 @@ The log feature must fail closed on unknown source IDs, paths, units, malformed 
 
 ## MC-6.9 — Incident and history expansion
 
+**Status: NEXT DESIGN/INSPECTION ONLY.** Do not begin implementation until a separate design review and scope approval are complete.
+
 ### Objectives
 
 Improve investigation without changing MC-3 event keys, incident correlation, schemas, or notification projection.
@@ -199,6 +203,8 @@ Use the existing read-only repositories and active-WAL regression fixture. No ne
 
 ## MC-6.10 — Settings and notification posture
 
+**Status: PLANNED.** Notifications remain disabled; this milestone must expose posture only.
+
 ### Objectives
 
 Make effective operational posture visible while notifications remain disabled.
@@ -212,6 +218,8 @@ Expose only booleans, counts, bounded numeric values, safe enum names, version, 
 Test with enabled, disabled, empty, invalid, and partially configured temporary configurations. The dashboard must fail closed when configuration cannot be safely interpreted. No notification worker is started and no provider is instantiated.
 
 ## MC-6.11 — TUI
+
+**Status: PLANNED.** Begin only after the shared façade contracts are stable through the preceding milestones.
 
 ### Objectives
 
@@ -318,6 +326,8 @@ The default answer for all runtime and write operations is **not authorized**.
 
 ## Definition of done for the first MC-6 release
 
+**Current note:** The implementation portion of the first read-only web cockpit is complete through MC-6.8. The remaining definition-of-done items are deployment staging, browser acceptance where not yet executed, and any later TUI work that is explicitly included in the release scope.
+
 The first read-only MC-6 release is complete only when:
 
 - Dashboard navigation covers the approved domains.
@@ -346,5 +356,6 @@ The first read-only MC-6 release is complete only when:
 
 - **EXISTS:** current read-only MC-5 dashboard and supporting telemetry/event/incident/notification capabilities.
 - **EXTEND:** frontend shell, server/project/Docker detail, history, incidents, settings, notification posture, tests, and deployment documentation.
-- **NEW:** systemd observation, bounded logs, shared scheduler, dedicated TUI, and supporting adapters.
+- **COMPLETE:** shared scheduler, Server, Docker, Project/Application, Systemd observation, bounded Logs, and supporting read-only adapters through MC-6.8.
+- **NEW/PLANNED:** dedicated TUI and later additive projections.
 - **FUTURE:** writes/actions, authentication/public ingress, SSE/WebSockets, AI Agent execution, and notification activation.

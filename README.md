@@ -4,9 +4,11 @@ AIPM is a local **AI Platform Manager** for discovering and operating projects t
 
 ## Current status
 
-The repository includes the core CLI, domain models, service/provider architecture, Git and Docker integrations, health analyzers, backup snapshots, and a guarded update workflow. The implementation is designed to remain useful on machines without a running Docker daemon: configuration, help, host diagnostics, and Git-only discovery do not require Docker. Docker- or Compose-specific commands return a clear error when the required runtime is unavailable.
+The repository includes the core CLI, domain models, service/provider architecture, Git and Docker integrations, health analyzers, backup snapshots, a guarded update workflow, and the read-only Mission Control operations cockpit. The implementation is designed to remain useful on machines without a running Docker daemon: configuration, help, host diagnostics, and Git-only discovery do not require Docker. Docker- or Compose-specific commands return a clear error when the required runtime is unavailable.
 
-For the detailed implementation assessment and remaining production considerations, see [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
+The current Mission Control checkpoint is **MC-6.8 complete** at commit `d1f692948a014197eda60616fd602e8061959316`. The cockpit now covers overview, host/server intelligence, Docker, projects/applications, Systemd observations, bounded redacted Logs, history, events, incidents, and notification posture. The next development milestone is MC-6.9 design/inspection only. Production deployment remains a separate approval-gated operation.
+
+For the complete milestone ledger, remaining roadmap, safety invariants, deployment gates, and next steps, see [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). The broader AIPM update-management roadmap remains in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md), while the historical baseline and completion records remain in [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
 
 ## Installation
 
@@ -41,7 +43,7 @@ AIPM now includes a read-only web dashboard that turns the VPS handbook into a l
 aipm dashboard
 ```
 
-The default listener is `127.0.0.1:8787`; keep it loopback-only when the existing cloudflared tunnel is the public ingress. The full deployment and security runbook is in [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md). Mission Control uses typed read-only telemetry services behind the existing AIPM providers and preserves the current `/api/overview` response contract. MC-2 adds a configurable SQLite sampler through `aipm telemetry sample` and `aipm telemetry run`, plus safe `/api/history/host`, `/api/history/containers`, `/api/history/projects`, and `/api/history/tunnel` endpoints. MC-3 adds a separate deterministic processor through `aipm events process` and `aipm events run`, with `/api/events`, `/api/incidents`, and a focused read-only Incident Room. See [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md) for the schema, retention, systemd templates, idempotency, and safety boundaries.
+The default listener is `127.0.0.1:8787`; keep it loopback-only when the existing cloudflared tunnel is the public ingress. The full deployment and security runbook is in [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md), and the current milestone ledger is in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). Mission Control uses typed read-only telemetry services behind the existing AIPM providers and preserves the current `/api/overview` response contract. MC-2 adds a configurable SQLite sampler through `aipm telemetry sample` and `aipm telemetry run`, plus safe `/api/history/host`, `/api/history/containers`, `/api/history/projects`, and `/api/history/tunnel` endpoints. MC-3 adds a separate deterministic processor through `aipm events process` and `aipm events run`, with `/api/events`, `/api/incidents`, and a focused read-only Incident Room. MC-6 adds the incremental cockpit shell, Server, Docker, Project/Application, Systemd, and bounded Logs pages. See [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md) for the schema, retention, systemd templates, idempotency, and safety boundaries.
 
 ## Commands
 
@@ -130,7 +132,7 @@ Run the automated tests with:
 pytest -q
 ```
 
-The tests focus on deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, health aggregation, dry-run side-effect protection, approval gating, update execution, and audit serialization. Thirteen tests currently pass. Docker integration tests and disposable Git-remote tests should be added separately for environments that provide those fixtures.
+The tests cover deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, health aggregation, dry-run side-effect protection, approval gating, update execution, audit serialization, Mission Control contracts, read-only SQLite behavior, frontend safety, and bounded log redaction. The MC-6.8 checkpoint passed 206 tests with the existing Starlette/httpx deprecation warning. Docker integration tests, disposable Git-remote tests, browser acceptance, and TUI tests remain separate roadmap work.
 
 ## License
 

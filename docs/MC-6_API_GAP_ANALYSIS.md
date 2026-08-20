@@ -2,7 +2,7 @@
 
 ## Purpose and contract rules
 
-This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. It is a design artifact only. No routes or application code are changed by this document.
+This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `d1f692948a014197eda60616fd602e8061959316`.
 
 The first MC-6 API release remains read-only and preserves all existing route names and response semantics. Existing clients must continue to receive stable `available`, `status`, `error`, freshness, and domain payload fields. Additive fields and new GET routes are preferred. Any POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoint is **FUTURE**.
 
@@ -28,6 +28,7 @@ The first MC-6 API release remains read-only and preserves all existing route na
 | `GET /api/notification-policies` | EXISTS / EXTEND | Sanitized configuration projection | Preserve; no raw config or secret references. |
 | `GET /api/notification-metrics` | EXISTS | MC-4.5 repository metrics | Preserve; add time-window filters only if bounded. |
 | `GET /api/services` | EXISTS / EXTEND | Dashboard service-health projection | Preserve freshness semantics; extend to more observed services later. |
+| `GET /api/logs` | COMPLETE MC-6.8 | Bounded Logs façade with backend-owned sources and redaction | Preserve GET-only behavior; extend only through reviewed bounded evidence/correlation work. |
 | `POST /api/incidents/{id}/acknowledge` | FUTURE / NOT EXPOSED | Underlying façade method exists, HTTP route is not mounted | Keep unavailable in the first MC-6 UI/API. Require separate authorization and audit design before exposure. |
 
 ## Contract invariants
@@ -194,6 +195,12 @@ Future action routes must not be designed as ordinary extensions to current GET 
 - Safe output redaction.
 - Separate service permissions from the read-only dashboard.
 
+## Current implementation reconciliation
+
+MC-6.1 through MC-6.8 are complete. The implemented additive routes include Server, Docker inventory/detail, Project/Application detail, Systemd unit observation, and bounded `/api/logs`. The Logs contract uses symbolic source IDs, bounded time/line/byte/cursor parameters, fixed local adapters, redaction before mapping, safe source errors, and no raw provider payloads.
+
+The next API work is MC-6.9 design/inspection only: bounded incident/history evidence, cursor pagination, comparisons, timelines, and cross-links built on existing MC-3 and history repositories. MC-6.10 may add sanitized settings/notification posture projections. No new database, schema, worker, notification provider, Docker lifecycle route, Systemd control route, or public-ingress route is authorized by these milestones.
+
 ## API versioning and compatibility
 
 The first MC-6 release remains unversioned to preserve current routes, but route response contracts should gain an internal schema version or `contract_version` only if clients can ignore unknown fields. A future breaking redesign should use `/api/v2` rather than silently changing `/api` semantics.
@@ -208,7 +215,7 @@ Query parameters must be bounded and normalized consistently. A shared query val
 | P0 | Server read façade | EXTEND/NEW | Provides a clean boundary for the Server page. |
 | P0 | Docker/project detail façades | EXTEND/NEW | Enables cockpit navigation while reusing providers. |
 | P1 | Systemd observation API | NEW | Required for a cPanel/Webmin-style operations cockpit, but must remain read-only. |
-| P1 | Bounded log API | NEW | High value for incidents, high security risk, requires redaction and allow-lists. |
+| P1 | Bounded log API | COMPLETE MC-6.8 | High-value read-only Logs route delivered with redaction, symbolic sources, fixed adapters, and strict bounds. |
 | P1 | Settings posture API | EXTEND | Makes deployment and notification safety visible without secrets. |
 | P1 | Cursor pagination and evidence expansions | EXTEND | Needed for scale and incident investigation. |
 | P2 | SSE event stream | FUTURE/EXTEND | Useful after polling and reconnect semantics are stable. |
@@ -259,5 +266,5 @@ The TUI may use direct façades for local efficiency. It should not make HTTP ca
 
 - **EXISTS:** current overview, history, event, incident, notification, metrics, channel, policy, service-health, and static UI APIs.
 - **EXTEND:** stable filters, cursor pagination, server/project/Docker detail, history comparisons, incident evidence, notification summary, and effective settings posture.
-- **NEW:** systemd observation, bounded logs, dedicated detail façades, and shared TUI adapter.
+- **NEW:** shared TUI adapter and any later additive detail projections not already delivered.
 - **FUTURE:** action routes, authentication/public ingress, SSE/WebSockets, notification activation, remediation, and AI Agent integration.

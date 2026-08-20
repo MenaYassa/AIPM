@@ -139,3 +139,48 @@ The attached production brief identified safe update planning as the first miles
 | Verification | Regression coverage increased from nine to thirteen tests, including dry-run side-effect protection, approval gating, approved custom-runtime execution, and audit serialization. |
 
 This milestone does not claim real-VPS readiness. The referenced VPS infrastructure and legacy scripts were absent from the sandbox, so production integration behavior remains unverified. The next milestone is read-only inspection of the real environment after credentials are rotated and the user explicitly authorizes that inspection; no state-changing VPS operation is implied by this local implementation.
+
+
+## Current Mission Control checkpoint
+
+**Updated:** 2026-08-20
+
+The historical baseline above is retained for auditability. The repository has since completed the core AIPM completion pass and the read-only Mission Control milestones through **MC-6.8**. The current pushed checkpoint is:
+
+```text
+HEAD=d1f692948a014197eda60616fd602e8061959316
+ORIGIN_MAIN=d1f692948a014197eda60616fd602e8061959316
+WORKTREE=CLEAN
+```
+
+Mission Control now provides a read-only operations cockpit over existing telemetry, events, incidents, notifications, history, Docker, project/application, Server, Systemd, and bounded Logs capabilities. MC-6.4 was reconciled rather than duplicated because the Server capability was already delivered by MC-6.3.
+
+| Completed area | Current result |
+|---|---|
+| MC-1.5 through MC-5 | Read-only dashboard foundation, telemetry, event/incident projections, notification safety, and GET-only APIs. |
+| MC-5.1 through MC-5.1.2 | SQLite `mode=ro`, `PRAGMA query_only=ON`, active-WAL compatibility, filesystem write denial, and service-template hardening. |
+| MC-5 Gate 2.1 | Successful operator staging run preserved in `ops/staging/mc5-gate2.1-staging-v2.sh`. |
+| MC-6.1 through MC-6.3 | Shared Observation contracts, frontend shell, scheduler, Server/Host Intelligence, and static-module routing. |
+| MC-6.5 through MC-6.6.3 | Docker intelligence, project/application association, conservative taxonomy, filtering, and health-evidence UX. |
+| MC-6.7 through MC-6.7.1 | Allow-listed Systemd observation with seven genuine units; Cloudflared remains Docker-owned. |
+| MC-6.8 | Bounded, redacted, read-only Logs with symbolic sources, fixed adapters, bounded queries, protected cursors, and safe frontend rendering. |
+
+The next Mission Control milestone is **MC-6.9 design/inspection only**. It should address bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links using existing MC-3, incident, history, and read-only repository contracts. MC-6.10 covers Settings posture and notification safety; MC-6.11 covers a shared Typer/Rich TUI; MC-6.12 and MC-6.13 remain future action-control and AI-advisor milestones requiring separate safety gates.
+
+## Current operational gates
+
+The successful Gate 2.1 harness remains byte-identical:
+
+```text
+SHA-256: 9e12cdc01f901381381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7
+```
+
+The dashboard has not been deployed or started on the target VPS by the MC-6.8 repository work. Permanent service installation requires a separately approved read-only production preflight covering the exact commit, configuration, executable, port, filesystem write-denial boundary, loopback binding, telemetry/MC-3 state, notification-disabled posture, and rollback readiness. Cloudflare/public ingress, credentials, Docker runtime changes, live SQLite operations, and notification activation remain outside this checkpoint.
+
+The complete current ledger and next-step sequence is maintained in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). The broader update-management roadmap remains in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md); its remaining work includes complete update planning, explicit approval, critical Git transaction safety, restore points, rollback management, structured audit history, disposable integration fixtures, CI/release hygiene, and separately approved real-VPS inspection.
+
+## Current verification baseline
+
+The MC-6.8 checkpoint passed 11 focused Logs tests, 90 relevant MC-5 through MC-6.7.1 regression tests, and 206 full tests, with the existing Starlette/httpx deprecation warning. Python compilation, JavaScript syntax checks, `git diff --check`, mutation/lifecycle scans, subprocess safety scans, output/secret scans, frontend action scans, production-scope scans, and Gate 2.1 harness identity checks passed.
+
+> **Current project position:** Mission Control implementation is complete through MC-6.8 and is ready for the next design checkpoint, not for automatic production deployment. The broader AIPM update-management roadmap remains an independent workstream.

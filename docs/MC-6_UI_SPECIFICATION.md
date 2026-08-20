@@ -287,6 +287,16 @@ Every page and component needs:
 - Negative tests proving no POST/action/acknowledgement controls are present in the first release.
 - Failure tests for unavailable API, partial provider availability, stale observations, and long-running history queries.
 
+## Current implementation status
+
+**Updated:** 2026-08-20
+
+The approved vanilla static architecture is now implemented through MC-6.8 at commit `d1f692948a014197eda60616fd602e8061959316`. The delivered navigation covers Dashboard, Server, Docker, Projects, Systemd, Logs, Incidents, History, Notifications, Settings, and the reserved AI Agent area. Dashboard, Server, Docker, Projects, Systemd, and Logs are functional observation pages; the remaining reserved pages retain safe placeholders or existing read-only projections where their milestone is not yet implemented.
+
+The frontend uses the existing hash router, shared state helpers, centralized scheduler, `/static` module mount, escaped rendering, and explicit fresh/stale/unavailable/error/empty/unknown semantics. MC-6.8 adds one bounded Logs scheduler resource, backend-owned source selection, visible truncation/redaction state, and no download, stream, lifecycle, acknowledgement, or mutation controls.
+
+The next UI milestone is MC-6.9 design/inspection only: bounded incident/history evidence, comparisons, pagination, and safe cross-links. MC-6.10 will add safe settings/notification posture; MC-6.11 will provide the shared Typer/Rich TUI using the same semantic contracts. Public ingress, authenticated actions, AI execution, and Cloudflare changes remain future work.
+
 ## References
 
 [1]: ../src/aipm/dashboard/static/index.html "Current MC-5 single-file frontend"

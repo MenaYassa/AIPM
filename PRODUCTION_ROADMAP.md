@@ -75,3 +75,29 @@ The project should not be declared production-ready merely because the CLI works
 
 [1]: https://github.com/MenaYassa/AIPM "AIPM repository"
 [2]: https://docs.python.org/3/library/subprocess.html "Python subprocess documentation"
+
+
+## Mission Control alignment update
+
+**Updated:** 2026-08-20
+
+This document remains the roadmap for the broader AIPM management product, especially safe `aipm update` transactions. It is not a replacement for the Mission Control roadmap in [`docs/MC-6_IMPLEMENTATION_PLAN.md`](docs/MC-6_IMPLEMENTATION_PLAN.md) or the current status ledger in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md).
+
+The Mission Control read-only cockpit is now implemented and pushed through **MC-6.8** at commit `d1f692948a014197eda60616fd602e8061959316`. Completed Mission Control work includes the MC-5 dashboard and read-only SQLite boundary, MC-5 Gate 2.1 staging validation, shared MC-6 contracts and frontend shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, and bounded redacted Logs.
+
+The next Mission Control milestone is MC-6.9 design/inspection only. It is expected to extend existing event, incident, history, and read-only repository projections with bounded evidence/timeline views, cursor pagination, comparison queries, and safe cross-links. MC-6.10 Settings posture, MC-6.11 TUI, MC-6.12 action control, and MC-6.13 AI advisor integration remain respectively planned or future. None of those milestones authorize changes to the broader `aipm update` transaction.
+
+The broader roadmap work remains independently tracked:
+
+| Workstream | Status after MC-6.8 |
+|---|---|
+| Update planner and typed risk plan | Local implementation exists; further production-grade planning and integration hardening remain. |
+| Side-effect-free dry-run and explicit approval | Implemented locally and must remain protected by regression tests. |
+| Critical Git transaction safety | Further integration coverage and operational validation remain. |
+| Restore points and deterministic rollback | Explicit restore tooling and rollback-manager work remain. |
+| Structured audit history | Local redacted audit records exist; broader release/integration validation remains. |
+| Disposable Git/Docker integration fixtures | Remaining. |
+| CI, release, contribution, upgrade, and security documentation | Remaining release-readiness work. |
+| Real VPS inspection | Separate read-only, explicitly approved operation; no state-changing commands are implied. |
+
+Mission Control does not perform update execution, remediation, or public exposure. Its loopback-only, GET-only, read-only posture remains a separate safety boundary from any future AIPM management control plane.

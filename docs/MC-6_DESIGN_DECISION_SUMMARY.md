@@ -33,17 +33,20 @@ MC-6 must preserve `read_only=True`, SQLite URI `mode=ro`, `PRAGMA query_only=ON
 
 No API or UI response may expose credentials, secret references, destination values, tokens, authorization material, raw provider payloads, tracebacks, or unnecessary private paths. No first-release route may acknowledge incidents, activate notifications, start or stop services, mutate Docker, update Git projects, execute shell commands, or change Cloudflare.
 
-## Recommended next step
+## Current implementation and recommended next step
 
-Approve **MC-6.1 — shared contracts and UI foundation** as a separate implementation milestone. Its scope should be limited to stable observation-state/query contracts, a deduplicated polling scheduler, secret-safe fixtures, incremental extraction of the current frontend, and tests proving that all existing MC-5 behavior remains unchanged.
+MC-6.1 through MC-6.8 have now been implemented, reviewed, validated, committed, and pushed. MC-6.4 was reconciled because the Server capability already existed through MC-6.3. MC-6.7.1 reconciled the Systemd registry so Cloudflared remains Docker-owned, and MC-6.8 delivered the bounded redacted Logs façade/API/page.
 
-MC-6.1 should stop for review before adding Systemd, Logs, TUI, public ingress, or any write/action capability.
+The current checkpoint is `d1f692948a014197eda60616fd602e8061959316`. The next milestone is **MC-6.9 design/inspection only**, covering bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links through existing read-only repositories and MC-3 contracts. MC-6.9 must stop for review before implementation. MC-6.10 Settings posture and MC-6.11 TUI remain planned; MC-6.12 action control and MC-6.13 AI Agent integration remain future and separately gated.
+
+Production deployment remains a separate approval gate. The loopback-only dashboard, notifications-disabled posture, read-only SQLite/WAL/SHM boundary, Cloudflared ownership rule, and no-action API boundary remain mandatory.
 
 ## Design status
 
 ```text
 MC6_DESIGN_STATUS=COMPLETE
-IMPLEMENTATION_STARTED=NO
+IMPLEMENTATION_STATUS=COMPLETE_THROUGH_MC6_8
+NEXT_MILESTONE=MC6_9_DESIGN_ONLY
 PRODUCTION_CHANGES=NONE
 WRITE_ACTIONS_AUTHORIZED=NO
 PUBLIC_INGRESS_AUTHORIZED=NO

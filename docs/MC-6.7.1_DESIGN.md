@@ -1,9 +1,10 @@
 # MC-6.7.1 Design: Verified Infrastructure Systemd Allow-List Refinement
 
-**Status:** Design and inspection only
-**Baseline:** `64d5bb52d017317cff7488fcc4f1859fbb680818`
-**Implementation status:** Not started
-**Scope:** Backend-owned Systemd registry refinement only; no source, test, runtime, deployment, or configuration changes in this milestone.
+**Design review status:** Complete and approved (historical design checkpoint)
+**Design baseline:** `64d5bb52d017317cff7488fcc4f1859fbb680818`
+**Implementation status:** Complete and pushed in the subsequent MC-6.7.1 checkpoint
+**Scope:** Backend-owned Systemd registry refinement only; no source, test, runtime, deployment, or configuration changes were authorized by the original design.
+**Current status note:** The seven-entry registry is implemented. Cloudflared is absent from the Systemd registry and remains Docker-owned. MC-6.8 and its Logs design/implementation are also complete; MC-6.9 remains unstarted.
 
 ## 1. Objective
 

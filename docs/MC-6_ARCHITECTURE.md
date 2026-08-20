@@ -201,6 +201,18 @@ A React/Vite migration is not the first implementation step. It may be reconside
 [8]: ../src/aipm/models/telemetry.py "Typed telemetry and freshness contracts"
 [9]: ../ops/systemd/aipm-dashboard.service "Validated production dashboard service template"
 
+## Current implementation reconciliation
+
+**Updated:** 2026-08-20
+
+The MC-6 architecture described above is now implemented through **MC-6.8**. The completed slices are MC-6.1 contracts and scheduler, MC-6.2 vanilla shell, MC-6.3 Server/Host Intelligence, MC-6.5 Docker intelligence, MC-6.6 Project/Application Intelligence, MC-6.7/6.7.1 Systemd observation, and MC-6.8 bounded redacted Logs. MC-6.4 was reconciled because the Server capability already existed through MC-6.3.
+
+The current pushed checkpoint is `d1f692948a014197eda60616fd602e8061959316`. The implementation continues to use FastAPI, existing capability/service/provider/repository boundaries, typed Observation contracts, vanilla static modules, centralized bounded polling, existing telemetry/event/incident/history projections, and the validated read-only SQLite boundary. No second telemetry/event database, collector, worker, or provider ownership layer was introduced.
+
+The next planned slice is MC-6.9 design/inspection only. It must extend existing incident/history evidence and cross-links without changing MC-3 keys, incident correlation, notification projections, schemas, or read-only repository behavior. MC-6.10 is planned for safe settings/notification posture, MC-6.11 for a shared Typer/Rich TUI, and MC-6.12/6.13 remain future action-control and AI-advisor gates.
+
+The deployment architecture remains intentionally separate from implementation. The dashboard is loopback-only, public ingress is not enabled, notifications remain disabled, Cloudflared remains Docker-owned, and permanent service installation requires an explicit read-only production preflight and deployment approval. The preserved Gate 2.1 harness SHA-256 is `9e12cdc01f901381381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7`.
+
 ## Classification
 
 - **EXISTS:** current MC-1 through MC-5 read-only dashboard, telemetry, history, events, incidents, notification audit, service health, and loopback deployment contracts.

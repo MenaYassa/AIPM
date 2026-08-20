@@ -1,10 +1,12 @@
 # MC-6.7 Design — Allow-Listed Systemd Observation
 
-**Status:** Design and inspection only
+**Design review status:** Complete and approved (historical design checkpoint)
 
-**Baseline:** `f55397374cb4a8648e47bd49d9afcf591924369f`
+**Design baseline:** `f55397374cb4a8648e47bd49d9afcf591924369f`
 
-**Implementation status:** Not started
+**Implementation status:** Complete and pushed; refined by MC-6.7.1
+
+**Current status note:** The read-only Systemd façade/API/page is complete. The allow-list was subsequently reconciled to seven genuine units, with Cloudflared removed from Systemd and retained under Docker ownership. MC-6.8 is complete; MC-6.9 remains unstarted.
 
 ## 1. Exact roadmap objective
 
