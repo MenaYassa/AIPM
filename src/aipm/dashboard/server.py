@@ -16,6 +16,7 @@ from aipm.capabilities.dashboard.project_api import DashboardProjectApi
 from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
 from aipm.capabilities.dashboard.logs_api import DashboardLogsApi
 from aipm.capabilities.dashboard.settings_api import DashboardSettingsApi
+from aipm.capabilities.dashboard.context import MissionControlContext
 from aipm.core.app import Application
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -36,16 +37,29 @@ def create_app(
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
-    api = dashboard_api or DashboardApi.from_application(app_context, include_history=True)
-    event_api = incidents_api or DashboardIncidentsApi.from_application(app_context)
-    notification_api = notifications_api or DashboardNotificationsApi.from_application(app_context)
-    health_api = service_health_api or DashboardServiceHealthApi.from_application(app_context, dashboard_api=api, incidents_api=event_api)
-    host_api = server_api or DashboardServerApi.from_application(app_context, dashboard_api=api, incidents_api=event_api, service_health_api=health_api)
-    docker_detail_api = docker_api or DashboardDockerApi.from_application(app_context, dashboard_api=api)
-    project_detail_api = project_api or DashboardProjectApi.from_application(app_context, dashboard_api=api)
-    systemd_observation_api = systemd_api or DashboardSystemdApi.from_application(app_context)
-    logs_observation_api = logs_api or DashboardLogsApi.from_application(app_context)
-    settings_posture_api = settings_api or DashboardSettingsApi.from_application(app_context, service_health_api=health_api)
+    context = MissionControlContext.from_application(
+        app_context,
+        dashboard=dashboard_api,
+        incidents=incidents_api,
+        notifications=notifications_api,
+        service_health=service_health_api,
+        server=server_api,
+        docker=docker_api,
+        projects=project_api,
+        systemd=systemd_api,
+        logs=logs_api,
+        settings=settings_api,
+    )
+    api = context.dashboard
+    event_api = context.incidents
+    notification_api = context.notifications
+    health_api = context.service_health
+    host_api = context.server
+    docker_detail_api = context.docker
+    project_detail_api = context.projects
+    systemd_observation_api = context.systemd
+    logs_observation_api = context.logs
+    settings_posture_api = context.settings
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
