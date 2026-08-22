@@ -1,0 +1,26 @@
+[Unit]
+Description=AIPM MC-6.12B trusted provenance process
+Requires=aipm-provenance.socket
+After=local-fs.target aipm-provenance.socket
+
+[Service]
+Type=simple
+User=aipm-provenance
+Group=aipm-provenance
+WorkingDirectory=/opt/aipm-provenance/current/app
+ExecStart=/opt/aipm-provenance/current/venv/bin/python -m aipm.provenance.trusted_service --socket-activation
+EnvironmentFile=/etc/aipm/provenance/service.conf
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/aipm-provenance/current /etc/aipm/provenance
+InaccessiblePaths=/root/.ssh /home/mina/.ssh /home/ubuntu/.ssh
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=AIPM MC-6.12B trusted provenance observation socket
+ConditionPathIsDirectory=/run/aipm
+After=local-fs.target
+
+[Socket]
+ListenStream=/run/aipm/provenance.sock
+SocketUser=aipm-provenance
+SocketGroup=aipm-provenance-client
+SocketMode=0660
+DirectoryMode=0750
+RemoveOnStop=yes
+Service=aipm-provenance.service
+
+[Install]
+WantedBy=sockets.target
