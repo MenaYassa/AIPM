@@ -6,7 +6,11 @@ from types import SimpleNamespace
 from git import Repo
 
 from aipm.core.config import ConfigManager
+from aipm.core.exceptions import AIPMError
+import pytest
+
 from aipm.models.config import DiscoveryConfig
+from aipm.services.project.service import DiscoveryLimitExceeded
 from aipm.models.project import Project
 from aipm.services.backup.engine import BackupEngine
 from aipm.services.project.service import ProjectService
@@ -47,7 +51,7 @@ def test_project_discovery_honors_depth_and_returns_git_state(tmp_path: Path):
         discovery=DiscoveryConfig(search_paths=[str(tmp_path)], max_depth=3)
     )
     service = ProjectService(app=SimpleNamespace(config=config))
-    projects = service.discover()
+    projects = service.discover(bounded=True)
 
     names = {project.name for project in projects}
     assert names == {"compose-project", "git-project"}
@@ -56,6 +60,35 @@ def test_project_discovery_honors_depth_and_returns_git_state(tmp_path: Path):
     assert git_state.exists is True
     assert git_state.dirty is False
     assert git_state.last_commit_message == "initial"
+
+
+def test_project_discovery_stops_at_directory_bound(tmp_path: Path):
+    for index in range(4):
+        (tmp_path / f"dir-{index}").mkdir()
+    config = SimpleNamespace(discovery=DiscoveryConfig(search_paths=[str(tmp_path)], max_directories=2))
+    service = ProjectService(app=SimpleNamespace(config=config))
+    with pytest.raises(DiscoveryLimitExceeded, match="directory bound"):
+        service.discover(bounded=True)
+
+
+def test_project_discovery_stops_at_project_bound(tmp_path: Path):
+    for index in range(3):
+        project = tmp_path / f"project-{index}"
+        project.mkdir()
+        (project / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    config = SimpleNamespace(discovery=DiscoveryConfig(search_paths=[str(tmp_path)], max_projects=2))
+    service = ProjectService(app=SimpleNamespace(config=config))
+    with pytest.raises(DiscoveryLimitExceeded, match="project bound"):
+        service.discover(bounded=True)
+
+
+def test_project_discovery_rejects_whole_home_root(monkeypatch, tmp_path: Path):
+    from aipm.core.config import ConfigManager
+    monkeypatch.setattr("aipm.core.config.Path.home", lambda: tmp_path)
+    path = tmp_path / "config.yaml"
+    path.write_text(f"logging: {{}}\ndiscovery:\n  search_paths: ['{tmp_path}']\ntelemetry:\n  database_path: /tmp/mc.db\n", encoding="utf-8")
+    with pytest.raises(AIPMError, match="entire home"):
+        ConfigManager(path)
 
 
 def test_backup_excludes_generated_directories(tmp_path: Path):

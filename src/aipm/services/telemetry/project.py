@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from threading import Event
 from typing import Any, Callable
 
 from aipm.core.exceptions import ProviderError
@@ -19,21 +21,33 @@ class ProjectTelemetryService:
         self._cached: ProjectInventorySnapshot | None = None
         self._sampled_at: datetime | None = None
 
-    def snapshot(self) -> ProjectInventorySnapshot:
+    def snapshot(self, *, cancel_event: Event | None = None, deadline: float | None = None, bounded: bool = False) -> ProjectInventorySnapshot:
         """Perform a project discovery refresh and update the last-known cache."""
         sampled_at = self.clock()
+        started = time.monotonic()
         search_paths = tuple(self.project_service.app.config.discovery.search_paths)
         try:
-            projects = self.project_service.discover()
-        except ProviderError as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                raise TimeoutError("project discovery cancelled")
+            if cancel_event is None and deadline is None and not bounded:
+                projects = self.project_service.discover()
+            else:
+                projects = self.project_service.discover(cancel_event=cancel_event, deadline=deadline, bounded=True)
+        except (ProviderError, TimeoutError) as exc:
             error = self._error("PROJECT_DISCOVERY_UNAVAILABLE", "Project discovery unavailable", exc)
+            if self.logger is not None:
+                self.logger.info("Project discovery finished", extra={"duration_ms": max(0, int((time.monotonic() - started) * 1000)), "project_count": 0, "status": "unavailable"})
             self._cached = ProjectInventorySnapshot(available=False, status="unavailable", search_paths=search_paths, error=error, freshness=TelemetryFreshness.from_sample(self._sampled_at, now=sampled_at, max_age_seconds=self.stale_after_seconds, available=False, error=error))
             return self._cached
         except Exception as exc:
             error = self._error("PROJECT_DISCOVERY_FAILED", "Project discovery unavailable", exc)
+            if self.logger is not None:
+                self.logger.info("Project discovery finished", extra={"duration_ms": max(0, int((time.monotonic() - started) * 1000)), "project_count": 0, "status": "failed"})
             self._cached = ProjectInventorySnapshot(available=False, status="unavailable", search_paths=search_paths, error=error, freshness=TelemetryFreshness.from_sample(self._sampled_at, now=sampled_at, max_age_seconds=self.stale_after_seconds, available=False, error=error))
             return self._cached
         self._sampled_at = sampled_at
+        if self.logger is not None:
+            self.logger.info("Project discovery finished", extra={"duration_ms": max(0, int((time.monotonic() - started) * 1000)), "project_count": len(projects), "status": "healthy"})
         self._cached = ProjectInventorySnapshot(available=True, status="healthy", search_paths=search_paths, projects=tuple(ProjectSnapshot(project=project) for project in projects), freshness=TelemetryFreshness.from_sample(sampled_at, now=sampled_at, max_age_seconds=self.stale_after_seconds))
         return self._cached
 

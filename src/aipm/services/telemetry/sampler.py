@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timedelta, timezone
+from threading import Event
 from typing import Any, Callable
 
 from aipm.mappers.telemetry_history import TelemetryHistoryMapper
@@ -64,9 +65,9 @@ class TelemetrySampler:
             self._log("Resource telemetry refresh failed", exc)
             return SampleResult(sampled_at=_utc(started_at), run_id=None, host_rows=0, container_rows=0, project_rows=0, tunnel_rows=0, retention_deleted=0, error="Resource telemetry unavailable")
 
-    def refresh_project_once(self) -> None:
+    def refresh_project_once(self, cancel_event: Event | None = None, deadline: float | None = None) -> None:
         if self.config.enabled:
-            self.telemetry_service.refresh_projects()
+            self.telemetry_service.projects.snapshot(cancel_event=cancel_event, deadline=deadline, bounded=True)
 
     def sample_once(self) -> SampleResult:
         started_at = self.clock()

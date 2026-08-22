@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import signal
 import threading
 import time
@@ -22,9 +23,10 @@ class _SingleFlightSlot:
         self.skipped_count = 0
         self.error: Exception | None = None
         self._timed_out = False
+        self._cancel_event = threading.Event()
         self._lock = threading.Lock()
 
-    def start(self, work: Callable[[], Any], *, timeout_seconds: int | None = None) -> bool:
+    def start(self, work: Callable[..., Any], *, timeout_seconds: int | None = None, cancellable: bool = False) -> bool:
         with self._lock:
             if self.running:
                 self.skipped_count += 1
@@ -33,7 +35,9 @@ class _SingleFlightSlot:
             self.last_started_at = time.monotonic()
             self.error = None
             self._timed_out = False
-        thread = threading.Thread(target=self._run, args=(work,), name=f"aipm-{self.name}", daemon=True)
+            self._cancel_event.clear()
+            deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+        thread = threading.Thread(target=self._run, args=(work, cancellable, deadline), name=f"aipm-{self.name}", daemon=True)
         thread.start()
         if timeout_seconds is not None:
             timer = threading.Timer(timeout_seconds, self._mark_timeout)
@@ -41,9 +45,9 @@ class _SingleFlightSlot:
             timer.start()
         return True
 
-    def _run(self, work: Callable[[], Any]) -> None:
+    def _run(self, work: Callable[..., Any], cancellable: bool, deadline: float | None) -> None:
         try:
-            result = work()
+            result = work(self._cancel_event, deadline) if cancellable else work()
             status = "healthy" if not getattr(result, "error", None) else "unavailable"
         except Exception as exc:
             status = "unavailable"
@@ -64,7 +68,12 @@ class _SingleFlightSlot:
         with self._lock:
             if self.running:
                 self._timed_out = True
+                self._cancel_event.set()
                 self.last_status = "timeout"
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancel_event.set()
 
     def state(self) -> SlowTaskState:
         with self._lock:
@@ -85,6 +94,14 @@ class TelemetrySamplingCoordinator:
         self.resource_slot = _SingleFlightSlot("resource", logger)
         self.project_slot = _SingleFlightSlot("project", logger)
 
+    def _refresh_project(self, cancel_event: threading.Event, deadline: float | None) -> Any:
+        method = self.sampler.refresh_project_once
+        try:
+            inspect.signature(method).bind(cancel_event, deadline)
+        except (TypeError, ValueError):
+            return method()
+        return method(cancel_event, deadline)
+
     def run(self) -> None:
         self._install_signal_handlers()
         now = self._monotonic()
@@ -97,7 +114,7 @@ class TelemetrySamplingCoordinator:
                 self.resource_slot.start(self.sampler.refresh_resource_once, timeout_seconds=self.config.resource_timeout_seconds)
                 next_resource = now + self.config.resource_interval_seconds
             if now >= next_project:
-                self.project_slot.start(self.sampler.refresh_project_once, timeout_seconds=self.config.project_timeout_seconds)
+                self.project_slot.start(self._refresh_project, timeout_seconds=self.config.project_timeout_seconds, cancellable=True)
                 next_project = now + self.config.project_interval_seconds
             if now >= next_fast:
                 result = self.sampler.sample_fast_once()
@@ -114,6 +131,8 @@ class TelemetrySamplingCoordinator:
     def request_stop(self, signum: int | None = None, frame: Any | None = None) -> None:
         self._stop_requested = True
         self._stop_event.set()
+        self.resource_slot.cancel()
+        self.project_slot.cancel()
         if self.logger is not None:
             self.logger.info("Telemetry sampling coordinator stop requested")
 

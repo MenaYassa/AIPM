@@ -3,13 +3,20 @@ discovery:
   - node_modules
   - .git
   - venv
-  - aipm  # Add this so AIPM doesn't scan itself!
-  - .venv # Add this to ignore virtual environments
+  - aipm
+  - .venv
+  max_directories: 2000
+  max_entries: 10000
+  max_projects: 128
+  max_git_enrichments: 128
+  git_timeout_seconds: 5
+  max_git_items: 100
   search_paths:
-  - /home/ubuntu/workspace
-  - /home/ubuntu/docker
-  - /home/ubuntu/projects
-  - /home/ubuntu          # <--- Add your home directory
+  - /home/ubuntu/aipm
+  - /home/ubuntu/fastsdcpu
+  - /home/ubuntu/invoicing
+  - /home/ubuntu/local-ai-packaged
+  - /home/ubuntu/EAG
 logging:
   backup_count: 3
   file: logs/aipm.log

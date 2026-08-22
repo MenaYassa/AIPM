@@ -83,8 +83,15 @@ class ConfigManager:
             raise ValueError("logging.backup_count cannot be negative")
         if discovery_config.max_depth < 0:
             raise ValueError("discovery.max_depth cannot be negative")
+        if discovery_config.max_directories <= 0 or discovery_config.max_entries <= 0 or discovery_config.max_projects <= 0 or discovery_config.max_git_enrichments <= 0 or discovery_config.max_git_items <= 0:
+            raise ValueError("discovery bounds must be greater than zero")
+        if discovery_config.git_timeout_seconds <= 0:
+            raise ValueError("discovery.git_timeout_seconds must be greater than zero")
         if not discovery_config.search_paths:
             raise ValueError("discovery.search_paths cannot be empty")
+        home = Path.home().resolve()
+        if any(Path(path).expanduser().resolve() == home for path in discovery_config.search_paths):
+            raise ValueError("discovery.search_paths cannot be the entire home directory")
         if telemetry_config.interval_seconds <= 0:
             raise ValueError("telemetry.interval_seconds must be greater than zero")
         if telemetry_config.resource_interval_seconds <= 0 or telemetry_config.project_interval_seconds <= 0:

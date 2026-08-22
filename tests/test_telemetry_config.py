@@ -4,7 +4,7 @@ import pytest
 
 from aipm.core.config import ConfigManager
 from aipm.core.exceptions import AIPMError
-from aipm.models.config import EventConfig
+from aipm.models.config import DiscoveryConfig, EventConfig
 
 
 def write_config(path: Path, telemetry: str) -> None:
@@ -20,6 +20,16 @@ def test_event_defaults_are_safe():
     assert config.interval_seconds == 15
     assert config.event_retention_days == 30
     assert config.incident_retention_days == 180
+
+
+def test_discovery_defaults_are_bounded():
+    config = DiscoveryConfig()
+    assert config.max_directories == 2000
+    assert config.max_entries == 10000
+    assert config.max_projects == 128
+    assert config.max_git_enrichments == 128
+    assert config.git_timeout_seconds == 5.0
+    assert config.max_git_items == 100
 
 
 def test_telemetry_defaults_are_safe(tmp_path):
@@ -45,11 +55,33 @@ def test_invalid_telemetry_config_fails_clearly(tmp_path, telemetry):
         ConfigManager(path)
 
 
+@pytest.mark.parametrize("field", ["max_directories", "max_entries", "max_projects", "max_git_enrichments", "max_git_items"])
+def test_invalid_discovery_bounds_fail_clearly(tmp_path, field):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"logging: {{}}\ndiscovery:\n  search_paths: ['/tmp']\n  {field}: 0\ntelemetry:\n  database_path: /tmp/mc.db\n", encoding="utf-8")
+    with pytest.raises(AIPMError, match="Failed to load configuration"):
+        ConfigManager(path)
+
+
+def test_invalid_git_timeout_fails_clearly(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("logging: {}\ndiscovery:\n  search_paths: ['/tmp']\n  git_timeout_seconds: 0\ntelemetry:\n  database_path: /tmp/mc.db\n", encoding="utf-8")
+    with pytest.raises(AIPMError, match="Failed to load configuration"):
+        ConfigManager(path)
+
+
 def test_invalid_event_config_fails_clearly(tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text("logging: {}\ndiscovery:\n  search_paths: ['/tmp']\nevents:\n  interval_seconds: 0\n", encoding="utf-8")
     with pytest.raises(AIPMError, match="Failed to load configuration"):
         ConfigManager(path)
+
+
+def test_explicit_aipm_config_environment_selects_config_source(tmp_path, monkeypatch):
+    path = tmp_path / "selected.yaml"
+    path.write_text("logging: {}\ndiscovery:\n  search_paths: ['/srv/approved']\ntelemetry:\n  database_path: /tmp/mc.db\n", encoding="utf-8")
+    monkeypatch.setenv("AIPM_CONFIG", str(path))
+    assert ConfigManager().config.discovery.search_paths == ["/srv/approved"]
 
 
 def test_telemetry_database_environment_override(tmp_path, monkeypatch):

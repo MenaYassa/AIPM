@@ -15,7 +15,7 @@ class LoggingConfig:
 
 @dataclass
 class DiscoveryConfig:
-    search_paths: list[str] = field(default_factory=lambda: [str(Path.home())])
+    search_paths: list[str] = field(default_factory=lambda: [str(Path.home() / "projects")])
     ignore_dirs: list[str] = field(
         default_factory=lambda: [
             ".git",
@@ -35,6 +35,12 @@ class DiscoveryConfig:
         ]
     )
     max_depth: int = 4
+    max_directories: int = 2000
+    max_entries: int = 10000
+    max_projects: int = 128
+    max_git_enrichments: int = 128
+    git_timeout_seconds: float = 5.0
+    max_git_items: int = 100
     follow_symlinks: bool = False
 
 
