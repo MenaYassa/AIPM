@@ -548,10 +548,18 @@ class SQLiteHistoryRepository:
             if deleted == 0:
                 break
 
+        with self._connection() as connection:
+            has_events_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+            ).fetchone() is not None
+        event_dependency_guard = ""
+        if has_events_table:
+            event_dependency_guard = "AND NOT EXISTS (SELECT 1 FROM events AS child WHERE child.source_run_id = parent.id)"
+
         while True:
             with self._connection() as connection:
                 cursor = connection.execute(
-                    """
+                    f"""
                     DELETE FROM sample_runs
                     WHERE id IN (
                         SELECT parent.id
@@ -561,6 +569,7 @@ class SQLiteHistoryRepository:
                           AND NOT EXISTS (SELECT 1 FROM container_samples AS child WHERE child.run_id = parent.id)
                           AND NOT EXISTS (SELECT 1 FROM project_samples AS child WHERE child.run_id = parent.id)
                           AND NOT EXISTS (SELECT 1 FROM tunnel_samples AS child WHERE child.run_id = parent.id)
+                          {event_dependency_guard}
                         LIMIT ?
                     )
                     """,

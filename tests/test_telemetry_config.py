@@ -94,6 +94,42 @@ def test_telemetry_database_environment_override(tmp_path, monkeypatch):
     assert ConfigManager(path).config.telemetry.database_path == str(override)
 
 
+def test_managed_consumers_resolve_same_explicit_path_across_home_directories(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    canonical = tmp_path / "canonical" / "mission_control.db"
+    write_config(config_path, f"  interval_seconds: 15\n  retention_days: 1\n  database_path: {canonical}\n")
+    monkeypatch.setenv("AIPM_CONFIG", str(config_path))
+    monkeypatch.setenv("AIPM_TELEMETRY_DB", str(canonical))
+
+    resolved = []
+    for home in (tmp_path / "mina-home", tmp_path / "ubuntu-home"):
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        resolved.append(ConfigManager().config.telemetry.database_path)
+
+    assert resolved == [str(canonical), str(canonical)]
+
+
+def test_managed_consumer_wiring_uses_shared_application_telemetry_path():
+    root = Path(__file__).resolve().parents[1]
+    expected = "application.config.telemetry.database_path"
+    assert expected in (root / "src/aipm/capabilities/dashboard/api.py").read_text(encoding="utf-8")
+    assert expected in (root / "src/aipm/capabilities/dashboard/history_api.py").read_text(encoding="utf-8")
+    assert expected in (root / "src/aipm/capabilities/events/commands.py").read_text(encoding="utf-8")
+    telemetry_commands = (root / "src/aipm/capabilities/telemetry/commands.py").read_text(encoding="utf-8")
+    assert "config = application.config.telemetry" in telemetry_commands
+    assert "SQLiteHistoryRepository(config.database_path)" in telemetry_commands
+
+
+def test_dashboard_service_template_uses_canonical_mina_telemetry_path():
+    root = Path(__file__).resolve().parents[1]
+    unit = (root / "ops/systemd/aipm-dashboard.service").read_text(encoding="utf-8")
+    assert "Environment=AIPM_CONFIG=/home/mina/.config/aipm/config.yaml" in unit
+    assert "Environment=AIPM_TELEMETRY_DB=/home/mina/.local/state/aipm/telemetry/mission_control.db" in unit
+    assert "AIPM_TELEMETRY_DB=/home/ubuntu/.local/state/aipm/telemetry/mission_control.db" not in unit
+    assert "/home/mina/.local/state/aipm/telemetry" in unit
+
+
 def test_mc21_telemetry_defaults_are_split_and_bounded(tmp_path):
     config = ConfigManager(tmp_path / "config.yaml").config.telemetry
     assert config.sampling_mode == "split"

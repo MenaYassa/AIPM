@@ -7,7 +7,8 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/home/ubuntu/aipm
 Environment=PYTHONUNBUFFERED=1
-Environment=AIPM_TELEMETRY_DB=/home/ubuntu/.local/state/aipm/telemetry/mission_control.db
+Environment=AIPM_CONFIG=/home/mina/.config/aipm/config.yaml
+Environment=AIPM_TELEMETRY_DB=/home/mina/.local/state/aipm/telemetry/mission_control.db
 ExecStart=/home/ubuntu/aipm/.venv/bin/aipm dashboard --host 127.0.0.1 --port 8787
 Restart=on-failure
 RestartSec=5s
@@ -16,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadOnlyPaths=/home/ubuntu/aipm /home/ubuntu/.config/aipm /home/ubuntu/.local/state/aipm/telemetry
+ReadOnlyPaths=/home/ubuntu/aipm /home/mina/.config/aipm /home/mina/.local/state/aipm/telemetry
 InaccessiblePaths=/home/ubuntu/.ssh /home/ubuntu/.config/cloudflared
 RestrictSUIDSGID=true
 UMask=0077

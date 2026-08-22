@@ -9,6 +9,7 @@ from aipm.models.history import (
     SampleRunRecord,
     TunnelHistoryPoint,
 )
+from aipm.repositories.events.sqlite import SCHEMA as EVENTS_SCHEMA
 from aipm.repositories.telemetry.sqlite import SQLiteHistoryRepository
 
 
@@ -121,6 +122,61 @@ def test_retention_deletes_old_rows_with_indexed_plans(tmp_path):
     assert _table_counts(path)["sample_runs"] == 1
     for table in ("container_samples", "project_samples", "container_resource_samples"):
         assert f"SCAN {table}" not in _retention_plan(path, table)
+
+
+def test_retention_preserves_event_referenced_sample_runs_until_event_is_removed(tmp_path):
+    path = tmp_path / "telemetry.db"
+    repository = SQLiteHistoryRepository(path)
+    old = datetime(2026, 8, 15, tzinfo=UTC)
+    recent = datetime(2026, 8, 16, tzinfo=UTC)
+    run, host, containers, projects, tunnel = sample_rows(old)
+    run_id = repository.save_sample(run, host, containers, projects, tunnel)
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(EVENTS_SCHEMA)
+        connection.execute(
+            """
+            INSERT INTO events (
+                event_key, occurred_at, event_type, severity, source,
+                resource_type, resource_id, title, description,
+                source_run_id, correlation_key, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "event-retention-1",
+                int(old.timestamp()),
+                "container_state_changed",
+                "warning",
+                "telemetry",
+                "container",
+                "id-1",
+                "Retention dependency",
+                "Keeps the source run referenced",
+                run_id,
+                "container:id-1",
+                int(old.timestamp()),
+            ),
+        )
+
+    deleted_before_event_removal = repository.delete_older_than(recent)
+    assert deleted_before_event_removal >= 5
+    counts = _table_counts(path)
+    assert counts["sample_runs"] == 1
+    assert counts["host_samples"] == 0
+    assert counts["container_samples"] == 0
+    assert counts["project_samples"] == 0
+    assert counts["tunnel_samples"] == 0
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        connection.execute("DELETE FROM events WHERE source_run_id = ?", (run_id,))
+
+    deleted_after_event_removal = repository.delete_older_than(recent)
+    assert deleted_after_event_removal == 1
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM sample_runs").fetchone()[0] == 0
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_read_only_open_does_not_mutate_retention_schema(tmp_path):
