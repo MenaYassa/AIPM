@@ -74,6 +74,11 @@ class FakeTelemetry:
             raise self.error
         return self.value
 
+    def fast_snapshot(self):
+        if self.error:
+            raise self.error
+        return self.value
+
 
 class FakeRepository:
     def __init__(self, error=None):
@@ -98,7 +103,7 @@ class FakeRepository:
         pass
 
 
-def test_sampler_persists_mapped_snapshot_and_retains_by_timestamp(tmp_path):
+def test_sampler_persists_mapped_snapshot_without_retention(tmp_path):
     repository = FakeRepository()
     config = TelemetryConfig(database_path=str(tmp_path / "telemetry.db"), retention_days=1)
     sampler = TelemetrySampler(FakeTelemetry(), TelemetryHistoryMapper(), repository, config, clock=lambda: NOW, monotonic=lambda: 1.0)
@@ -108,8 +113,28 @@ def test_sampler_persists_mapped_snapshot_and_retains_by_timestamp(tmp_path):
     assert result.container_rows == 1
     assert result.project_rows == 1
     assert result.tunnel_rows == 1
-    assert result.retention_deleted == 3
+    assert result.retention_deleted == 0
     assert repository.saved[0][0].sampled_at == NOW
+    assert repository.deleted == []
+
+
+def test_fast_sampling_does_not_run_retention(tmp_path):
+    repository = FakeRepository()
+    config = TelemetryConfig(database_path=str(tmp_path / "telemetry.db"), retention_days=1)
+    sampler = TelemetrySampler(FakeTelemetry(), TelemetryHistoryMapper(), repository, config, clock=lambda: NOW, monotonic=lambda: 1.0)
+    result = sampler.sample_fast_once()
+    assert result.error is None
+    assert repository.deleted == []
+
+
+def test_retention_cleanup_is_dedicated_and_reports_metrics(tmp_path):
+    repository = FakeRepository()
+    config = TelemetryConfig(database_path=str(tmp_path / "telemetry.db"), retention_days=1)
+    sampler = TelemetrySampler(FakeTelemetry(), TelemetryHistoryMapper(), repository, config, clock=lambda: NOW, monotonic=lambda: 1.0)
+    result = sampler.cleanup_retention()
+    assert result.error is None
+    assert result.deleted_rows == 3
+    assert result.duration_ms == 0
     assert repository.deleted[0].tzinfo is UTC
 
 

@@ -93,6 +93,7 @@ class TelemetrySamplingCoordinator:
         self._stop_event = threading.Event()
         self.resource_slot = _SingleFlightSlot("resource", logger)
         self.project_slot = _SingleFlightSlot("project", logger)
+        self.retention_slot = _SingleFlightSlot("retention", logger)
 
     def _refresh_project(self, cancel_event: threading.Event, deadline: float | None) -> Any:
         method = self.sampler.refresh_project_once
@@ -108,6 +109,7 @@ class TelemetrySamplingCoordinator:
         next_fast = now
         next_resource = now
         next_project = now
+        next_retention = now
         while not self._stop_requested:
             now = self._monotonic()
             if now >= next_resource and self.config.resource_sampling_enabled:
@@ -116,6 +118,9 @@ class TelemetrySamplingCoordinator:
             if now >= next_project:
                 self.project_slot.start(self._refresh_project, timeout_seconds=self.config.project_timeout_seconds, cancellable=True)
                 next_project = now + self.config.project_interval_seconds
+            if now >= next_retention and hasattr(self.sampler, "cleanup_retention"):
+                self.retention_slot.start(self.sampler.cleanup_retention, timeout_seconds=60)
+                next_retention = now + self.config.retention_interval_seconds
             if now >= next_fast:
                 result = self.sampler.sample_fast_once()
                 if result.error and self.logger is not None:
@@ -125,7 +130,10 @@ class TelemetrySamplingCoordinator:
                     next_fast = now + self.config.interval_seconds
             if self._stop_requested:
                 break
-            deadline = min(next_fast, next_resource if self.config.resource_sampling_enabled else next_fast, next_project)
+            deadlines = [next_fast, next_resource if self.config.resource_sampling_enabled else next_fast, next_project]
+            if hasattr(self.sampler, "cleanup_retention"):
+                deadlines.append(next_retention)
+            deadline = min(deadlines)
             self._sleep_interruptibly(max(0.0, deadline - self._monotonic()))
 
     def request_stop(self, signum: int | None = None, frame: Any | None = None) -> None:
@@ -133,6 +141,7 @@ class TelemetrySamplingCoordinator:
         self._stop_event.set()
         self.resource_slot.cancel()
         self.project_slot.cancel()
+        self.retention_slot.cancel()
         if self.logger is not None:
             self.logger.info("Telemetry sampling coordinator stop requested")
 

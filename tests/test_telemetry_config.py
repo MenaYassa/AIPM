@@ -37,6 +37,7 @@ def test_telemetry_defaults_are_safe(tmp_path):
     assert config.telemetry.enabled is True
     assert config.telemetry.interval_seconds == 15
     assert config.telemetry.retention_days == 1
+    assert config.telemetry.retention_interval_seconds == 900
     assert config.telemetry.database_path.endswith(".local/state/aipm/telemetry/mission_control.db")
 
 
@@ -45,6 +46,7 @@ def test_telemetry_defaults_are_safe(tmp_path):
     [
         "  interval_seconds: 0\n  retention_days: 1\n  database_path: /tmp/mc.db\n",
         "  interval_seconds: 15\n  retention_days: 0\n  database_path: /tmp/mc.db\n",
+        "  interval_seconds: 15\n  retention_interval_seconds: 0\n  database_path: /tmp/mc.db\n",
         "  interval_seconds: 15\n  retention_days: 1\n  database_path: ''\n",
     ],
 )
@@ -99,6 +101,7 @@ def test_mc21_telemetry_defaults_are_split_and_bounded(tmp_path):
     assert config.resource_timeout_seconds == 15
     assert config.resource_stale_after_seconds == 180
     assert config.slow_task_max_concurrency == 1
+    assert config.retention_interval_seconds == 900
 
 
 @pytest.mark.parametrize("telemetry", [

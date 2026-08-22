@@ -19,6 +19,9 @@ from aipm.models.history import (
 from aipm.repositories.readonly import require_read_only_filesystem
 
 
+RETENTION_BATCH_SIZE = 5000
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sample_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -499,14 +502,84 @@ class SQLiteHistoryRepository:
         ]
 
     def delete_older_than(self, cutoff: datetime) -> int:
+        """Delete stale telemetry in bounded, dependency-safe transactions."""
         self._assert_writable()
         cutoff_ts = _timestamp(cutoff)
+        total = 0
+
+        for table in ("host_samples", "container_samples", "project_samples", "tunnel_samples"):
+            while True:
+                deleted = self._delete_batch(table, "sampled_at < ?", (cutoff_ts,))
+                total += deleted
+                if deleted == 0:
+                    break
+
+        while True:
+            deleted = self._delete_batch(
+                "container_resource_samples",
+                "resource_run_id IN (SELECT id FROM resource_sample_runs WHERE sampled_at < ?)",
+                (cutoff_ts,),
+            )
+            total += deleted
+            if deleted == 0:
+                break
+
+        while True:
+            with self._connection() as connection:
+                cursor = connection.execute(
+                    """
+                    DELETE FROM resource_sample_runs
+                    WHERE id IN (
+                        SELECT parent.id
+                        FROM resource_sample_runs AS parent
+                        WHERE parent.sampled_at < ?
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM container_resource_samples AS child
+                              WHERE child.resource_run_id = parent.id
+                          )
+                        LIMIT ?
+                    )
+                    """,
+                    (cutoff_ts, RETENTION_BATCH_SIZE),
+                )
+                deleted = cursor.rowcount if cursor.rowcount >= 0 else 0
+            total += deleted
+            if deleted == 0:
+                break
+
+        while True:
+            with self._connection() as connection:
+                cursor = connection.execute(
+                    """
+                    DELETE FROM sample_runs
+                    WHERE id IN (
+                        SELECT parent.id
+                        FROM sample_runs AS parent
+                        WHERE parent.sampled_at < ?
+                          AND NOT EXISTS (SELECT 1 FROM host_samples AS child WHERE child.run_id = parent.id)
+                          AND NOT EXISTS (SELECT 1 FROM container_samples AS child WHERE child.run_id = parent.id)
+                          AND NOT EXISTS (SELECT 1 FROM project_samples AS child WHERE child.run_id = parent.id)
+                          AND NOT EXISTS (SELECT 1 FROM tunnel_samples AS child WHERE child.run_id = parent.id)
+                        LIMIT ?
+                    )
+                    """,
+                    (cutoff_ts, RETENTION_BATCH_SIZE),
+                )
+                deleted = cursor.rowcount if cursor.rowcount >= 0 else 0
+            total += deleted
+            if deleted == 0:
+                break
+
+        return total
+
+    def _delete_batch(self, table: str, predicate: str, values: tuple[object, ...]) -> int:
         with self._connection() as connection:
-            total = 0
-            for table in ("host_samples", "container_samples", "project_samples", "tunnel_samples", "container_resource_samples", "resource_sample_runs", "sample_runs"):
-                cursor = connection.execute(f"DELETE FROM {table} WHERE sampled_at < ?", (cutoff_ts,))
-                total += cursor.rowcount if cursor.rowcount >= 0 else 0
-            return total
+            cursor = connection.execute(
+                f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {predicate} LIMIT ?)",
+                (*values, RETENTION_BATCH_SIZE),
+            )
+            return cursor.rowcount if cursor.rowcount >= 0 else 0
 
     def close(self) -> None:
         """Connections are short-lived; this method exists for lifecycle symmetry."""

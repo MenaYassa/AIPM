@@ -25,6 +25,13 @@ class ResourceRefreshResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RetentionCleanupResult:
+    deleted_rows: int
+    duration_ms: int
+    error: TelemetryError | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SlowTaskState:
     name: str
     running: bool = False

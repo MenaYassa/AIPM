@@ -106,6 +106,8 @@ class ConfigManager:
             raise ValueError("telemetry.sampling_mode must be split or legacy")
         if telemetry_config.retention_days <= 0:
             raise ValueError("telemetry.retention_days must be greater than zero")
+        if telemetry_config.retention_interval_seconds <= 0:
+            raise ValueError("telemetry.retention_interval_seconds must be greater than zero")
         database_path = str(telemetry_config.database_path).strip()
         if not database_path:
             raise ValueError("telemetry.database_path cannot be empty")

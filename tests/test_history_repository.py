@@ -143,6 +143,37 @@ def test_read_only_open_does_not_mutate_retention_schema(tmp_path):
                 os.chmod(candidate, mode)
 
 
+def test_retention_removes_resource_children_by_parent_age(tmp_path):
+    path = tmp_path / "telemetry.db"
+    repository = SQLiteHistoryRepository(path)
+    old = datetime(2026, 8, 15, tzinfo=UTC)
+    recent = datetime(2026, 8, 16, tzinfo=UTC)
+    point = sample_rows(old)[2][0]
+    repository.save_resource_sample(old, [point], duration_ms=1, status="healthy")
+    with sqlite3.connect(path) as connection:
+        connection.execute("UPDATE container_resource_samples SET sampled_at = ? WHERE resource_run_id = 1", (int(recent.timestamp()),))
+    deleted = repository.delete_older_than(recent)
+    assert deleted == 2
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM resource_sample_runs").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM container_resource_samples").fetchone()[0] == 0
+
+
+def test_retention_deletes_in_configured_batches(tmp_path, monkeypatch):
+    import aipm.repositories.telemetry.sqlite as telemetry_sqlite
+
+    path = tmp_path / "telemetry.db"
+    repository = SQLiteHistoryRepository(path)
+    at = datetime(2026, 8, 15, tzinfo=UTC)
+    for _ in range(5):
+        run, host, containers, projects, tunnel = sample_rows(at)
+        repository.save_sample(run, host, containers, projects, tunnel)
+    monkeypatch.setattr(telemetry_sqlite, "RETENTION_BATCH_SIZE", 2)
+    deleted = repository.delete_older_than(datetime(2026, 8, 16, tzinfo=UTC))
+    assert deleted >= 25
+    assert _table_counts(path) == {table: 0 for table in _table_counts(path)}
+
+
 def test_sqlite_pragmas_are_enabled(tmp_path):
     path = tmp_path / "telemetry.db"
     repository = SQLiteHistoryRepository(path)

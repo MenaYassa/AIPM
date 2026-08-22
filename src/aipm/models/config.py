@@ -57,6 +57,7 @@ class TelemetryConfig:
     slow_task_max_concurrency: int = 1
     sampling_mode: str = "split"
     retention_days: int = 1
+    retention_interval_seconds: int = 900
     database_path: str = str(Path.home() / ".local" / "state" / "aipm" / "telemetry" / "mission_control.db")
 
 

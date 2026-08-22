@@ -120,6 +120,46 @@ def test_85_second_slow_resource_operation_does_not_delay_fast_loop():
     assert not gate.is_set()
 
 
+def test_retention_slot_is_single_flight_and_fast_sampling_continues():
+    gate = Event()
+    fast_calls = []
+    retention_calls = []
+
+    class Sampler:
+        def refresh_resource_once(self):
+            return None
+
+        def refresh_project_once(self):
+            return None
+
+        def sample_fast_once(self):
+            fast_calls.append(time.monotonic())
+            return SimpleNamespace(error=None)
+
+        def cleanup_retention(self):
+            retention_calls.append("retention")
+            gate.wait(timeout=0.15)
+            return SimpleNamespace(error=None)
+
+    sampler = Sampler()
+    config = TelemetryConfig(
+        interval_seconds=0.01,
+        resource_sampling_enabled=False,
+        project_interval_seconds=10,
+        retention_interval_seconds=0.01,
+    )
+    coordinator = TelemetrySamplingCoordinator(sampler, config, sleeper=lambda seconds: time.sleep(min(seconds, 0.002)))
+    worker = __import__("threading").Thread(target=coordinator.run, daemon=True)
+    worker.start()
+    time.sleep(0.05)
+    coordinator.request_stop()
+    gate.set()
+    worker.join(timeout=1)
+    assert len(fast_calls) >= 3
+    assert retention_calls == ["retention"]
+    assert coordinator.retention_slot.skipped_count > 0
+
+
 def test_legacy_runner_keeps_synchronous_sample_path():
     class LegacySampler:
         def __init__(self):

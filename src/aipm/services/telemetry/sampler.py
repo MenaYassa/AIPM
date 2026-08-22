@@ -8,6 +8,8 @@ from typing import Any, Callable
 from aipm.mappers.telemetry_history import TelemetryHistoryMapper
 from aipm.models.config import TelemetryConfig
 from aipm.models.history import SampleResult
+from aipm.models.telemetry import TelemetryError
+from aipm.models.telemetry_sampling import RetentionCleanupResult
 from aipm.repositories.telemetry.base import HistoryRepository
 from aipm.services.telemetry.dashboard import DashboardTelemetryService
 
@@ -44,12 +46,40 @@ class TelemetrySampler:
             snapshot = self.telemetry_service.fast_snapshot()
             mapped = self.mapper.to_sample(snapshot, duration_ms=max(0, int((self.monotonic() - started) * 1000)))
             run_id = self.repository.save_sample(mapped.run, mapped.host, mapped.containers, mapped.projects, mapped.tunnel)
-            cutoff = mapped.run.sampled_at - timedelta(days=self.config.retention_days)
-            deleted = self.repository.delete_older_than(cutoff)
-            return SampleResult(sampled_at=mapped.run.sampled_at, run_id=run_id, host_rows=1 if mapped.host else 0, container_rows=len(mapped.containers), project_rows=len(mapped.projects), tunnel_rows=1 if mapped.tunnel else 0, retention_deleted=deleted)
+            return SampleResult(sampled_at=mapped.run.sampled_at, run_id=run_id, host_rows=1 if mapped.host else 0, container_rows=len(mapped.containers), project_rows=len(mapped.projects), tunnel_rows=1 if mapped.tunnel else 0, retention_deleted=0)
         except Exception as exc:
             self._log("Fast telemetry sampling failed", exc)
             return SampleResult(sampled_at=_utc(started_at), run_id=None, host_rows=0, container_rows=0, project_rows=0, tunnel_rows=0, retention_deleted=0, error="Fast telemetry sampling unavailable")
+
+    def cleanup_retention(self) -> RetentionCleanupResult:
+        """Run bounded history retention separately from fast telemetry sampling."""
+        started = self.monotonic()
+        if not self.config.enabled:
+            return RetentionCleanupResult(deleted_rows=0, duration_ms=0)
+        if self.logger is not None:
+            self.logger.info("Telemetry retention started")
+        try:
+            cutoff = self.clock() - timedelta(days=self.config.retention_days)
+            deleted = self.repository.delete_older_than(cutoff)
+            duration_ms = max(0, int((self.monotonic() - started) * 1000))
+            if self.logger is not None:
+                self.logger.info(
+                    "Telemetry retention completed",
+                    extra={"deleted_rows": deleted, "duration_ms": duration_ms},
+                )
+            return RetentionCleanupResult(deleted_rows=deleted, duration_ms=duration_ms)
+        except Exception:
+            duration_ms = max(0, int((self.monotonic() - started) * 1000))
+            if self.logger is not None:
+                self.logger.error(
+                    "Telemetry retention failed",
+                    extra={"deleted_rows": 0, "duration_ms": duration_ms},
+                )
+            return RetentionCleanupResult(
+                deleted_rows=0,
+                duration_ms=duration_ms,
+                error=TelemetryError("RETENTION_UNAVAILABLE", "Telemetry retention unavailable"),
+            )
 
     def refresh_resource_once(self) -> SampleResult:
         """Run one aggregate slow resource refresh and persist sparse resource history."""
@@ -95,8 +125,6 @@ class TelemetrySampler:
                 mapped.projects,
                 mapped.tunnel,
             )
-            cutoff = mapped.run.sampled_at - timedelta(days=self.config.retention_days)
-            retention_deleted = self.repository.delete_older_than(cutoff)
             return SampleResult(
                 sampled_at=mapped.run.sampled_at,
                 run_id=run_id,
@@ -104,7 +132,7 @@ class TelemetrySampler:
                 container_rows=len(mapped.containers),
                 project_rows=len(mapped.projects),
                 tunnel_rows=1 if mapped.tunnel is not None else 0,
-                retention_deleted=retention_deleted,
+                retention_deleted=0,
             )
         except Exception as exc:
             self._log("Telemetry sampling failed", exc)
