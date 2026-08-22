@@ -105,12 +105,16 @@ CREATE TABLE IF NOT EXISTS tunnel_samples (
 
 CREATE INDEX IF NOT EXISTS idx_sample_runs_sampled_at ON sample_runs(sampled_at);
 CREATE INDEX IF NOT EXISTS idx_host_samples_sampled_at ON host_samples(sampled_at);
+CREATE INDEX IF NOT EXISTS idx_host_samples_run_id ON host_samples(run_id);
 CREATE INDEX IF NOT EXISTS idx_container_samples_identity_time ON container_samples(container_id, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_container_samples_name_time ON container_samples(container_name, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_container_samples_sampled_at ON container_samples(sampled_at);
+CREATE INDEX IF NOT EXISTS idx_container_samples_run_id ON container_samples(run_id);
 CREATE INDEX IF NOT EXISTS idx_project_samples_name_time ON project_samples(name, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_project_samples_sampled_at ON project_samples(sampled_at);
+CREATE INDEX IF NOT EXISTS idx_project_samples_run_id ON project_samples(run_id);
 CREATE INDEX IF NOT EXISTS idx_tunnel_samples_sampled_at ON tunnel_samples(sampled_at);
+CREATE INDEX IF NOT EXISTS idx_tunnel_samples_run_id ON tunnel_samples(run_id);
 
 CREATE TABLE IF NOT EXISTS resource_sample_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,6 +142,7 @@ CREATE TABLE IF NOT EXISTS container_resource_samples (
 CREATE INDEX IF NOT EXISTS idx_container_resource_samples_identity_time ON container_resource_samples(container_id, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_container_resource_samples_name_time ON container_resource_samples(container_name, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_container_resource_samples_sampled_at ON container_resource_samples(sampled_at);
+CREATE INDEX IF NOT EXISTS idx_container_resource_samples_resource_run_id ON container_resource_samples(resource_run_id);
 """
 
 
@@ -183,6 +188,11 @@ class SQLiteHistoryRepository:
             "CREATE INDEX IF NOT EXISTS idx_container_samples_sampled_at ON container_samples(sampled_at)",
             "CREATE INDEX IF NOT EXISTS idx_project_samples_sampled_at ON project_samples(sampled_at)",
             "CREATE INDEX IF NOT EXISTS idx_container_resource_samples_sampled_at ON container_resource_samples(sampled_at)",
+            "CREATE INDEX IF NOT EXISTS idx_host_samples_run_id ON host_samples(run_id)",
+            "CREATE INDEX IF NOT EXISTS idx_container_samples_run_id ON container_samples(run_id)",
+            "CREATE INDEX IF NOT EXISTS idx_project_samples_run_id ON project_samples(run_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tunnel_samples_run_id ON tunnel_samples(run_id)",
+            "CREATE INDEX IF NOT EXISTS idx_container_resource_samples_resource_run_id ON container_resource_samples(resource_run_id)",
         ):
             connection.execute(statement)
 

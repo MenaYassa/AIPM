@@ -51,6 +51,17 @@ def _retention_plan(path, table):
         return " ".join(str(row[-1]) for row in connection.execute(f"EXPLAIN QUERY PLAN DELETE FROM {table} WHERE sampled_at < ?", (0,)).fetchall())
 
 
+def _dependency_plan(path, child_table, child_column):
+    with sqlite3.connect(path) as connection:
+        return " ".join(
+            str(row[-1])
+            for row in connection.execute(
+                f"EXPLAIN QUERY PLAN SELECT 1 FROM {child_table} AS child WHERE child.{child_column} = ?",
+                (1,),
+            ).fetchall()
+        )
+
+
 def _table_counts(path):
     with sqlite3.connect(path) as connection:
         return {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("sample_runs", "host_samples", "container_samples", "project_samples", "tunnel_samples", "resource_sample_runs", "container_resource_samples")}
@@ -63,6 +74,11 @@ def test_fresh_schema_creates_retention_indexes_and_uses_them(tmp_path):
         "idx_container_samples_sampled_at",
         "idx_project_samples_sampled_at",
         "idx_container_resource_samples_sampled_at",
+        "idx_host_samples_run_id",
+        "idx_container_samples_run_id",
+        "idx_project_samples_run_id",
+        "idx_tunnel_samples_run_id",
+        "idx_container_resource_samples_resource_run_id",
     }
     assert expected <= _index_names(path)
     for table, index in (
@@ -73,6 +89,26 @@ def test_fresh_schema_creates_retention_indexes_and_uses_them(tmp_path):
         plan = _retention_plan(path, table)
         assert index in plan
         assert f"SCAN {table}" not in plan
+
+
+def test_fresh_schema_uses_child_lookup_indexes_for_retention_dependencies(tmp_path):
+    path = tmp_path / "telemetry.db"
+    SQLiteHistoryRepository(path)
+    expected = (
+        ("host_samples", "run_id", "idx_host_samples_run_id"),
+        ("container_samples", "run_id", "idx_container_samples_run_id"),
+        ("project_samples", "run_id", "idx_project_samples_run_id"),
+        ("tunnel_samples", "run_id", "idx_tunnel_samples_run_id"),
+        ("container_resource_samples", "resource_run_id", "idx_container_resource_samples_resource_run_id"),
+    )
+    indexes = _index_names(path)
+    for table, column, index in expected:
+        assert index in indexes
+        plan = _dependency_plan(path, table, column)
+        assert index in plan
+        assert f"SCAN {table}" not in plan
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_existing_schema_migration_is_idempotent_and_preserves_rows(tmp_path):
@@ -87,12 +123,22 @@ def test_existing_schema_migration_is_idempotent_and_preserves_rows(tmp_path):
             "idx_container_samples_sampled_at",
             "idx_project_samples_sampled_at",
             "idx_container_resource_samples_sampled_at",
+            "idx_host_samples_run_id",
+            "idx_container_samples_run_id",
+            "idx_project_samples_run_id",
+            "idx_tunnel_samples_run_id",
+            "idx_container_resource_samples_resource_run_id",
         ):
             connection.execute(f"DROP INDEX {index}")
     assert not {
         "idx_container_samples_sampled_at",
         "idx_project_samples_sampled_at",
         "idx_container_resource_samples_sampled_at",
+        "idx_host_samples_run_id",
+        "idx_container_samples_run_id",
+        "idx_project_samples_run_id",
+        "idx_tunnel_samples_run_id",
+        "idx_container_resource_samples_resource_run_id",
     } <= _index_names(path)
 
     SQLiteHistoryRepository(path)
@@ -102,11 +148,26 @@ def test_existing_schema_migration_is_idempotent_and_preserves_rows(tmp_path):
         "idx_container_samples_sampled_at",
         "idx_project_samples_sampled_at",
         "idx_container_resource_samples_sampled_at",
+        "idx_host_samples_run_id",
+        "idx_container_samples_run_id",
+        "idx_project_samples_run_id",
+        "idx_tunnel_samples_run_id",
+        "idx_container_resource_samples_resource_run_id",
     } <= _index_names(path)
     SQLiteHistoryRepository(path)
     assert _table_counts(path) == before
     for table in ("container_samples", "project_samples", "container_resource_samples"):
         assert f"SCAN {table}" not in _retention_plan(path, table)
+    for table, column, index in (
+        ("host_samples", "run_id", "idx_host_samples_run_id"),
+        ("container_samples", "run_id", "idx_container_samples_run_id"),
+        ("project_samples", "run_id", "idx_project_samples_run_id"),
+        ("tunnel_samples", "run_id", "idx_tunnel_samples_run_id"),
+        ("container_resource_samples", "resource_run_id", "idx_container_resource_samples_resource_run_id"),
+    ):
+        plan = _dependency_plan(path, table, column)
+        assert index in plan
+        assert f"SCAN {table}" not in plan
 
 
 def test_retention_deletes_old_rows_with_indexed_plans(tmp_path):
