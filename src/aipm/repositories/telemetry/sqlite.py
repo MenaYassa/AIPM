@@ -104,7 +104,9 @@ CREATE INDEX IF NOT EXISTS idx_sample_runs_sampled_at ON sample_runs(sampled_at)
 CREATE INDEX IF NOT EXISTS idx_host_samples_sampled_at ON host_samples(sampled_at);
 CREATE INDEX IF NOT EXISTS idx_container_samples_identity_time ON container_samples(container_id, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_container_samples_name_time ON container_samples(container_name, sampled_at);
+CREATE INDEX IF NOT EXISTS idx_container_samples_sampled_at ON container_samples(sampled_at);
 CREATE INDEX IF NOT EXISTS idx_project_samples_name_time ON project_samples(name, sampled_at);
+CREATE INDEX IF NOT EXISTS idx_project_samples_sampled_at ON project_samples(sampled_at);
 CREATE INDEX IF NOT EXISTS idx_tunnel_samples_sampled_at ON tunnel_samples(sampled_at);
 
 CREATE TABLE IF NOT EXISTS resource_sample_runs (
@@ -132,6 +134,7 @@ CREATE TABLE IF NOT EXISTS container_resource_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_container_resource_samples_identity_time ON container_resource_samples(container_id, sampled_at);
 CREATE INDEX IF NOT EXISTS idx_container_resource_samples_name_time ON container_resource_samples(container_name, sampled_at);
+CREATE INDEX IF NOT EXISTS idx_container_resource_samples_sampled_at ON container_resource_samples(sampled_at);
 """
 
 
@@ -162,6 +165,7 @@ class SQLiteHistoryRepository:
         with self._connection() as connection:
             connection.executescript(SCHEMA)
             self._migrate_columns(connection)
+            self._ensure_retention_indexes(connection)
 
     def _migrate_columns(self, connection: sqlite3.Connection) -> None:
         self._assert_writable()
@@ -169,6 +173,15 @@ class SQLiteHistoryRepository:
         for name, definition in (("resource_sampled_at", "INTEGER"), ("resource_status", "TEXT NOT NULL DEFAULT 'never_sampled'"), ("resource_age_seconds", "INTEGER")):
             if name not in columns:
                 connection.execute(f"ALTER TABLE container_samples ADD COLUMN {name} {definition}")
+
+    def _ensure_retention_indexes(self, connection: sqlite3.Connection) -> None:
+        self._assert_writable()
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS idx_container_samples_sampled_at ON container_samples(sampled_at)",
+            "CREATE INDEX IF NOT EXISTS idx_project_samples_sampled_at ON project_samples(sampled_at)",
+            "CREATE INDEX IF NOT EXISTS idx_container_resource_samples_sampled_at ON container_resource_samples(sampled_at)",
+        ):
+            connection.execute(statement)
 
     def save_sample(
         self,

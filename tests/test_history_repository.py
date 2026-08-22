@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -37,6 +38,109 @@ def test_schema_save_and_query(tmp_path):
     assert len(repository.get_container_history(None, None, None, 10)) == 2
     assert repository.get_project_history("demo", None, None, 10)[0].branch == "main"
     assert repository.get_tunnel_history(None, None, 10)[0].local_containers == ("cloudflared",)
+
+
+def _index_names(path):
+    with sqlite3.connect(path) as connection:
+        return {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+
+
+def _retention_plan(path, table):
+    with sqlite3.connect(path) as connection:
+        return " ".join(str(row[-1]) for row in connection.execute(f"EXPLAIN QUERY PLAN DELETE FROM {table} WHERE sampled_at < ?", (0,)).fetchall())
+
+
+def _table_counts(path):
+    with sqlite3.connect(path) as connection:
+        return {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("sample_runs", "host_samples", "container_samples", "project_samples", "tunnel_samples", "resource_sample_runs", "container_resource_samples")}
+
+
+def test_fresh_schema_creates_retention_indexes_and_uses_them(tmp_path):
+    path = tmp_path / "telemetry.db"
+    SQLiteHistoryRepository(path)
+    expected = {
+        "idx_container_samples_sampled_at",
+        "idx_project_samples_sampled_at",
+        "idx_container_resource_samples_sampled_at",
+    }
+    assert expected <= _index_names(path)
+    for table, index in (
+        ("container_samples", "idx_container_samples_sampled_at"),
+        ("project_samples", "idx_project_samples_sampled_at"),
+        ("container_resource_samples", "idx_container_resource_samples_sampled_at"),
+    ):
+        plan = _retention_plan(path, table)
+        assert index in plan
+        assert f"SCAN {table}" not in plan
+
+
+def test_existing_schema_migration_is_idempotent_and_preserves_rows(tmp_path):
+    path = tmp_path / "telemetry.db"
+    repository = SQLiteHistoryRepository(path)
+    at = datetime(2026, 8, 16, tzinfo=UTC)
+    run, host, containers, projects, tunnel = sample_rows(at)
+    repository.save_sample(run, host, containers, projects, tunnel)
+    before = _table_counts(path)
+    with sqlite3.connect(path) as connection:
+        for index in (
+            "idx_container_samples_sampled_at",
+            "idx_project_samples_sampled_at",
+            "idx_container_resource_samples_sampled_at",
+        ):
+            connection.execute(f"DROP INDEX {index}")
+    assert not {
+        "idx_container_samples_sampled_at",
+        "idx_project_samples_sampled_at",
+        "idx_container_resource_samples_sampled_at",
+    } <= _index_names(path)
+
+    SQLiteHistoryRepository(path)
+    migrated = _table_counts(path)
+    assert migrated == before
+    assert {
+        "idx_container_samples_sampled_at",
+        "idx_project_samples_sampled_at",
+        "idx_container_resource_samples_sampled_at",
+    } <= _index_names(path)
+    SQLiteHistoryRepository(path)
+    assert _table_counts(path) == before
+    for table in ("container_samples", "project_samples", "container_resource_samples"):
+        assert f"SCAN {table}" not in _retention_plan(path, table)
+
+
+def test_retention_deletes_old_rows_with_indexed_plans(tmp_path):
+    path = tmp_path / "telemetry.db"
+    repository = SQLiteHistoryRepository(path)
+    old = datetime(2026, 8, 15, tzinfo=UTC)
+    recent = datetime(2026, 8, 16, tzinfo=UTC)
+    for at in (old, recent):
+        run, host, containers, projects, tunnel = sample_rows(at)
+        repository.save_sample(run, host, containers, projects, tunnel)
+    deleted = repository.delete_older_than(recent)
+    assert deleted >= 5
+    assert _table_counts(path)["sample_runs"] == 1
+    for table in ("container_samples", "project_samples", "container_resource_samples"):
+        assert f"SCAN {table}" not in _retention_plan(path, table)
+
+
+def test_read_only_open_does_not_mutate_retention_schema(tmp_path):
+    path = tmp_path / "telemetry.db"
+    SQLiteHistoryRepository(path)
+    before = _index_names(path)
+    directory = path.parent
+    original_directory_mode = directory.stat().st_mode & 0o777
+    tracked = {candidate: candidate.stat().st_mode & 0o777 for candidate in directory.glob(path.name + "*")}
+    try:
+        for candidate in tracked:
+            os.chmod(candidate, 0o444)
+        os.chmod(directory, 0o555)
+        SQLiteHistoryRepository(path, read_only=True)
+        assert _index_names(path) == before
+    finally:
+        os.chmod(directory, original_directory_mode)
+        for candidate, mode in tracked.items():
+            if candidate.exists():
+                os.chmod(candidate, mode)
 
 
 def test_sqlite_pragmas_are_enabled(tmp_path):
