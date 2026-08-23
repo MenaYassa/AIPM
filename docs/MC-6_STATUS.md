@@ -1,10 +1,10 @@
 # AIPM Mission Control Status and Roadmap
 
-**Status date:** 2026-08-23
+**Status date:** 2026-08-24
 
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
 
-**Checkpoint:** `a7ee2f1b90932772fcb7855d9e41a7fa01252824` — `feat: implement MC-6.13 advisor rules`
+**Checkpoint:** `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70` — `feat: implement MC-6.13 Phase 4A composition`
 
 **Remote parity:** `HEAD == origin/main`; working tree clean at the time of this status update.
 
@@ -16,7 +16,7 @@ The completed implementation preserves the central operating rule:
 
 > **Mission Control observes the VPS; it does not change the VPS.**
 
-The current committed checkpoint completes **MC-6.13 Phase 3**. MC-6.13 Phase 2 evidence normalization and Phase 3 deterministic rules are reviewed, committed, and pushed. MC-6.13 Phase 4 has not started and remains unauthorized. Production/runtime changes remain separate operational concerns and are not implied by the advisor domain commits.
+The current committed checkpoint completes **MC-6.13 Phase 4A**. Phases 2 and 3 established immutable evidence normalization and deterministic rules; Phase 4A now adds pure request validation, recursive input snapshotting, and direct normalizer-to-rule-engine composition. Phases 4B–4E have not started and remain unauthorized. Production/runtime changes remain separate operational concerns and are not implied by the advisor domain commits.
 
 ## Completed delivery ledger
 
@@ -43,6 +43,7 @@ The current committed checkpoint completes **MC-6.13 Phase 3**. MC-6.13 Phase 2 
 | MC-6.8 | Bounded, redacted, read-only Logs façade/API/page with symbolic sources, fixed adapters, HMAC cursors, redaction-before-mapping, bounded queries, and source failure isolation. | Complete |
 | MC-6.13 Phase 2 | Immutable evidence normalization with mandatory evaluation time, freshness/availability semantics, deterministic canonical serialization, stable identifiers, and explicit uncertainty. | Complete and pushed at `ebe1f84` |
 | MC-6.13 Phase 3 | Pure deterministic advisor rules, canonical field schema, bounded continuity envelope, exact evidence binding, traceable recommendations, and no authority/runtime integrations. | Complete and pushed at `a7ee2f1` |
+| MC-6.13 Phase 4A | Pure composition of the existing normalizer and rule engine with bounded immutable request metadata; no API/UI/LLM/runtime/action path. | Complete and pushed at `37d8a0e` |
 
 ## Current capability surface
 
@@ -57,7 +58,7 @@ The dashboard currently provides GET-only observations for:
 - Host, container, project, resource, and tunnel history.
 - Events, incidents, notification posture, channels, policies, and metrics.
 
-The frontend remains vanilla HTML/CSS/JavaScript with static modules served through the existing `/static` mount. Polling is centralized through the shared scheduler; the Logs page uses one bounded 60-second resource. No frontend framework or build pipeline was introduced. MC-6.13 Phase 2/3 are backend domain-only additions and add no advisor API, dashboard view, TUI view, scheduler, or LLM integration.
+The frontend remains vanilla HTML/CSS/JavaScript with static modules served through the existing `/static` mount. Polling is centralized through the shared scheduler; the Logs page uses one bounded 60-second resource. No frontend framework or build pipeline was introduced. MC-6.13 Phase 2/3/4A are backend domain-only additions and add no advisor API, dashboard view, TUI view, scheduler, LLM integration, runtime adapter, or action path.
 
 ## Read-only and ownership invariants
 
@@ -98,9 +99,7 @@ This is not part of the current read-only cockpit. Any future action architectur
 
 ### MC-6.13 — AI Advisor
 
-**Phase 2 and Phase 3 complete and pushed; Phase 4 not started.** Phase 2 provides deterministic evidence normalization. Phase 3 provides the pure `mc613-rules-v1` rule engine over immutable evidence, including the ten approved service-health, resource-pressure, telemetry-anomaly, deployment-change, and project-state rules. The engine emits evidence-linked findings and explanatory recommendations with explicit uncertainty; it has no runtime, provider, API, UI, LLM, or action authority.
-
-Phase 4 remains a future, separately authorized composition milestone. It must not be described as implemented, and any future execution—if ever approved—must occur through the separately governed MC-6.12 control plane rather than browser-generated commands or arbitrary shell access. The detailed Phase 2/3 ledger is maintained in [`MC-6.13_STATUS.md`](MC-6.13_STATUS.md).
+**Phase 2, Phase 3, and Phase 4A complete and pushed.** Phase 4A provides bounded immutable request metadata, recursive caller-input snapshots, and direct composition of the existing normalizer and rule engine. It emits the existing evidence-linked `AdvisorResponse` without aggregation or authority. No advisor API, dashboard/UI view, TUI view, LLM integration, runtime adapter, scheduler, or action authority exists. Phases 4B–4E remain future and separately authorized; any future execution—if ever approved—must occur through the separately governed MC-6.12 control plane rather than browser-generated commands or arbitrary shell access. The detailed ledger is maintained in [`MC-6.13_STATUS.md`](MC-6.13_STATUS.md).
 
 ## Deployment and operational gates
 
@@ -110,11 +109,14 @@ Implementation completion and production deployment are separate states.
 |---|---|---|
 | Local MC-6.8 validation | Passed | Historical MC-6.8 validation record retained. |
 | Local MC-6.13 Phase 2/3 validation | Passed | Phase 2: 18 focused and 444 full tests. Phase 3 final: 29 focused and 473 full tests, with the existing unrelated Starlette/httpx warning. |
+| Local MC-6.13 Phase 4A validation | Passed | 26 focused and 499 full tests, with the same unrelated Starlette/httpx warning; exact scope and protected-state checks passed. |
 | MC-5 Gate 2.1 | Passed | Harness preserved with the SHA below; do not rerun without separate instruction. |
 | Target-VPS production readiness | Separate operational gate | Repository work does not imply deployment or runtime validation. Operator-supplied runtime evidence remains authoritative. |
 | Permanent dashboard service | Separate deployment state | The dashboard remains loopback-bound at `127.0.0.1:8787`; the current host nginx bridge listener is `172.20.0.1:8788`. |
 | Public ingress/Cloudflare | Existing bridge ingress | Cloudflared container → `172.20.0.1:8788` → host nginx → `127.0.0.1:8787`; no Cloudflared or Docker configuration was changed by MC-6.13. |
 | Notifications | Disabled | Must remain disabled during Mission Control development and deployment. |
+
+The separately verified production telemetry correction is landed at `0ab4b0e859fff96add058cb3eb55e0ff408b1a83` (`fix: guard telemetry retention against lock churn and FK-poisoned batches`). This is an external production-state result, not a Phase 4A test result: the previous retention lock-churn spin fell to approximately 0% attributable CPU, five samples were observed over five minutes at the configured cadence, and no new `database is locked` entries appeared after deployment. Host-level orphan-process cleanup and configuration-twin deletion are live VPS state and are not represented as repository commits.
 
 The preserved Gate 2.1 operator harness is:
 
@@ -144,7 +146,7 @@ Mission Control does not replace this update roadmap. The dashboard remains a re
 
 The recommended order is:
 
-1. Keep MC-6.13 Phase 4 explicitly unauthorized and not started.
+1. Keep MC-6.13 Phases 4B–4E explicitly unauthorized and not started.
 2. Approve and perform **MC-6.9 design/inspection only** as a separate roadmap milestone if selected.
 3. Review any future composition work against the MC-6.13 pure-domain and MC-6.12A/B boundaries.
 4. Independently perform any approved target-VPS production readiness or runtime validation; repository commits do not imply deployment.
@@ -196,10 +198,11 @@ MC6.9=NEXT_DESIGN_ONLY
 MC6.10=PLANNED
 MC6.11=PLANNED
 MC6.12=FUTURE
-MC6.13=COMPLETE_THROUGH_PHASE3
+MC6.13=COMPLETE_THROUGH_PHASE4A
 MC6.13_PHASE2=COMPLETE
 MC6.13_PHASE3=COMPLETE
-MC6.13_PHASE4=NOT_STARTED
+MC6.13_PHASE4A=COMPLETE
+MC6.13_PHASE4B_TO_4E=NOT_STARTED
 PRODUCTION_DEPLOYMENT=SEPARATE_APPROVAL_REQUIRED
 PUBLIC_INGRESS=EXISTING_BRIDGE_INGRESS
 NOTIFICATIONS=DISABLED

@@ -143,17 +143,17 @@ This milestone does not claim real-VPS readiness. The referenced VPS infrastruct
 
 ## Current Mission Control checkpoint
 
-**Updated:** 2026-08-23
+**Updated:** 2026-08-24
 
-The historical baseline above is retained for auditability. The repository has completed the read-only Mission Control cockpit through MC-6.8 and the pure MC-6.13 advisor domain through Phase 3. The current pushed checkpoint is:
+The historical baseline above is retained for auditability. The repository has completed the read-only Mission Control cockpit through MC-6.8 and the pure MC-6.13 advisor domain through Phase 4A. The current pushed checkpoint is:
 
 ```text
-HEAD=a7ee2f1b90932772fcb7855d9e41a7fa01252824
-ORIGIN_MAIN=a7ee2f1b90932772fcb7855d9e41a7fa01252824
+HEAD=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
+ORIGIN_MAIN=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
 WORKTREE=CLEAN
 ```
 
-MC-6.13 Phase 2 and Phase 3 are complete, reviewed, committed, and pushed. Phase 4 has not started and remains unauthorized. The Phase 2/3 work adds no dashboard surface, API route, façade integration, runtime collector, provider access, LLM, or autonomous action.
+MC-6.13 Phases 2, 3, and 4A are complete, reviewed, committed, and pushed. Phase 4A adds only pure bounded request composition over the existing normalizer and rule engine. Phases 4B–4E have not started and remain unauthorized. The Phase 2/3/4A work adds no dashboard surface, API route, façade integration, runtime collector, provider access, LLM, or autonomous action.
 
 | Completed area | Current result |
 |---|---|
@@ -166,8 +166,9 @@ MC-6.13 Phase 2 and Phase 3 are complete, reviewed, committed, and pushed. Phase
 | MC-6.8 | Bounded, redacted, read-only Logs with symbolic sources, fixed adapters, bounded queries, protected cursors, and safe frontend rendering. |
 | MC-6.13 Phase 2 | Immutable evidence normalization, mandatory evaluation time, freshness/availability semantics, deterministic canonical serialization, stable identifiers, and explicit uncertainty; pushed at `ebe1f84`. |
 | MC-6.13 Phase 3 | Ten deterministic evidence-linked rules, canonical field schema, bounded continuity envelope, exact evidence binding, and explanatory non-executable recommendations; pushed at `a7ee2f1`. |
+| MC-6.13 Phase 4A | Pure bounded request validation/snapshotting and direct normalizer-to-rule-engine composition; pushed at `37d8a0e`. |
 
-MC-6.9 remains the next separate design/inspection milestone. It should address bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links using existing MC-3, incident, history, and read-only repository contracts. MC-6.10 covers Settings posture and notification safety; MC-6.11 covers a shared Typer/Rich TUI; MC-6.12 remains the future action-control boundary; and MC-6.13 Phase 4 remains future and unauthorized.
+MC-6.9 remains the next separate design/inspection milestone. It should address bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links using existing MC-3, incident, history, and read-only repository contracts. MC-6.10 covers Settings posture and notification safety; MC-6.11 covers a shared Typer/Rich TUI; MC-6.12 remains the future action-control boundary; and MC-6.13 Phases 4B–4E remain future and unauthorized.
 
 ## Current operational gates
 
@@ -177,7 +178,7 @@ The successful Gate 2.1 harness remains byte-identical:
 SHA-256: 9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7
 ```
 
-Repository completion does not imply target-VPS deployment or runtime validation. The current dashboard ingress architecture is:
+Repository completion does not imply target-VPS deployment or runtime validation. Separately supplied production verification reports that telemetry commit `0ab4b0e859fff96add058cb3eb55e0ff408b1a83` reduced the previous retention-spin CPU to approximately 0%, preserved five samples over five minutes, and produced no new lock errors after deployment. This is live VPS evidence, not a repository test result. The dashboard ingress architecture is:
 
 ```text
 Cloudflared container
@@ -193,6 +194,6 @@ The complete current ledger and next-step sequence is maintained in [`docs/MC-6_
 
 ## Current verification baseline
 
-The final MC-6.13 Phase 3 validation passed 29 focused tests and 473 full tests, with the existing unrelated Starlette/httpx deprecation warning. The Phase 2 validation passed 18 focused tests and 444 full tests. Runtime/authority scans, generated-artifact cleanup, exact-scope checks, protected-state checks, and Gate 2.1 identity checks passed.
+The final MC-6.13 Phase 4A validation passed 26 focused tests and 499 full tests, with the existing unrelated Starlette/httpx deprecation warning. Phase 3 validation passed 29 focused tests and 473 full tests; Phase 2 validation passed 18 focused tests and 444 full tests. Runtime/authority scans, generated-artifact cleanup, exact-scope checks, protected-state checks, and Gate 2.1 identity checks passed.
 
-> **Current project position:** Mission Control read-only cockpit work is complete through MC-6.8, and the pure MC-6.13 advisor domain is complete through Phase 3. MC-6.13 Phase 4 composition, API/UI integration, LLM functionality, autonomous actions, and target runtime deployment remain outside the authorized current state.
+> **Current project position:** Mission Control read-only cockpit work is complete through MC-6.8, and the pure MC-6.13 advisor domain is complete through Phase 4A. MC-6.13 Phases 4B–4E, API/UI integration, LLM functionality, autonomous actions, and target runtime deployment remain outside the authorized current state.

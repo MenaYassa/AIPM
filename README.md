@@ -6,7 +6,7 @@ AIPM is a local **AI Platform Manager** for discovering and operating projects t
 
 The repository includes the core CLI, domain models, service/provider architecture, Git and Docker integrations, health analyzers, backup snapshots, a guarded update workflow, and the read-only Mission Control operations cockpit. The implementation is designed to remain useful on machines without a running Docker daemon: configuration, help, host diagnostics, and Git-only discovery do not require Docker. Docker- or Compose-specific commands return a clear error when the required runtime is unavailable.
 
-The current Mission Control checkpoint is **MC-6.13 Phase 3 complete** at commit `a7ee2f1b90932772fcb7855d9e41a7fa01252824`. MC-6.13 Phase 2 established immutable evidence normalization and Phase 3 established a pure deterministic advisor rule engine. Phase 4 has not started and remains unauthorized. The cockpit continues to cover overview, host/server intelligence, Docker, projects/applications, Systemd observations, bounded redacted Logs, history, events, incidents, and notification posture. MC-6.9 remains a separate design/inspection milestone, and production/runtime changes remain separate approval-gated operations.
+The current Mission Control checkpoint is **MC-6.13 Phase 4A complete** at commit `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70`. MC-6.13 Phase 2 established immutable evidence normalization, Phase 3 established the pure deterministic advisor rule engine, and Phase 4A established pure bounded composition over those seams. Phases 4B–4E have not started and remain unauthorized. The cockpit continues to cover overview, host/server intelligence, Docker, projects/applications, Systemd observations, bounded redacted Logs, history, events, incidents, and notification posture. MC-6.9 remains a separate design/inspection milestone, and production/runtime changes remain separate approval-gated operations.
 
 For the complete milestone ledger, remaining roadmap, safety invariants, deployment gates, and next steps, see [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). The broader AIPM update-management roadmap remains in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md), while the historical baseline and completion records remain in [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
 
@@ -37,7 +37,7 @@ AIPM_CONFIG=/path/to/config.yaml aipm discover
 
 ## Mission Control dashboard
 
-AIPM includes a read-only web dashboard that turns the VPS handbook into a live operations cockpit. It reports host telemetry, Docker container state, local cloudflared visibility, and Git/Compose-backed project inventory while linking back to the handbook’s first-response workflows. The current public path is an existing bridge-bound ingress: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787` → dashboard, serving `vpanel.03092017.xyz`. The dashboard itself remains loopback-bound.
+AIPM includes a read-only web dashboard that turns the VPS handbook into a live operations cockpit. It reports host telemetry, Docker container state, local cloudflared visibility, and Git/Compose-backed project inventory while linking back to the handbook’s first-response workflows. The current public path is an existing bridge-bound ingress: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787` → dashboard, serving `vpanel.03092017.xyz`. The dashboard itself remains loopback-bound. Separately supplied production checks confirmed the bridge-side `/healthz` and public `/healthz` plus `/api/overview`; these are live VPS results and not changes made by Phase 4A.
 
 Start it locally with:
 
@@ -49,7 +49,7 @@ The default listener is `127.0.0.1:8787`; do not bind it to `0.0.0.0:8787`. The 
 
 ## MC-6.13 AI Advisor domain
 
-MC-6.13 Phase 2 and Phase 3 are complete and pushed. Phase 2 normalizes bounded caller-supplied observations into immutable evidence bundles. Phase 3 applies ten deterministic, evidence-linked rules over immutable evidence using a canonical field schema and bounded `ResourceHistoryEnvelope` continuity contract. The advisor is pure domain logic: it does not access runtime state, providers, filesystems, processes, networks, Docker, Systemd, credentials, databases, the provenance socket, or an LLM. It exposes no advisor API/UI and performs no autonomous action. Phase 4 remains unauthorized and not started. See [`docs/MC-6.13_STATUS.md`](docs/MC-6.13_STATUS.md).
+MC-6.13 Phases 2, 3, and 4A are complete and pushed. Phase 2 normalizes bounded caller-supplied observations into immutable evidence bundles. Phase 3 applies ten deterministic, evidence-linked rules over immutable evidence using a canonical field schema and bounded `ResourceHistoryEnvelope` continuity contract. Phase 4A validates bounded immutable request metadata, recursively snapshots caller input, and directly composes the existing normalizer and rule engine. The advisor remains pure domain logic: it does not access runtime state, providers, filesystems, processes, networks, Docker, Systemd, credentials, databases, the provenance socket, or an LLM. It exposes no advisor API/UI and performs no autonomous action. Phases 4B–4E remain unauthorized and not started. See [`docs/MC-6.13_STATUS.md`](docs/MC-6.13_STATUS.md).
 
 ## Commands
 
@@ -138,7 +138,7 @@ Run the automated tests with:
 pytest -q
 ```
 
-The tests cover deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, health aggregation, dry-run side-effect protection, approval gating, update execution, audit serialization, Mission Control contracts, read-only SQLite behavior, frontend safety, bounded log redaction, MC-6.13 evidence normalization, and MC-6.13 deterministic rule evaluation. The final MC-6.13 Phase 3 validation passed 29 focused tests and 473 full tests with the existing unrelated Starlette/httpx deprecation warning. Docker integration tests, disposable Git-remote tests, browser acceptance, and TUI tests remain separate roadmap work.
+The tests cover deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, health aggregation, dry-run side-effect protection, approval gating, update execution, audit serialization, Mission Control contracts, read-only SQLite behavior, frontend safety, bounded log redaction, MC-6.13 evidence normalization, deterministic rule evaluation, and Phase 4A composition. The final Phase 4A validation passed 26 focused tests and 499 full tests with the existing unrelated Starlette/httpx deprecation warning. Docker integration tests, disposable Git-remote tests, browser acceptance, and TUI tests remain separate roadmap work.
 
 ## License
 

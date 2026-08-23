@@ -2,9 +2,9 @@
 
 ## Scope and delivery rule
 
-This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 and MC-6.13 Phase 2/3 have been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `a7ee2f1b90932772fcb7855d9e41a7fa01252824`.
+This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 and MC-6.13 Phases 2, 3, and 4A have been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70`.
 
-MC-6.9 through MC-6.12 and MC-6.13 Phase 4 remain future milestones. Each new milestone must proceed as a small, reviewable change set with focused tests, full regression, safety review, explicit scope, and an explicit stop point. No milestone may quietly introduce writes into the read-only dashboard or authority into the pure advisor domain. Production deployment, target-VPS operations, credentials, notifications, live SQLite, Docker runtime changes, and Systemd operations require separate approval.
+MC-6.9 through MC-6.12 and MC-6.13 Phases 4B–4E remain future milestones. MC-6.13 Phase 4A is complete and remains limited to pure domain composition. Each new milestone must proceed as a small, reviewable change set with focused tests, full regression, safety review, explicit scope, and an explicit stop point. No milestone may quietly introduce writes into the read-only dashboard or authority into the pure advisor domain. Production deployment, target-VPS operations, credentials, notifications, live SQLite, Docker runtime changes, and Systemd operations require separate approval.
 
 ## Milestone map
 
@@ -22,7 +22,8 @@ MC-6.9 through MC-6.12 and MC-6.13 Phase 4 remain future milestones. Each new mi
 | MC-6.10 | EXTEND | Settings posture and expanded notification safety/audit views. | Planned | Read-only only; notifications remain disabled. |
 | MC-6.11 | NEW | Shared Typer/Rich TUI consuming the same façades and contracts. | Planned | Read-only only. |
 | MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Future, separate gate | Separate authorization required. |
-| MC-6.13 Phase 2/3 | EXTEND/NEW | Immutable evidence normalization and ten deterministic, evidence-linked advisor rules. | Complete and pushed at `a7ee2f1` | Pure domain logic only; Phase 4 composition remains separately gated. |
+| MC-6.13 Phase 2/3 | EXTEND/NEW | Immutable evidence normalization and ten deterministic, evidence-linked advisor rules. | Complete and pushed at `a7ee2f1` | Pure domain logic only. |
+| MC-6.13 Phase 4A | EXTEND/NEW | Bounded immutable request contract and direct normalizer-to-rule-engine composition. | Complete and pushed at `37d8a0e` | No API, UI, LLM, runtime, scheduler, or action behavior; Phases 4B–4E remain separately gated. |
 
 ## MC-6.1 — contracts and UI foundation
 
@@ -260,11 +261,11 @@ Intent → Plan → Risk classification → Human approval → Action executor
 
 Actions must not be added to existing read façades. The action executor needs distinct service accounts/permissions, explicit allow-lists, per-action timeouts, concurrency control, audit records, and tested rollback. Public access and authentication are prerequisites.
 
-## MC-6.13 — AI Advisor Phase 2/3 complete
+## MC-6.13 — AI Advisor Phase 2/3/4A complete
 
-Phase 2 established deterministic normalization from bounded caller-supplied observations into immutable `EvidenceBundle` values. Phase 3 established the pure `mc613-rules-v1` engine with ten deterministic service-health, resource-pressure, telemetry-anomaly, deployment-change, and project-state rules. The final continuity contract uses an immutable bounded `ResourceHistoryEnvelope`, exact evidence binding, explicit uncertainty, canonical fields, stable identifiers, and no aliases or implicit unit conversion.
+Phase 2 established deterministic normalization from bounded caller-supplied observations into immutable `EvidenceBundle` values. Phase 3 established the pure `mc613-rules-v1` engine with ten deterministic service-health, resource-pressure, telemetry-anomaly, deployment-change, and project-state rules. Phase 4A adds `AdvisorCompositionRequest` and `compose_advisor()` as a pure façade over those existing seams: request metadata is bounded and recursively snapshotted, caller-supplied evaluation time remains mandatory, and the existing `AdvisorResponse` is returned directly.
 
-The Phase 3 engine is not a generic “run shell” or agent-execution feature. It does not collect observations, access runtime/provider state, expose an API/UI, invoke an LLM, approve plans, write audit transitions, or execute operations. Phase 4 composition remains unauthorized and future. Any later execution, if separately approved, must occur through the MC-6.12 control plane rather than browser-generated commands.
+The Phase 4A composition is not a generic “run shell” or agent-execution feature. It does not collect observations, access runtime/provider state, expose an API/UI, invoke an LLM, approve plans, write audit transitions, or execute operations. Phases 4B–4E remain future and separately authorized. Any later execution, if separately approved, must occur through the MC-6.12 control plane rather than browser-generated commands.
 
 ## Migration and schema strategy
 
@@ -297,7 +298,7 @@ Production deployment is a separate approval gate. It should create the persiste
 
 ### Public access
 
-The current public dashboard path is an existing bridge-bound ingress, not a change to the dashboard listener: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787` → AIPM dashboard, serving `vpanel.03092017.xyz`. The dashboard remains loopback-bound and nginx forwards only to it. Cloudflared and Docker configuration are outside this documentation-only synchronization and were not changed by MC-6.13.
+The current public dashboard path is an existing bridge-bound ingress, not a change to the dashboard listener: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787` → AIPM dashboard, serving `vpanel.03092017.xyz`. The dashboard remains loopback-bound and nginx forwards only to it. Cloudflared and Docker configuration are outside this documentation-only synchronization and were not changed by MC-6.13. Separately supplied production verification reports successful health checks through this existing path; those checks are live VPS evidence, not repository implementation evidence.
 
 This existing ingress does not authorize new AIPM public-ingress features, authentication changes, action routes, or credential access. Any future ingress modification still requires independent threat modeling and explicit approval.
 
@@ -330,7 +331,7 @@ The default answer for all runtime and write operations is **not authorized**.
 
 ## Definition of done for the first MC-6 release
 
-**Current note:** The implementation portion of the first read-only web cockpit is complete through MC-6.8. The remaining definition-of-done items are deployment staging, browser acceptance where not yet executed, and any later TUI work that is explicitly included in the release scope.
+**Current note:** The implementation portion of the first read-only web cockpit is complete through MC-6.8, while the pure MC-6.13 advisor domain is complete through Phase 4A. The remaining definition-of-done items are deployment staging, browser acceptance where not yet executed, later TUI work, and the separately authorized MC-6.13 API/UI/LLM/runtime phases.
 
 The first read-only MC-6 release is complete only when:
 

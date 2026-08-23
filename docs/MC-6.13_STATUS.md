@@ -1,13 +1,13 @@
 # MC-6.13 AI Advisor Status
 
-**Status date:** 2026-08-23
+**Status date:** 2026-08-24
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
-**Current commit:** `a7ee2f1b90932772fcb7855d9e41a7fa01252824` — `feat: implement MC-6.13 advisor rules`
-**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 3 push.
+**Current commit:** `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70` — `feat: implement MC-6.13 Phase 4A composition`
+**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 4A push.
 
 ## Current status
 
-MC-6.13 Phase 2 and Phase 3 are complete, reviewed, committed, and pushed. Phase 4 has **not started** and remains unauthorized. The landed work is a pure, deterministic, evidence-based advisor domain boundary. It does not collect runtime observations, call existing façades, access infrastructure, expose an API, change the dashboard, invoke an LLM, or perform actions.
+MC-6.13 Phases 2, 3, and 4A are complete, reviewed, committed, and pushed. Phase 4A adds only pure composition over the existing Phase 2 normalizer and Phase 3 rule engine. It accepts bounded immutable request metadata and caller-supplied observations, performs no runtime collection or infrastructure access, exposes no API or UI, invokes no LLM, and performs no action. Phases 4B, 4C, 4D, and 4E have **not started** and remain unauthorized.
 
 ```text
 MC6.13_PHASE2_REVIEW=PASS
@@ -16,7 +16,10 @@ MC6.13_PHASE2_PUSH=COMPLETE
 MC6.13_PHASE3_REVIEW=PASS
 MC6.13_PHASE3_COMMIT=a7ee2f1b90932772fcb7855d9e41a7fa01252824
 MC6.13_PHASE3_PUSH=COMPLETE
-MC6.13_PHASE4_STARTED=NO
+MC6.13_PHASE4A_REVIEW=PASS
+MC6.13_PHASE4A_COMMIT=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
+MC6.13_PHASE4A_PUSH=COMPLETE
+MC6.13_PHASE4B_TO_4E_STARTED=NO
 ```
 
 ## Phase 2 — evidence normalization
@@ -115,9 +118,17 @@ Final Phase 3 validation:
 | Gate 2.1 harness | Protected |
 | Gate 2.1 SHA-256 | `9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7` |
 
+### Phase 4A validation
+
+| Check | Result |
+|---|---:|
+| Focused Phase 4A suite | 26 passed |
+| Full repository suite | 499 passed, 1 existing Starlette/httpx deprecation warning |
+| Exact scope, authority scan, protected-state checks, and artifact cleanup | PASS |
+
 ## Phase 4 status
 
-Phase 4 composition work is not implemented and is not authorized. No façade integration, advisor API, dashboard/UI surface, TUI surface, LLM provider, scheduler, runtime adapter, or autonomous action path has been added. Future Phase 4 design must receive a separate narrow authorization and must preserve the Phase 3 pure-domain boundary.
+Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. `AdvisorCompositionRequest` validates bounded caller metadata and recursively snapshots raw mappings/sequences; `compose_advisor()` directly composes the existing Phase 2 normalizer with the Phase 3 rule engine and returns the existing `AdvisorResponse` without aggregation or semantic rewriting. No façade integration, advisor API, dashboard/UI surface, TUI surface, LLM provider, scheduler, runtime adapter, or autonomous action path was added. Phases 4B–4E remain future, separately authorized work and must preserve the pure-domain boundary.
 
 ## Related documentation
 
@@ -129,7 +140,12 @@ Phase 4 composition work is not implemented and is not authorized. No façade in
 - [`../PRODUCTION_ROADMAP.md`](../PRODUCTION_ROADMAP.md) — broader update-management roadmap.
 
 ```text
-MC6.13_PHASE4=NOT_STARTED
+MC6.13_PHASE4A=COMPLETE
+MC6.13_PHASE4A_COMMIT=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
+MC6.13_PHASE4B=NOT_STARTED
+MC6.13_PHASE4C=NOT_STARTED
+MC6.13_PHASE4D=NOT_STARTED
+MC6.13_PHASE4E=NOT_STARTED
 MC6.13_RUNTIME_INTEGRATION=NOT_IMPLEMENTED
 MC6.13_API=NOT_IMPLEMENTED
 MC6.13_UI=NOT_IMPLEMENTED

@@ -1,7 +1,7 @@
 # AIPM Production Roadmap
 
-**Assessment date:** 2026-08-16
-**Repository state:** local `main` at `df4e909` (`Complete AIPM core workflows and documentation`)
+**Assessment date:** 2026-08-24
+**Repository state:** `main` and `origin/main` at `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70` (`feat: implement MC-6.13 Phase 4A composition`)
 **Source of requirements:** attached `AIPM.md`, especially sections 2, 5, 7–11, 15, and 18.
 
 ## Current-state assessment
@@ -83,9 +83,9 @@ The project should not be declared production-ready merely because the CLI works
 
 This document remains the roadmap for the broader AIPM management product, especially safe `aipm update` transactions. It is not a replacement for the Mission Control roadmap in [`docs/MC-6_IMPLEMENTATION_PLAN.md`](docs/MC-6_IMPLEMENTATION_PLAN.md) or the current status ledger in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md).
 
-The Mission Control read-only cockpit is implemented and pushed through **MC-6.8**. The current repository checkpoint is `a7ee2f1b90932772fcb7855d9e41a7fa01252824`, which also contains landed MC-6.13 Phase 2 evidence normalization and Phase 3 deterministic advisor rules. Completed Mission Control work includes the MC-5 dashboard and read-only SQLite boundary, MC-5 Gate 2.1 staging validation, shared MC-6 contracts and frontend shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, and the pure advisor domain.
+The Mission Control read-only cockpit is implemented and pushed through **MC-6.8**. The current repository checkpoint is `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70`, which also contains landed MC-6.13 Phase 2 evidence normalization, Phase 3 deterministic advisor rules, and Phase 4A pure composition. Completed Mission Control work includes the MC-5 dashboard and read-only SQLite boundary, MC-5 Gate 2.1 staging validation, shared MC-6 contracts and frontend shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, and the pure advisor domain.
 
-The next Mission Control milestone is MC-6.9 design/inspection only. MC-6.10 Settings posture and MC-6.11 TUI remain planned; MC-6.12 remains the future action-control boundary; and MC-6.13 Phase 4 remains unauthorized and not started. None of those milestones authorize changes to the broader `aipm update` transaction.
+The next Mission Control milestone is MC-6.9 design/inspection only. MC-6.10 Settings posture and MC-6.11 TUI remain planned; MC-6.12 remains the future action-control boundary; and MC-6.13 Phases 4B–4E remain unauthorized and not started after the completed pure Phase 4A composition. None of those milestones authorize changes to the broader `aipm update` transaction.
 
 The broader roadmap work remains independently tracked:
 
@@ -101,4 +101,4 @@ The broader roadmap work remains independently tracked:
 | MC-6.13 Phase 2/3 advisor domain | Complete and pushed; pure normalization and deterministic rules only. Phase 4 composition, API/UI integration, LLM functionality, and actions remain unauthorized. |
 | Real VPS inspection | Separate read-only, explicitly approved operation; no state-changing commands are implied. |
 
-Mission Control does not perform update execution, remediation, or public exposure itself. The current dashboard path is an existing bridge ingress—Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → loopback dashboard at `127.0.0.1:8787`—while AIPM remains loopback-bound, GET-only, and read-only. This ingress topology remains separate from any future AIPM management control plane.
+Mission Control does not perform update execution, remediation, or public exposure itself. The current dashboard path is an existing bridge ingress—Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → loopback dashboard at `127.0.0.1:8787`—while AIPM remains loopback-bound, GET-only, and read-only. Separately supplied production verification reports successful health checks through the existing bridge and public endpoint, while telemetry commit `0ab4b0e859fff96add058cb3eb55e0ff408b1a83` reduced the previous retention-spin CPU to approximately 0% with healthy sampling. These are live operational facts, not repository changes made by the roadmap work. Orphan-process cleanup and configuration-twin deletion remain external VPS state. This ingress topology remains separate from any future AIPM management control plane.
