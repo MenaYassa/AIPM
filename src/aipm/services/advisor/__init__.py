@@ -1,3 +1,5 @@
 """Pure, non-authoritative MC-6.13 advisor service package boundary."""
 
-__all__: tuple[str, ...] = ()
+from aipm.services.advisor.normalizer import EvidenceNormalizer, NormalizationError, normalize_observations
+
+__all__ = ("EvidenceNormalizer", "NormalizationError", "normalize_observations")
