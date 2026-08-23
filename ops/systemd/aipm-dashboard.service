@@ -18,7 +18,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadOnlyPaths=/home/ubuntu/aipm /home/mina/.config/aipm /home/mina/.local/state/aipm/telemetry
-InaccessiblePaths=/home/ubuntu/.ssh /home/ubuntu/.config/cloudflared
+InaccessiblePaths=/home/ubuntu/.ssh
 RestrictSUIDSGID=true
 UMask=0077
 

@@ -434,6 +434,8 @@ def test_dashboard_service_template_enforces_read_only_boundary() -> None:
     assert "Environment=AIPM_CONFIG=/home/mina/.config/aipm/config.yaml" in text
     assert "Environment=AIPM_TELEMETRY_DB=/home/mina/.local/state/aipm/telemetry/mission_control.db" in text
     assert "ReadOnlyPaths=/home/ubuntu/aipm /home/mina/.config/aipm /home/mina/.local/state/aipm/telemetry" in text
+    assert "InaccessiblePaths=/home/ubuntu/.ssh" in text
+    assert "/home/ubuntu/.config/cloudflared" not in text
     assert "AIPM_TELEMETRY_DB=/home/ubuntu/.local/state/aipm/telemetry/mission_control.db" not in text
     assert "ReadWritePaths=" not in text
     assert "--host 0.0.0.0" not in text
