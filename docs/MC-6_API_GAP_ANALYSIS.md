@@ -2,9 +2,9 @@
 
 ## Purpose and contract rules
 
-This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `d1f692948a014197eda60616fd602e8061959316`.
+This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 and the pure MC-6.13 Phase 2/3 advisor domain are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `a7ee2f1b90932772fcb7855d9e41a7fa01252824`.
 
-The first MC-6 API release remains read-only and preserves all existing route names and response semantics. Existing clients must continue to receive stable `available`, `status`, `error`, freshness, and domain payload fields. Additive fields and new GET routes are preferred. Any POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoint is **FUTURE**.
+The first MC-6 API release remains read-only and preserves all existing route names and response semantics. Existing clients must continue to receive stable `available`, `status`, `error`, freshness, and domain payload fields. Additive fields and new GET routes are preferred. Any POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoint is **FUTURE**. MC-6.13 Phase 2/3 adds no API route; an eventual `/api/advisor` composition surface is a separate Phase 4 decision.
 
 ## Current API inventory
 
@@ -221,7 +221,7 @@ Query parameters must be bounded and normalized consistently. A shared query val
 | P2 | SSE event stream | FUTURE/EXTEND | Useful after polling and reconnect semantics are stable. |
 | P2 | TUI adapter | NEW | Requires stable shared façade contracts. |
 | P3 | Authenticated action API | FUTURE | Must be separately designed and approved. |
-| P3 | AI Agent API | FUTURE | Depends on action, identity, approval, and audit control planes. |
+| P3 | AI Agent API | FUTURE / PHASE 4 | Phase 2/3 domain contracts and rules are landed, but no `/api/advisor` route or façade composition exists. Depends on separate identity, approval, audit, and action-boundary decisions. |
 
 ## Cross-interface contract
 
@@ -267,4 +267,4 @@ The TUI may use direct façades for local efficiency. It should not make HTTP ca
 - **EXISTS:** current overview, history, event, incident, notification, metrics, channel, policy, service-health, and static UI APIs.
 - **EXTEND:** stable filters, cursor pagination, server/project/Docker detail, history comparisons, incident evidence, notification summary, and effective settings posture.
 - **NEW:** shared TUI adapter and any later additive detail projections not already delivered.
-- **FUTURE:** action routes, authentication/public ingress, SSE/WebSockets, notification activation, remediation, and AI Agent integration.
+- **FUTURE:** `/api/advisor` and Phase 4 composition, action routes, authentication or ingress changes, SSE/WebSockets, notification activation, remediation, and LLM/provider integration.

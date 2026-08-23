@@ -143,17 +143,17 @@ This milestone does not claim real-VPS readiness. The referenced VPS infrastruct
 
 ## Current Mission Control checkpoint
 
-**Updated:** 2026-08-20
+**Updated:** 2026-08-23
 
-The historical baseline above is retained for auditability. The repository has since completed the core AIPM completion pass and the read-only Mission Control milestones through **MC-6.8**. The current pushed checkpoint is:
+The historical baseline above is retained for auditability. The repository has completed the read-only Mission Control cockpit through MC-6.8 and the pure MC-6.13 advisor domain through Phase 3. The current pushed checkpoint is:
 
 ```text
-HEAD=d1f692948a014197eda60616fd602e8061959316
-ORIGIN_MAIN=d1f692948a014197eda60616fd602e8061959316
+HEAD=a7ee2f1b90932772fcb7855d9e41a7fa01252824
+ORIGIN_MAIN=a7ee2f1b90932772fcb7855d9e41a7fa01252824
 WORKTREE=CLEAN
 ```
 
-Mission Control now provides a read-only operations cockpit over existing telemetry, events, incidents, notifications, history, Docker, project/application, Server, Systemd, and bounded Logs capabilities. MC-6.4 was reconciled rather than duplicated because the Server capability was already delivered by MC-6.3.
+MC-6.13 Phase 2 and Phase 3 are complete, reviewed, committed, and pushed. Phase 4 has not started and remains unauthorized. The Phase 2/3 work adds no dashboard surface, API route, façade integration, runtime collector, provider access, LLM, or autonomous action.
 
 | Completed area | Current result |
 |---|---|
@@ -164,23 +164,35 @@ Mission Control now provides a read-only operations cockpit over existing teleme
 | MC-6.5 through MC-6.6.3 | Docker intelligence, project/application association, conservative taxonomy, filtering, and health-evidence UX. |
 | MC-6.7 through MC-6.7.1 | Allow-listed Systemd observation with seven genuine units; Cloudflared remains Docker-owned. |
 | MC-6.8 | Bounded, redacted, read-only Logs with symbolic sources, fixed adapters, bounded queries, protected cursors, and safe frontend rendering. |
+| MC-6.13 Phase 2 | Immutable evidence normalization, mandatory evaluation time, freshness/availability semantics, deterministic canonical serialization, stable identifiers, and explicit uncertainty; pushed at `ebe1f84`. |
+| MC-6.13 Phase 3 | Ten deterministic evidence-linked rules, canonical field schema, bounded continuity envelope, exact evidence binding, and explanatory non-executable recommendations; pushed at `a7ee2f1`. |
 
-The next Mission Control milestone is **MC-6.9 design/inspection only**. It should address bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links using existing MC-3, incident, history, and read-only repository contracts. MC-6.10 covers Settings posture and notification safety; MC-6.11 covers a shared Typer/Rich TUI; MC-6.12 and MC-6.13 remain future action-control and AI-advisor milestones requiring separate safety gates.
+MC-6.9 remains the next separate design/inspection milestone. It should address bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links using existing MC-3, incident, history, and read-only repository contracts. MC-6.10 covers Settings posture and notification safety; MC-6.11 covers a shared Typer/Rich TUI; MC-6.12 remains the future action-control boundary; and MC-6.13 Phase 4 remains future and unauthorized.
 
 ## Current operational gates
 
 The successful Gate 2.1 harness remains byte-identical:
 
 ```text
-SHA-256: 9e12cdc01f901381381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7
+SHA-256: 9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7
 ```
 
-The dashboard has not been deployed or started on the target VPS by the MC-6.8 repository work. Permanent service installation requires a separately approved read-only production preflight covering the exact commit, configuration, executable, port, filesystem write-denial boundary, loopback binding, telemetry/MC-3 state, notification-disabled posture, and rollback readiness. Cloudflare/public ingress, credentials, Docker runtime changes, live SQLite operations, and notification activation remain outside this checkpoint.
+Repository completion does not imply target-VPS deployment or runtime validation. The current dashboard ingress architecture is:
 
-The complete current ledger and next-step sequence is maintained in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). The broader update-management roadmap remains in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md); its remaining work includes complete update planning, explicit approval, critical Git transaction safety, restore points, rollback management, structured audit history, disposable integration fixtures, CI/release hygiene, and separately approved real-VPS inspection.
+```text
+Cloudflared container
+    -> 172.20.0.1:8788
+    -> host nginx reverse proxy
+    -> 127.0.0.1:8787
+    -> AIPM dashboard
+```
+
+The dashboard remains loopback-bound and the public hostname is `vpanel.03092017.xyz`. Cloudflared and Docker remain infrastructure-owned. Credentials, live SQLite, Systemd runtime changes, telemetry runtime changes, and notification activation remain outside the MC-6.13 repository scope.
+
+The complete current ledger and next-step sequence is maintained in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). The dedicated advisor status is in [`docs/MC-6.13_STATUS.md`](docs/MC-6.13_STATUS.md). The broader update-management roadmap remains in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md).
 
 ## Current verification baseline
 
-The MC-6.8 checkpoint passed 11 focused Logs tests, 90 relevant MC-5 through MC-6.7.1 regression tests, and 206 full tests, with the existing Starlette/httpx deprecation warning. Python compilation, JavaScript syntax checks, `git diff --check`, mutation/lifecycle scans, subprocess safety scans, output/secret scans, frontend action scans, production-scope scans, and Gate 2.1 harness identity checks passed.
+The final MC-6.13 Phase 3 validation passed 29 focused tests and 473 full tests, with the existing unrelated Starlette/httpx deprecation warning. The Phase 2 validation passed 18 focused tests and 444 full tests. Runtime/authority scans, generated-artifact cleanup, exact-scope checks, protected-state checks, and Gate 2.1 identity checks passed.
 
-> **Current project position:** Mission Control implementation is complete through MC-6.8 and is ready for the next design checkpoint, not for automatic production deployment. The broader AIPM update-management roadmap remains an independent workstream.
+> **Current project position:** Mission Control read-only cockpit work is complete through MC-6.8, and the pure MC-6.13 advisor domain is complete through Phase 3. MC-6.13 Phase 4 composition, API/UI integration, LLM functionality, autonomous actions, and target runtime deployment remain outside the authorized current state.

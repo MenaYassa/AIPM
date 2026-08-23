@@ -2,9 +2,9 @@
 
 ## Scope and delivery rule
 
-This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 have now been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `d1f692948a014197eda60616fd602e8061959316`.
+This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 and MC-6.13 Phase 2/3 have been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `a7ee2f1b90932772fcb7855d9e41a7fa01252824`.
 
-MC-6.9 and later remain future milestones. Each new milestone must proceed as a small, reviewable change set with focused tests, full regression, safety review, explicit scope, and an explicit stop point. No milestone may quietly introduce writes into the read-only dashboard. Production deployment, target-VPS operations, public ingress, credentials, notifications, live SQLite, Docker runtime changes, and Systemd operations require separate approval.
+MC-6.9 through MC-6.12 and MC-6.13 Phase 4 remain future milestones. Each new milestone must proceed as a small, reviewable change set with focused tests, full regression, safety review, explicit scope, and an explicit stop point. No milestone may quietly introduce writes into the read-only dashboard or authority into the pure advisor domain. Production deployment, target-VPS operations, credentials, notifications, live SQLite, Docker runtime changes, and Systemd operations require separate approval.
 
 ## Milestone map
 
@@ -22,7 +22,7 @@ MC-6.9 and later remain future milestones. Each new milestone must proceed as a 
 | MC-6.10 | EXTEND | Settings posture and expanded notification safety/audit views. | Planned | Read-only only; notifications remain disabled. |
 | MC-6.11 | NEW | Shared Typer/Rich TUI consuming the same façades and contracts. | Planned | Read-only only. |
 | MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Future, separate gate | Separate authorization required. |
-| MC-6.13 | FUTURE | AI Agent advisor and action planner integration. | Future, separate product gate | Separate product and safety gate required. |
+| MC-6.13 Phase 2/3 | EXTEND/NEW | Immutable evidence normalization and ten deterministic, evidence-linked advisor rules. | Complete and pushed at `a7ee2f1` | Pure domain logic only; Phase 4 composition remains separately gated. |
 
 ## MC-6.1 — contracts and UI foundation
 
@@ -260,9 +260,11 @@ Intent → Plan → Risk classification → Human approval → Action executor
 
 Actions must not be added to existing read façades. The action executor needs distinct service accounts/permissions, explicit allow-lists, per-action timeouts, concurrency control, audit records, and tested rollback. Public access and authentication are prerequisites.
 
-## MC-6.13 — future AI Agent integration
+## MC-6.13 — AI Advisor Phase 2/3 complete
 
-The AI Agent is not a generic “run shell” feature. A future agent should initially be an evidence-based advisor that reads the same safe projections, proposes a plan, cites observed evidence and freshness, identifies uncertainty, and waits for human approval. Execution, if ever approved, occurs through the MC-6.12 control plane rather than through browser-generated commands.
+Phase 2 established deterministic normalization from bounded caller-supplied observations into immutable `EvidenceBundle` values. Phase 3 established the pure `mc613-rules-v1` engine with ten deterministic service-health, resource-pressure, telemetry-anomaly, deployment-change, and project-state rules. The final continuity contract uses an immutable bounded `ResourceHistoryEnvelope`, exact evidence binding, explicit uncertainty, canonical fields, stable identifiers, and no aliases or implicit unit conversion.
+
+The Phase 3 engine is not a generic “run shell” or agent-execution feature. It does not collect observations, access runtime/provider state, expose an API/UI, invoke an LLM, approve plans, write audit transitions, or execute operations. Phase 4 composition remains unauthorized and future. Any later execution, if separately approved, must occur through the MC-6.12 control plane rather than browser-generated commands.
 
 ## Migration and schema strategy
 
@@ -295,7 +297,9 @@ Production deployment is a separate approval gate. It should create the persiste
 
 ### Public access
 
-Public or non-loopback access is a separate future project requiring authenticated ingress, authorization, threat modeling, and explicit Cloudflare approval. It is not a consequence of MC-6 UI implementation.
+The current public dashboard path is an existing bridge-bound ingress, not a change to the dashboard listener: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787` → AIPM dashboard, serving `vpanel.03092017.xyz`. The dashboard remains loopback-bound and nginx forwards only to it. Cloudflared and Docker configuration are outside this documentation-only synchronization and were not changed by MC-6.13.
+
+This existing ingress does not authorize new AIPM public-ingress features, authentication changes, action routes, or credential access. Any future ingress modification still requires independent threat modeling and explicit approval.
 
 ## Rollback strategy
 

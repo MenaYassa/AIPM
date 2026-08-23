@@ -1,0 +1,138 @@
+# MC-6.13 AI Advisor Status
+
+**Status date:** 2026-08-23
+**Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
+**Current commit:** `a7ee2f1b90932772fcb7855d9e41a7fa01252824` — `feat: implement MC-6.13 advisor rules`
+**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 3 push.
+
+## Current status
+
+MC-6.13 Phase 2 and Phase 3 are complete, reviewed, committed, and pushed. Phase 4 has **not started** and remains unauthorized. The landed work is a pure, deterministic, evidence-based advisor domain boundary. It does not collect runtime observations, call existing façades, access infrastructure, expose an API, change the dashboard, invoke an LLM, or perform actions.
+
+```text
+MC6.13_PHASE2_REVIEW=PASS
+MC6.13_PHASE2_COMMIT=ebe1f848947981ee771c4435a19272a50445cb65
+MC6.13_PHASE2_PUSH=COMPLETE
+MC6.13_PHASE3_REVIEW=PASS
+MC6.13_PHASE3_COMMIT=a7ee2f1b90932772fcb7855d9e41a7fa01252824
+MC6.13_PHASE3_PUSH=COMPLETE
+MC6.13_PHASE4_STARTED=NO
+```
+
+## Phase 2 — evidence normalization
+
+Phase 2 established the isolated normalization seam in:
+
+```text
+src/aipm/services/advisor/__init__.py
+src/aipm/services/advisor/normalizer.py
+tests/test_advisor_normalizer.py
+```
+
+The normalizer accepts only bounded mapping-shaped source observations supplied by its caller and converts them into immutable Phase 1 `EvidenceBundle` values. It requires a timezone-aware caller-supplied `evaluation_time`, performs deterministic ordering and serialization, derives freshness without reading the current clock, preserves safe bounded fields for valid degraded states, and emits explicit uncertainty for missing, stale, unavailable, invalid, conflicting, incomplete, or unverified evidence. It performs no filesystem, process, network, provider, Docker, Systemd, database, credential, or provenance-socket access.
+
+Phase 2 validation completed with 18 focused tests and 444 full-suite tests passed, with the existing unrelated Starlette/httpx deprecation warning. The Phase 2 commit is `ebe1f848947981ee771c4435a19272a50445cb65`, subject `feat: establish MC-6.13 evidence normalization seam`.
+
+## Phase 3 — deterministic rule engine
+
+Phase 3 established the pure rule engine in:
+
+```text
+src/aipm/services/advisor/__init__.py
+src/aipm/services/advisor/rules.py
+tests/test_advisor_rules.py
+```
+
+The fixed catalog is `mc613-rules-v1`, with ten deterministic rules:
+
+| Rule ID | Category | Purpose |
+|---|---|---|
+| `service.health.unavailable` | `service_health` | Detect explicit unavailable service-health evidence. |
+| `service.health.stale` | `service_health` | Detect explicit stale service-health evidence. |
+| `resource.pressure.sustained` | `resource_pressure` | Detect complete, continuous, threshold-sustained resource pressure. |
+| `resource.pressure.spike` | `resource_pressure` | Detect an explicit changed resource comparison. |
+| `telemetry.cadence.gap` | `telemetry_anomaly` | Detect an explicit cadence gap. |
+| `telemetry.source.degraded` | `telemetry_anomaly` | Detect explicit degraded retention/source state. |
+| `deployment.revision.changed` | `deployment_change` | Detect an explicit deployment revision comparison change. |
+| `deployment.posture.unverified` | `deployment_change` | Detect an unverified runtime confirmation state. |
+| `project.state.changed` | `project_state_change` | Detect a change for a proven project identity. |
+| `project.health.degraded` | `project_state_change` | Detect explicit degraded project health with supporting evidence. |
+
+### Canonical field schema
+
+Rules consume only the following canonical fields. No aliases are supported and no implicit unit conversion is performed.
+
+| Field | Type or allowed values | Purpose |
+|---|---|---|
+| `service_status` | string: `healthy`, `degraded`, `critical`, `unavailable`, `unknown` | Service-health status. |
+| `metric` | string: `cpu_percent`, `memory_percent`, `disk_percent` | Resource metric identity. |
+| `value` | finite number, percent | Resource point value. |
+| `unit` | exactly `percent` | Resource unit. |
+| `comparison_status` | `unchanged`, `changed`, `missing`, `unavailable`, `indeterminate` | Explicit comparison result. |
+| `baseline_value`, `current_value` | finite numbers, percent | Resource comparison sides. |
+| `cadence_seconds` | positive finite number, seconds | Telemetry cadence. |
+| `retention_status` | `healthy`, `unavailable`, `invalid`, `failed` | Retention/source status. |
+| `baseline_revision`, `current_revision`, `revision` | bounded strings | Deployment revision identities. |
+| `runtime_confirmation_status` | `observed`, `unavailable`, `not_observed`, `stale`, `invalid` | Runtime confirmation state. |
+| `identity_proven` | boolean | Evidence-backed project identity. |
+| `changed_field` | `revision`, `branch`, `dirty`, `runtime_association`, `component_count`, `health_state` | Allow-listed project state field. |
+| `health_status` | `healthy`, `degraded`, `critical`, `unknown` | Project-health projection. |
+| `supporting_evidence_count` | positive integer | Supporting health evidence count. |
+
+The obsolete names `baseline`, `current`, `before_revision`, `after_revision`, `sample_interval_seconds`, `runtime_state`, `state_field`, `health_state`, and `supporting_evidence` are not supported rule inputs.
+
+### Sustained-pressure continuity contract
+
+`resource.pressure.sustained` accepts an immutable bounded `ResourceHistoryEnvelope`. The envelope requires a bounded resource identity; an allow-listed CPU, memory, or disk metric; the exact `percent` unit; a positive finite cadence no greater than 86,400 seconds; timezone-aware ordered window bounds; producer-supplied completeness; at most 128 immutable points; unique evidence IDs; and unique normalized timestamps.
+
+A positive sustained finding requires at least three valid observed points, a requested window of at least five minutes, actual point coverage of at least five minutes, and adjacent gaps no greater than `1.5 × cadence_seconds`, with equality accepted. CPU, memory, and disk thresholds are inclusive at 85%, 85%, and 90%, respectively. Incomplete, sparse, short, malformed, conflicting, stale/degraded, invalid, or mismatched histories fail closed with explicit uncertainty.
+
+Envelope points are not independently authoritative. Each point must bind exactly to its referenced `EvidenceItem` by resource identity, state, canonical metric, canonical value, canonical unit, and UTC-normalized `observed_at`. Any mismatch produces invalid-evidence uncertainty and cannot satisfy continuity or produce a positive finding.
+
+## Phase 3 safety boundary
+
+The Phase 3 engine accepts immutable evidence plus caller-supplied request and evaluation context. It does not read the current clock, generate randomness or UUIDs, access filesystem/process/network/provider state, invoke Docker or Systemd, read credentials, access the provenance socket, or perform autonomous actions. It produces deterministic findings and explanatory, non-executable recommendations while propagating uncertainty explicitly.
+
+The engine does not create an `ActionPlan`, `ApprovalBinding`, executable operation, authoritative audit transition, provider invocation, shell/Systemd/Docker/database operation, or autonomous action. Any future execution, if ever approved, must remain behind the separately governed MC-6.12 control plane.
+
+## Review and validation record
+
+Phase 3 passed strict review after resolving the following historical blockers: generic aliases were rejected in favor of a canonical field schema; timestamp-only sustained-pressure inference was replaced by a bounded history envelope; duplicate timestamps were rejected; and envelope values were bound exactly to normalized evidence values and timestamps. These historical decisions remain documented without weakening the current PASS state.
+
+Final Phase 3 validation:
+
+| Check | Result |
+|---|---:|
+| Focused Phase 3 suite | 29 passed |
+| Full repository suite | 473 passed, 1 existing warning |
+| `git diff --check` | PASS |
+| Runtime/authority import boundary | PASS |
+| Generated-artifact cleanup | PASS |
+| Exact committed scope | PASS |
+| MC-6.12A / MC-6.12B | Protected |
+| Telemetry and provenance runtime | Untouched |
+| Dashboard/Systemd/Docker/Cloudflared/database/VPS | Untouched |
+| Gate 2.1 harness | Protected |
+| Gate 2.1 SHA-256 | `9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7` |
+
+## Phase 4 status
+
+Phase 4 composition work is not implemented and is not authorized. No façade integration, advisor API, dashboard/UI surface, TUI surface, LLM provider, scheduler, runtime adapter, or autonomous action path has been added. Future Phase 4 design must receive a separate narrow authorization and must preserve the Phase 3 pure-domain boundary.
+
+## Related documentation
+
+- [`MC-6_STATUS.md`](MC-6_STATUS.md) — current Mission Control ledger.
+- [`MC-6_IMPLEMENTATION_PLAN.md`](MC-6_IMPLEMENTATION_PLAN.md) — milestone sequence and gates.
+- [`MC-6_ARCHITECTURE.md`](MC-6_ARCHITECTURE.md) — architecture and security boundaries.
+- [`MISSION_CONTROL.md`](MISSION_CONTROL.md) — operational dashboard and ingress documentation.
+- [`../PROJECT_STATUS.md`](../PROJECT_STATUS.md) — broader project status.
+- [`../PRODUCTION_ROADMAP.md`](../PRODUCTION_ROADMAP.md) — broader update-management roadmap.
+
+```text
+MC6.13_PHASE4=NOT_STARTED
+MC6.13_RUNTIME_INTEGRATION=NOT_IMPLEMENTED
+MC6.13_API=NOT_IMPLEMENTED
+MC6.13_UI=NOT_IMPLEMENTED
+MC6.13_LLM=NOT_IMPLEMENTED
+MC6.13_AUTONOMOUS_ACTIONS=NOT_AUTHORIZED
+```

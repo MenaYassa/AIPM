@@ -15,10 +15,10 @@ Do not introduce a second telemetry system, event store, notification database, 
 | Frontend | Incrementally extract and organize the current vanilla `index.html`; defer React/Vite migration until contracts and information architecture stabilize. |
 | Data | Existing telemetry, MC-3, incident, notification, and history repositories; dashboard/TUI access remains true read-only. |
 | Realtime | Bounded polling first; SSE is a later one-way observation enhancement; WebSockets are FUTURE. |
-| Deployment | Loopback-only user-level systemd dashboard alongside existing telemetry and MC-3 services. |
+| Deployment | Dashboard remains loopback-bound at `127.0.0.1:8787`; the current public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → loopback dashboard. |
 | Authentication | Local/SSH access first; authenticated public access is a separate future gate. |
 | Writes/actions | FUTURE only; require a distinct approval, authorization, audit, idempotency, verification, and rollback control plane. |
-| AI Agent | FUTURE advisor first, with execution only through the future action control plane. |
+| AI Agent | MC-6.13 Phase 2/3 advisor domain is landed; Phase 4 composition and any execution remain future and separately gated. |
 
 ## Feature classification
 
@@ -35,21 +35,21 @@ No API or UI response may expose credentials, secret references, destination val
 
 ## Current implementation and recommended next step
 
-MC-6.1 through MC-6.8 have now been implemented, reviewed, validated, committed, and pushed. MC-6.4 was reconciled because the Server capability already existed through MC-6.3. MC-6.7.1 reconciled the Systemd registry so Cloudflared remains Docker-owned, and MC-6.8 delivered the bounded redacted Logs façade/API/page.
+MC-6.1 through MC-6.8 have been implemented, reviewed, validated, committed, and pushed. MC-6.4 was reconciled because the Server capability already existed through MC-6.3. MC-6.7.1 reconciled the Systemd registry so Cloudflared remains Docker-owned, and MC-6.8 delivered the bounded redacted Logs façade/API/page. MC-6.13 Phase 2 and Phase 3 are also implemented, reviewed, committed, and pushed.
 
-The current checkpoint is `d1f692948a014197eda60616fd602e8061959316`. The next milestone is **MC-6.9 design/inspection only**, covering bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links through existing read-only repositories and MC-3 contracts. MC-6.9 must stop for review before implementation. MC-6.10 Settings posture and MC-6.11 TUI remain planned; MC-6.12 action control and MC-6.13 AI Agent integration remain future and separately gated.
+The current checkpoint is `a7ee2f1b90932772fcb7855d9e41a7fa01252824`. MC-6.13 Phase 2 provides immutable evidence normalization, and Phase 3 provides the pure deterministic `mc613-rules-v1` engine with ten evidence-linked rules. Phase 4 has not started and remains unauthorized. MC-6.9 remains the next separate design/inspection milestone; MC-6.10 and MC-6.11 remain planned, and MC-6.12 remains the future action-control boundary.
 
-Production deployment remains a separate approval gate. The loopback-only dashboard, notifications-disabled posture, read-only SQLite/WAL/SHM boundary, Cloudflared ownership rule, and no-action API boundary remain mandatory.
+Production/runtime deployment remains separate from repository completion. The dashboard remains loopback-bound at `127.0.0.1:8787`; the current public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`. Notifications remain disabled, the SQLite/WAL/SHM read-only boundary remains mandatory, Cloudflared remains Docker-owned, and no-action API boundaries remain in force.
 
 ## Design status
 
 ```text
 MC6_DESIGN_STATUS=COMPLETE
-IMPLEMENTATION_STATUS=COMPLETE_THROUGH_MC6_8
+IMPLEMENTATION_STATUS=COMPLETE_THROUGH_MC6_13_PHASE3
 NEXT_MILESTONE=MC6_9_DESIGN_ONLY
 PRODUCTION_CHANGES=NONE
 WRITE_ACTIONS_AUTHORIZED=NO
-PUBLIC_INGRESS_AUTHORIZED=NO
+PUBLIC_INGRESS_AUTHORIZED=EXISTING_BRIDGE_ONLY
 NOTIFICATIONS_ACTIVATED=NO
 ```
 

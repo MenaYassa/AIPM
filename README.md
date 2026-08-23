@@ -6,7 +6,7 @@ AIPM is a local **AI Platform Manager** for discovering and operating projects t
 
 The repository includes the core CLI, domain models, service/provider architecture, Git and Docker integrations, health analyzers, backup snapshots, a guarded update workflow, and the read-only Mission Control operations cockpit. The implementation is designed to remain useful on machines without a running Docker daemon: configuration, help, host diagnostics, and Git-only discovery do not require Docker. Docker- or Compose-specific commands return a clear error when the required runtime is unavailable.
 
-The current Mission Control checkpoint is **MC-6.8 complete** at commit `d1f692948a014197eda60616fd602e8061959316`. The cockpit now covers overview, host/server intelligence, Docker, projects/applications, Systemd observations, bounded redacted Logs, history, events, incidents, and notification posture. The next development milestone is MC-6.9 design/inspection only. Production deployment remains a separate approval-gated operation.
+The current Mission Control checkpoint is **MC-6.13 Phase 3 complete** at commit `a7ee2f1b90932772fcb7855d9e41a7fa01252824`. MC-6.13 Phase 2 established immutable evidence normalization and Phase 3 established a pure deterministic advisor rule engine. Phase 4 has not started and remains unauthorized. The cockpit continues to cover overview, host/server intelligence, Docker, projects/applications, Systemd observations, bounded redacted Logs, history, events, incidents, and notification posture. MC-6.9 remains a separate design/inspection milestone, and production/runtime changes remain separate approval-gated operations.
 
 For the complete milestone ledger, remaining roadmap, safety invariants, deployment gates, and next steps, see [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). The broader AIPM update-management roadmap remains in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md), while the historical baseline and completion records remain in [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
 
@@ -37,13 +37,19 @@ AIPM_CONFIG=/path/to/config.yaml aipm discover
 
 ## Mission Control dashboard
 
-AIPM now includes a read-only web dashboard that turns the VPS handbook into a live operations cockpit. It reports host telemetry, Docker container state, local cloudflared visibility, and Git/Compose-backed project inventory while linking back to the handbook’s first-response workflows. Start it locally with:
+AIPM includes a read-only web dashboard that turns the VPS handbook into a live operations cockpit. It reports host telemetry, Docker container state, local cloudflared visibility, and Git/Compose-backed project inventory while linking back to the handbook’s first-response workflows. The current public path is an existing bridge-bound ingress: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787` → dashboard, serving `vpanel.03092017.xyz`. The dashboard itself remains loopback-bound.
+
+Start it locally with:
 
 ```bash
 aipm dashboard
 ```
 
-The default listener is `127.0.0.1:8787`; keep it loopback-only when the existing cloudflared tunnel is the public ingress. The full deployment and security runbook is in [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md), and the current milestone ledger is in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). Mission Control uses typed read-only telemetry services behind the existing AIPM providers and preserves the current `/api/overview` response contract. MC-2 adds a configurable SQLite sampler through `aipm telemetry sample` and `aipm telemetry run`, plus safe `/api/history/host`, `/api/history/containers`, `/api/history/projects`, and `/api/history/tunnel` endpoints. MC-3 adds a separate deterministic processor through `aipm events process` and `aipm events run`, with `/api/events`, `/api/incidents`, and a focused read-only Incident Room. MC-6 adds the incremental cockpit shell, Server, Docker, Project/Application, Systemd, and bounded Logs pages. See [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md) for the schema, retention, systemd templates, idempotency, and safety boundaries.
+The default listener is `127.0.0.1:8787`; do not bind it to `0.0.0.0:8787`. The existing public path uses the host nginx bridge listener at `172.20.0.1:8788`, which forwards only to the loopback dashboard. The full deployment and security runbook is in [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md), and the current milestone ledger is in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). Mission Control uses typed read-only telemetry services behind the existing AIPM providers and preserves the current `/api/overview` response contract. MC-2 adds a configurable SQLite sampler through `aipm telemetry sample` and `aipm telemetry run`, plus safe `/api/history/host`, `/api/history/containers`, `/api/history/projects`, and `/api/history/tunnel` endpoints. MC-3 adds a separate deterministic processor through `aipm events process` and `aipm events run`, with `/api/events`, `/api/incidents`, and a focused read-only Incident Room. MC-6 adds the incremental cockpit shell, Server, Docker, Project/Application, Systemd, and bounded Logs pages. See [`docs/MISSION_CONTROL.md`](docs/MISSION_CONTROL.md) for the schema, retention, Systemd templates, idempotency, and safety boundaries.
+
+## MC-6.13 AI Advisor domain
+
+MC-6.13 Phase 2 and Phase 3 are complete and pushed. Phase 2 normalizes bounded caller-supplied observations into immutable evidence bundles. Phase 3 applies ten deterministic, evidence-linked rules over immutable evidence using a canonical field schema and bounded `ResourceHistoryEnvelope` continuity contract. The advisor is pure domain logic: it does not access runtime state, providers, filesystems, processes, networks, Docker, Systemd, credentials, databases, the provenance socket, or an LLM. It exposes no advisor API/UI and performs no autonomous action. Phase 4 remains unauthorized and not started. See [`docs/MC-6.13_STATUS.md`](docs/MC-6.13_STATUS.md).
 
 ## Commands
 
@@ -132,7 +138,7 @@ Run the automated tests with:
 pytest -q
 ```
 
-The tests cover deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, health aggregation, dry-run side-effect protection, approval gating, update execution, audit serialization, Mission Control contracts, read-only SQLite behavior, frontend safety, and bounded log redaction. The MC-6.8 checkpoint passed 206 tests with the existing Starlette/httpx deprecation warning. Docker integration tests, disposable Git-remote tests, browser acceptance, and TUI tests remain separate roadmap work.
+The tests cover deterministic domain logic, configuration, discovery, backups, mapping, provider command construction, health aggregation, dry-run side-effect protection, approval gating, update execution, audit serialization, Mission Control contracts, read-only SQLite behavior, frontend safety, bounded log redaction, MC-6.13 evidence normalization, and MC-6.13 deterministic rule evaluation. The final MC-6.13 Phase 3 validation passed 29 focused tests and 473 full tests with the existing unrelated Starlette/httpx deprecation warning. Docker integration tests, disposable Git-remote tests, browser acceptance, and TUI tests remain separate roadmap work.
 
 ## License
 

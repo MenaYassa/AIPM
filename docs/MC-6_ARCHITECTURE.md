@@ -133,9 +133,9 @@ The HTTP mapper and TUI renderer may differ in presentation shape, but both must
 
 ## Authentication and authorization boundary
 
-The first MC-6 deployment remains loopback-only on `127.0.0.1:8787`, accessed locally or through an operator-controlled SSH port forward. This provides network locality but is not a complete multi-user authentication model.
+The AIPM dashboard remains loopback-bound on `127.0.0.1:8787`. The current public path is an existing bridge-bound ingress: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`. The public hostname is `vpanel.03092017.xyz`; nginx forwards only to the loopback dashboard.
 
-A later non-loopback deployment requires, at minimum, authenticated ingress, explicit user identity, role-based authorization, CSRF protection for any future writes, audit correlation, rate limits, session expiry, and secret-safe error handling. Cloudflare Access or an equivalent trusted proxy may be evaluated later, but MC-6 design does not authorize changing Cloudflare routes. No browser-held provider credential is acceptable.
+This existing ingress does not grant AIPM application authority, credential access, or action routes. Any future ingress or authentication change requires explicit identity, authorization, threat modeling, rate limits, session controls, and secret-safe error handling. No browser-held provider credential is acceptable.
 
 ## Deployment topology
 
@@ -149,7 +149,7 @@ user systemd manager
 └── aipm-notifications.service (not enabled while notifications.enabled=False)
 ```
 
-The dashboard reads the live telemetry database through the validated read-only boundary. It does not run telemetry sampling, event processing, notification delivery, Docker lifecycle operations, Git fetches, or background remediation. The service remains loopback-only. No reverse proxy, public ingress, additional database, or extra worker is needed for the first read-only cockpit.
+The dashboard reads the live telemetry database through the validated read-only boundary. It does not run telemetry sampling, event processing, notification delivery, Docker lifecycle operations, Git fetches, or background remediation. The service remains loopback-only. The existing host nginx bridge is the ingress layer and forwards `172.20.0.1:8788` only to `127.0.0.1:8787`; it is not an AIPM application authority or a second database/worker.
 
 ## Testing architecture
 
@@ -184,7 +184,7 @@ A React/Vite migration is not the first implementation step. It may be reconside
 4. **Storage:** reuse the existing SQLite database and repositories; no second telemetry or event store.
 5. **Systemd:** introduce a read-only observation adapter as NEW, but keep systemd mutation entirely FUTURE.
 6. **Logs:** introduce bounded, redacted, read-only log access as NEW; no arbitrary shell execution.
-7. **Access:** loopback-only first; authenticated public ingress is a separate future gate.
+7. **Access:** the dashboard remains loopback-bound; the existing public path uses a bridge-bound nginx listener at `172.20.0.1:8788` forwarding to `127.0.0.1:8787`. Any new ingress or authentication change remains separately gated.
 8. **Actions:** all writes and remediation are FUTURE and require a dedicated approval/control plane.
 9. **TUI:** build after shared façade contracts stabilize; share backend/core contracts, not HTTP scraping.
 10. **Delivery:** implement in small, independently testable vertical slices with explicit rollback at every stage.
@@ -203,15 +203,15 @@ A React/Vite migration is not the first implementation step. It may be reconside
 
 ## Current implementation reconciliation
 
-**Updated:** 2026-08-20
+**Updated:** 2026-08-23
 
-The MC-6 architecture described above is now implemented through **MC-6.8**. The completed slices are MC-6.1 contracts and scheduler, MC-6.2 vanilla shell, MC-6.3 Server/Host Intelligence, MC-6.5 Docker intelligence, MC-6.6 Project/Application Intelligence, MC-6.7/6.7.1 Systemd observation, and MC-6.8 bounded redacted Logs. MC-6.4 was reconciled because the Server capability already existed through MC-6.3.
+The MC-6 architecture described above is implemented through **MC-6.8** plus MC-6.13 Phase 2/3. The completed slices are MC-6.1 contracts and scheduler, MC-6.2 vanilla shell, MC-6.3 Server/Host Intelligence, MC-6.5 Docker intelligence, MC-6.6 Project/Application Intelligence, MC-6.7/6.7.1 Systemd observation, MC-6.8 bounded redacted Logs, MC-6.13 Phase 2 evidence normalization, and MC-6.13 Phase 3 deterministic advisor rules. MC-6.4 was reconciled because the Server capability already existed through MC-6.3.
 
-The current pushed checkpoint is `d1f692948a014197eda60616fd602e8061959316`. The implementation continues to use FastAPI, existing capability/service/provider/repository boundaries, typed Observation contracts, vanilla static modules, centralized bounded polling, existing telemetry/event/incident/history projections, and the validated read-only SQLite boundary. No second telemetry/event database, collector, worker, or provider ownership layer was introduced.
+The current pushed checkpoint is `a7ee2f1b90932772fcb7855d9e41a7fa01252824`. MC-6.13 Phase 2/3 uses an isolated pure advisor domain boundary over immutable evidence and does not change FastAPI, existing façade/service/provider/repository boundaries, vanilla static modules, bounded polling, telemetry/event/incident/history projections, or the validated read-only SQLite boundary. No second telemetry/event database, collector, worker, provider ownership layer, advisor API, UI, or LLM integration was introduced.
 
-The next planned slice is MC-6.9 design/inspection only. It must extend existing incident/history evidence and cross-links without changing MC-3 keys, incident correlation, notification projections, schemas, or read-only repository behavior. MC-6.10 is planned for safe settings/notification posture, MC-6.11 for a shared Typer/Rich TUI, and MC-6.12/6.13 remain future action-control and AI-advisor gates.
+The next planned slice remains MC-6.9 design/inspection only. It must extend existing incident/history evidence and cross-links without changing MC-3 keys, incident correlation, notification projections, schemas, or read-only repository behavior. MC-6.10 is planned for safe settings/notification posture, MC-6.11 for a shared Typer/Rich TUI, MC-6.12 remains the future action-control boundary, and MC-6.13 Phase 4 remains future, unauthorized, and not started.
 
-The deployment architecture remains intentionally separate from implementation. The dashboard is loopback-only, public ingress is not enabled, notifications remain disabled, Cloudflared remains Docker-owned, and permanent service installation requires an explicit read-only production preflight and deployment approval. The preserved Gate 2.1 harness SHA-256 is `9e12cdc01f901381381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7`.
+The deployment architecture remains separate from advisor implementation. The dashboard is loopback-bound at `127.0.0.1:8787`; the existing public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`. Notifications remain disabled, Cloudflared remains Docker-owned, and any future runtime or ingress change requires separate approval. The preserved Gate 2.1 harness SHA-256 is `9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7`.
 
 ## Classification
 

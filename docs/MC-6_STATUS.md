@@ -1,10 +1,10 @@
 # AIPM Mission Control Status and Roadmap
 
-**Status date:** 2026-08-20
+**Status date:** 2026-08-23
 
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
 
-**Checkpoint:** `d1f692948a014197eda60616fd602e8061959316` — `feat: add MC-6.8 bounded logs intelligence`
+**Checkpoint:** `a7ee2f1b90932772fcb7855d9e41a7fa01252824` — `feat: implement MC-6.13 advisor rules`
 
 **Remote parity:** `HEAD == origin/main`; working tree clean at the time of this status update.
 
@@ -16,7 +16,7 @@ The completed implementation preserves the central operating rule:
 
 > **Mission Control observes the VPS; it does not change the VPS.**
 
-The current committed checkpoint completes **MC-6.8**. The next development milestone is **MC-6.9 design and inspection only**, subject to a separate approval. Production deployment is a separate operational gate and is not implied by the successful repository implementation or local tests.
+The current committed checkpoint completes **MC-6.13 Phase 3**. MC-6.13 Phase 2 evidence normalization and Phase 3 deterministic rules are reviewed, committed, and pushed. MC-6.13 Phase 4 has not started and remains unauthorized. Production/runtime changes remain separate operational concerns and are not implied by the advisor domain commits.
 
 ## Completed delivery ledger
 
@@ -41,6 +41,8 @@ The current committed checkpoint completes **MC-6.8**. The next development mile
 | MC-6.7 | Read-only Systemd observation façade/API/page with bounded provider calls and no lifecycle controls. | Complete |
 | MC-6.7.1 | Reconciled seven-entry Systemd allow-list; Cloudflared removed from Systemd and remains Docker-owned. | Complete |
 | MC-6.8 | Bounded, redacted, read-only Logs façade/API/page with symbolic sources, fixed adapters, HMAC cursors, redaction-before-mapping, bounded queries, and source failure isolation. | Complete |
+| MC-6.13 Phase 2 | Immutable evidence normalization with mandatory evaluation time, freshness/availability semantics, deterministic canonical serialization, stable identifiers, and explicit uncertainty. | Complete and pushed at `ebe1f84` |
+| MC-6.13 Phase 3 | Pure deterministic advisor rules, canonical field schema, bounded continuity envelope, exact evidence binding, traceable recommendations, and no authority/runtime integrations. | Complete and pushed at `a7ee2f1` |
 
 ## Current capability surface
 
@@ -55,7 +57,7 @@ The dashboard currently provides GET-only observations for:
 - Host, container, project, resource, and tunnel history.
 - Events, incidents, notification posture, channels, policies, and metrics.
 
-The frontend remains vanilla HTML/CSS/JavaScript with static modules served through the existing `/static` mount. Polling is centralized through the shared scheduler; the Logs page uses one bounded 60-second resource. No frontend framework or build pipeline was introduced.
+The frontend remains vanilla HTML/CSS/JavaScript with static modules served through the existing `/static` mount. Polling is centralized through the shared scheduler; the Logs page uses one bounded 60-second resource. No frontend framework or build pipeline was introduced. MC-6.13 Phase 2/3 are backend domain-only additions and add no advisor API, dashboard view, TUI view, scheduler, or LLM integration.
 
 ## Read-only and ownership invariants
 
@@ -69,7 +71,7 @@ The following invariants remain mandatory for every future milestone:
 | Docker | Docker remains the authoritative owner of container observations, including Cloudflared. No start, stop, restart, remove, prune, exec, or Compose mutation is reachable from Mission Control read façades. |
 | Logs | Sources are backend-owned symbolic IDs. Paths, journal expressions, unit names, container names, commands, and provider arguments are never browser-owned. Redaction occurs before mapping and serialization. |
 | Notifications | `notifications.enabled` remains `false` unless a separately approved future change explicitly changes the posture. No notification provider is activated by dashboard work. |
-| Network | The dashboard remains loopback-only at `127.0.0.1:8787`. Public ingress and Cloudflare changes are separate future approvals. |
+| Network | The dashboard remains loopback-bound at `127.0.0.1:8787`. The current Cloudflared container reaches the host-side nginx listener at `172.20.0.1:8788`, which forwards only to the loopback dashboard; the public hostname is `vpanel.03092017.xyz`. |
 | Runtime | No background collector, duplicate telemetry/event store, new worker, or second database is introduced. Existing telemetry, events, incidents, notifications, and history remain authoritative. |
 
 ## Remaining Mission Control milestones
@@ -94,9 +96,11 @@ Add a local SSH/TUI surface only after shared capability contracts stabilize. Th
 
 This is not part of the current read-only cockpit. Any future action architecture requires separate identity, authorization, human approval, intent/plan models, risk classification, idempotency, leases, audit records, verification, timeout/cancellation, rollback, and dedicated permissions. Actions must not be added to existing read façades.
 
-### MC-6.13 — Future AI Agent integration
+### MC-6.13 — AI Advisor
 
-The first AI Agent scope should be an evidence-based advisor that reads safe projections, cites evidence and freshness, identifies uncertainty, proposes plans, and waits for human approval. Execution, if ever approved, must occur through the separately governed MC-6.12 control plane rather than browser-generated commands or arbitrary shell access.
+**Phase 2 and Phase 3 complete and pushed; Phase 4 not started.** Phase 2 provides deterministic evidence normalization. Phase 3 provides the pure `mc613-rules-v1` rule engine over immutable evidence, including the ten approved service-health, resource-pressure, telemetry-anomaly, deployment-change, and project-state rules. The engine emits evidence-linked findings and explanatory recommendations with explicit uncertainty; it has no runtime, provider, API, UI, LLM, or action authority.
+
+Phase 4 remains a future, separately authorized composition milestone. It must not be described as implemented, and any future execution—if ever approved—must occur through the separately governed MC-6.12 control plane rather than browser-generated commands or arbitrary shell access. The detailed Phase 2/3 ledger is maintained in [`MC-6.13_STATUS.md`](MC-6.13_STATUS.md).
 
 ## Deployment and operational gates
 
@@ -104,11 +108,12 @@ Implementation completion and production deployment are separate states.
 
 | Gate | State | Next requirement |
 |---|---|---|
-| Local MC-6.8 validation | Passed | 11 focused tests, 206 full tests, compilation, JavaScript syntax, diff, safety, and scope scans passed. |
+| Local MC-6.8 validation | Passed | Historical MC-6.8 validation record retained. |
+| Local MC-6.13 Phase 2/3 validation | Passed | Phase 2: 18 focused and 444 full tests. Phase 3 final: 29 focused and 473 full tests, with the existing unrelated Starlette/httpx warning. |
 | MC-5 Gate 2.1 | Passed | Harness preserved with the SHA below; do not rerun without separate instruction. |
-| Target-VPS production readiness | Separate gate | Perform a read-only preflight against the exact committed target, without changing runtime state. |
-| Permanent dashboard service | Not deployed by this checkpoint | Requires explicit deployment approval after readiness preflight. |
-| Public ingress/Cloudflare | Not changed | Requires separate authentication, authorization, threat-model, and Cloudflare approval. |
+| Target-VPS production readiness | Separate operational gate | Repository work does not imply deployment or runtime validation. Operator-supplied runtime evidence remains authoritative. |
+| Permanent dashboard service | Separate deployment state | The dashboard remains loopback-bound at `127.0.0.1:8787`; the current host nginx bridge listener is `172.20.0.1:8788`. |
+| Public ingress/Cloudflare | Existing bridge ingress | Cloudflared container → `172.20.0.1:8788` → host nginx → `127.0.0.1:8787`; no Cloudflared or Docker configuration was changed by MC-6.13. |
 | Notifications | Disabled | Must remain disabled during Mission Control development and deployment. |
 
 The preserved Gate 2.1 operator harness is:
@@ -139,12 +144,11 @@ Mission Control does not replace this update roadmap. The dashboard remains a re
 
 The recommended order is:
 
-1. Approve and perform **MC-6.9 design/inspection only**.
-2. Review the MC-6.9 design against existing MC-3, incidents, history, logs, and read-only repository contracts.
-3. Approve MC-6.9 implementation as a separate narrow milestone, then run its focused and full validation.
-4. Independently perform the approved target-VPS production readiness preflight.
-5. Only after a successful preflight, obtain explicit approval for permanent loopback-only dashboard deployment.
-6. Keep public ingress, notifications, actions, and AI Agent execution outside the current scope.
+1. Keep MC-6.13 Phase 4 explicitly unauthorized and not started.
+2. Approve and perform **MC-6.9 design/inspection only** as a separate roadmap milestone if selected.
+3. Review any future composition work against the MC-6.13 pure-domain and MC-6.12A/B boundaries.
+4. Independently perform any approved target-VPS production readiness or runtime validation; repository commits do not imply deployment.
+5. Keep notifications, autonomous actions, advisor API/UI integration, LLM providers, and new authority paths outside the current scope unless separately approved.
 
 ## Verification baseline
 
@@ -192,9 +196,12 @@ MC6.9=NEXT_DESIGN_ONLY
 MC6.10=PLANNED
 MC6.11=PLANNED
 MC6.12=FUTURE
-MC6.13=FUTURE
+MC6.13=COMPLETE_THROUGH_PHASE3
+MC6.13_PHASE2=COMPLETE
+MC6.13_PHASE3=COMPLETE
+MC6.13_PHASE4=NOT_STARTED
 PRODUCTION_DEPLOYMENT=SEPARATE_APPROVAL_REQUIRED
-PUBLIC_INGRESS=OUT_OF_SCOPE
+PUBLIC_INGRESS=EXISTING_BRIDGE_INGRESS
 NOTIFICATIONS=DISABLED
 ```
 

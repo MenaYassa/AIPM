@@ -291,11 +291,11 @@ Every page and component needs:
 
 **Updated:** 2026-08-20
 
-The approved vanilla static architecture is now implemented through MC-6.8 at commit `d1f692948a014197eda60616fd602e8061959316`. The delivered navigation covers Dashboard, Server, Docker, Projects, Systemd, Logs, Incidents, History, Notifications, Settings, and the reserved AI Agent area. Dashboard, Server, Docker, Projects, Systemd, and Logs are functional observation pages; the remaining reserved pages retain safe placeholders or existing read-only projections where their milestone is not yet implemented.
+The approved vanilla static architecture remains implemented through MC-6.8. The repository also contains MC-6.13 Phase 2/3 pure advisor domain logic at `a7ee2f1b90932772fcb7855d9e41a7fa01252824`, but no advisor UI or API was added. The delivered navigation covers Dashboard, Server, Docker, Projects, Systemd, Logs, Incidents, History, Notifications, Settings, and the reserved AI Agent area. Dashboard, Server, Docker, Projects, Systemd, and Logs are functional observation pages; the remaining reserved pages retain safe placeholders or existing read-only projections where their milestone is not yet implemented.
 
 The frontend uses the existing hash router, shared state helpers, centralized scheduler, `/static` module mount, escaped rendering, and explicit fresh/stale/unavailable/error/empty/unknown semantics. MC-6.8 adds one bounded Logs scheduler resource, backend-owned source selection, visible truncation/redaction state, and no download, stream, lifecycle, acknowledgement, or mutation controls.
 
-The next UI milestone is MC-6.9 design/inspection only: bounded incident/history evidence, comparisons, pagination, and safe cross-links. MC-6.10 will add safe settings/notification posture; MC-6.11 will provide the shared Typer/Rich TUI using the same semantic contracts. Public ingress, authenticated actions, AI execution, and Cloudflare changes remain future work.
+The next UI milestone is MC-6.9 design/inspection only: bounded incident/history evidence, comparisons, pagination, and safe cross-links. MC-6.10 will add safe settings/notification posture; MC-6.11 will provide the shared Typer/Rich TUI using the same semantic contracts. MC-6.13 Phase 2/3 add no UI, API, scheduler, LLM, or action surface; Phase 4 remains unauthorized and not started. The existing ingress is documented separately as Cloudflared container → `172.20.0.1:8788` → host nginx → `127.0.0.1:8787`.
 
 ## References
 
@@ -312,4 +312,4 @@ The next UI milestone is MC-6.9 design/inspection only: bounded incident/history
 - **EXISTS:** current Dashboard sections, service pulse, Docker/container overview, project inventory, history, event stream, Incident Room, notification safety, search/filtering, and refresh behavior.
 - **EXTEND:** navigation shell, detail views, charts, filtering, settings posture, accessibility, component extraction, and responsive behavior.
 - **NEW:** Systemd page, Logs page, shared scheduler module, bounded log UI, and future TUI presentation.
-- **FUTURE:** action controls, authentication/public ingress, AI Agent page behavior, SSE/WebSockets, and any write-enabled settings or operations.
+- **FUTURE:** MC-6.13 Phase 4 advisor composition/UI/API, action controls, new authentication or ingress changes, SSE/WebSockets, and any write-enabled settings or operations. The current bridge ingress is existing infrastructure, not a Phase 4 UI feature.

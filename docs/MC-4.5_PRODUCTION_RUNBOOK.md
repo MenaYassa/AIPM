@@ -2,21 +2,21 @@
 
 ## Readiness status
 
-MC-4.5 hardens the notification subsystem but does not authorize production enablement by itself. The dashboard remains loopback-only by default, and public access is considered **not production-ready** until authenticated Cloudflare Access or equivalent ingress has been independently verified.
+MC-4.5 hardens the notification subsystem but does not authorize notification production enablement by itself. The dashboard remains loopback-bound, while the current public ingress is an existing bridge path serving `vpanel.03092017.xyz`:
 
 ```text
-Internet
+Cloudflared container
   ↓
-Cloudflare Tunnel
+172.20.0.1:8788
   ↓
-Authenticated Cloudflare Access policy
+host nginx reverse proxy
   ↓
 127.0.0.1:8787
   ↓
 AIPM Mission Control
 ```
 
-AIPM is not an authentication provider. Do not bind the dashboard to `0.0.0.0` for convenience, and do not treat a tunnel hostname as authorization.
+AIPM is not an authentication provider. Do not bind the dashboard to `0.0.0.0` for convenience, do not change Cloudflared or Docker configuration from this runbook, and do not treat a tunnel hostname as authorization beyond the existing ingress/access policy.
 
 ## Safe staging verification
 
@@ -35,7 +35,7 @@ Perform staging verification with a temporary database, notifications disabled o
 | Database recovery | Temporary backup restores identities, leases, statuses, and unique keys. |
 | Logs | Delivery, suppression, retry, unknown, terminal failure, and retention outcomes are visible without secrets. |
 | Environment file | If used by systemd, permissions are restrictive and the service user can read it. |
-| Public ingress | Access policy is verified before any public hostname is considered usable. |
+| Public ingress | Existing Cloudflared container → `172.20.0.1:8788` → host nginx → `127.0.0.1:8787`; any ingress change remains separately approved. |
 
 ## Systemd review checklist
 
