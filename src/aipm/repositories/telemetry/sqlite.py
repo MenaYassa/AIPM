@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,9 @@ from aipm.repositories.readonly import require_read_only_filesystem
 
 
 RETENTION_BATCH_SIZE = 5000
+_LOCK_RETRY_LIMIT = 3
+_MIN_BATCH_LIMIT = 100
+_RETENTION_BATCH_SLEEP_SECONDS = 0.05
 
 
 SCHEMA = """
@@ -566,39 +570,62 @@ class SQLiteHistoryRepository:
         if has_events_table:
             event_dependency_guard = "AND NOT EXISTS (SELECT 1 FROM events AS child WHERE child.source_run_id = parent.id)"
 
+        sample_runs_sql = f"""
+            DELETE FROM sample_runs
+            WHERE id IN (
+                SELECT parent.id
+                FROM sample_runs AS parent
+                WHERE parent.sampled_at < ?
+                  AND NOT EXISTS (SELECT 1 FROM host_samples AS child WHERE child.run_id = parent.id)
+                  AND NOT EXISTS (SELECT 1 FROM container_samples AS child WHERE child.run_id = parent.id)
+                  AND NOT EXISTS (SELECT 1 FROM project_samples AS child WHERE child.run_id = parent.id)
+                  AND NOT EXISTS (SELECT 1 FROM tunnel_samples AS child WHERE child.run_id = parent.id)
+                {event_dependency_guard}
+                LIMIT ?
+            )
+        """
         while True:
-            with self._connection() as connection:
-                cursor = connection.execute(
-                    f"""
-                    DELETE FROM sample_runs
-                    WHERE id IN (
-                        SELECT parent.id
-                        FROM sample_runs AS parent
-                        WHERE parent.sampled_at < ?
-                          AND NOT EXISTS (SELECT 1 FROM host_samples AS child WHERE child.run_id = parent.id)
-                          AND NOT EXISTS (SELECT 1 FROM container_samples AS child WHERE child.run_id = parent.id)
-                          AND NOT EXISTS (SELECT 1 FROM project_samples AS child WHERE child.run_id = parent.id)
-                          AND NOT EXISTS (SELECT 1 FROM tunnel_samples AS child WHERE child.run_id = parent.id)
-                          {event_dependency_guard}
-                        LIMIT ?
-                    )
-                    """,
-                    (cutoff_ts, RETENTION_BATCH_SIZE),
-                )
-                deleted = cursor.rowcount if cursor.rowcount >= 0 else 0
+            deleted = self._execute_guarded(sample_runs_sql, (cutoff_ts,)) or 0
             total += deleted
             if deleted == 0:
                 break
+            time.sleep(_RETENTION_BATCH_SLEEP_SECONDS)
 
         return total
 
+    def _execute_guarded(self, sql: str, params: Sequence[object]) -> int | None:
+        """Run one bounded DELETE batch with lock and foreign-key guards.
+
+        Returns the deleted row count, or ``None`` when the batch must be
+        abandoned for this pass: either the write lock stayed busy after
+        bounded retries, or shrinking the batch could not get past
+        foreign-key-poisoned rows. Committed progress from earlier batches
+        is kept. Returning instead of raising prevents retention from
+        hot-looping against sibling writers on the same database.
+        """
+        limit = RETENTION_BATCH_SIZE
+        lock_failures = 0
+        while True:
+            try:
+                with self._connection() as connection:
+                    cursor = connection.execute(sql, (*params, limit))
+                    return cursor.rowcount if cursor.rowcount >= 0 else 0
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                if "locked" not in message and "busy" not in message:
+                    raise
+                lock_failures += 1
+                if lock_failures > _LOCK_RETRY_LIMIT:
+                    return None
+                time.sleep(0.25 * lock_failures)
+            except sqlite3.IntegrityError:
+                if limit <= _MIN_BATCH_LIMIT:
+                    return None
+                limit //= 4
+
     def _delete_batch(self, table: str, predicate: str, values: tuple[object, ...]) -> int:
-        with self._connection() as connection:
-            cursor = connection.execute(
-                f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {predicate} LIMIT ?)",
-                (*values, RETENTION_BATCH_SIZE),
-            )
-            return cursor.rowcount if cursor.rowcount >= 0 else 0
+        sql = f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {predicate} LIMIT ?)"
+        return self._execute_guarded(sql, values) or 0
 
     def close(self) -> None:
         """Connections are short-lived; this method exists for lifecycle symmetry."""
