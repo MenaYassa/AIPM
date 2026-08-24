@@ -145,15 +145,15 @@ This milestone does not claim real-VPS readiness. The referenced VPS infrastruct
 
 **Updated:** 2026-08-24
 
-The historical baseline above is retained for auditability. The repository has completed the read-only Mission Control cockpit through MC-6.8 and the pure MC-6.13 advisor domain through Phase 4A. The current pushed checkpoint is:
+The historical baseline above is retained for auditability. The repository has completed the read-only Mission Control cockpit through MC-6.8 and MC-6.13 through Phase 4B. The current pushed checkpoint is:
 
 ```text
-HEAD=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
-ORIGIN_MAIN=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
+HEAD=af1a10b1f150335df27fda5d915f44e4f14146f4
+ORIGIN_MAIN=af1a10b1f150335df27fda5d915f44e4f14146f4
 WORKTREE=CLEAN
 ```
 
-MC-6.13 Phases 2, 3, and 4A are complete, reviewed, committed, and pushed. Phase 4A adds only pure bounded request composition over the existing normalizer and rule engine. Phases 4B–4E have not started and remain unauthorized. The Phase 2/3/4A work adds no dashboard surface, API route, façade integration, runtime collector, provider access, LLM, or autonomous action.
+MC-6.13 Phases 2, 3, 4A, and 4B are complete, reviewed, committed, and pushed. Phase 4B adds only a private authenticated read-only `POST /api/advisor/evaluate` transport boundary with bounded request decoding, fail-closed authentication, safe 400/401/422/500 errors, direct delegation through `AdvisorCompositionRequest` and `compose_advisor()`, and direct `AdvisorResponse` serialization. Phases 4C–4E have not started and remain unauthorized. The Phase 4B API does not collect observations, read a clock, invoke providers or LLMs, perform actions, or alter the dashboard UI or runtime infrastructure.
 
 | Completed area | Current result |
 |---|---|
@@ -167,8 +167,9 @@ MC-6.13 Phases 2, 3, and 4A are complete, reviewed, committed, and pushed. Phase
 | MC-6.13 Phase 2 | Immutable evidence normalization, mandatory evaluation time, freshness/availability semantics, deterministic canonical serialization, stable identifiers, and explicit uncertainty; pushed at `ebe1f84`. |
 | MC-6.13 Phase 3 | Ten deterministic evidence-linked rules, canonical field schema, bounded continuity envelope, exact evidence binding, and explanatory non-executable recommendations; pushed at `a7ee2f1`. |
 | MC-6.13 Phase 4A | Pure bounded request validation/snapshotting and direct normalizer-to-rule-engine composition; pushed at `37d8a0e`. |
+| MC-6.13 Phase 4B | Private authenticated read-only `POST /api/advisor/evaluate`; bounded transport validation, fail-closed authentication, safe 400/401/422/500 errors, direct Phase 4A delegation, and existing `AdvisorResponse` serialization; pushed at `af1a10b`. |
 
-MC-6.9 remains the next separate design/inspection milestone. It should address bounded incident/history evidence, comparison queries, cursor pagination, and safe cross-links using existing MC-3, incident, history, and read-only repository contracts. MC-6.10 covers Settings posture and notification safety; MC-6.11 covers a shared Typer/Rich TUI; MC-6.12 remains the future action-control boundary; and MC-6.13 Phases 4B–4E remain future and unauthorized.
+MC-6.9 remains the next separate design/inspection milestone. MC-6.13 Phase 4B is complete as a private authenticated API boundary, while Phases 4C–4E remain future and unauthorized. It must not be interpreted as public exposure, live observation collection, dashboard UI integration, LLM/provider functionality, or action authority.
 
 ## Current operational gates
 
@@ -194,6 +195,6 @@ The complete current ledger and next-step sequence is maintained in [`docs/MC-6_
 
 ## Current verification baseline
 
-The final MC-6.13 Phase 4A validation passed 26 focused tests and 499 full tests, with the existing unrelated Starlette/httpx deprecation warning. Phase 3 validation passed 29 focused tests and 473 full tests; Phase 2 validation passed 18 focused tests and 444 full tests. Runtime/authority scans, generated-artifact cleanup, exact-scope checks, protected-state checks, and Gate 2.1 identity checks passed.
+The final MC-6.13 Phase 4B validation passed 17 focused tests and 516 full tests
 
-> **Current project position:** Mission Control read-only cockpit work is complete through MC-6.8, and the pure MC-6.13 advisor domain is complete through Phase 4A. MC-6.13 Phases 4B–4E, API/UI integration, LLM functionality, autonomous actions, and target runtime deployment remain outside the authorized current state.
+> **Current project position:** Mission Control read-only cockpit work is complete through MC-6.8, and the MC-6.13 advisor implementation is complete through Phase 4B. MC-6.13 Phases 4C–4E, advisor UI integration, LLM functionality, autonomous actions, public exposure, and target runtime deployment remain outside the authorized current state; Phase 4B is private, authenticated, read-only, and non-authoritative.

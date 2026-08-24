@@ -18,7 +18,7 @@ Do not introduce a second telemetry system, event store, notification database, 
 | Deployment | Dashboard remains loopback-bound at `127.0.0.1:8787`; the current public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → loopback dashboard. |
 | Authentication | Local/SSH access first; authenticated public access is a separate future gate. |
 | Writes/actions | FUTURE only; require a distinct approval, authorization, audit, idempotency, verification, and rollback control plane. |
-| AI Agent | MC-6.13 Phase 2/3 advisor domain is landed; Phase 4 composition and any execution remain future and separately gated. |
+| AI Agent | MC-6.13 Phases 2, 3, 4A, and 4B are landed; Phase 4B is a private authenticated read-only transport boundary over Phase 4A. Phases 4C–4E, live collection, LLM/provider use, and execution remain future and separately gated. |
 
 ## Feature classification
 
@@ -35,9 +35,9 @@ No API or UI response may expose credentials, secret references, destination val
 
 ## Current implementation and recommended next step
 
-MC-6.1 through MC-6.8 have been implemented, reviewed, validated, committed, and pushed. MC-6.4 was reconciled because the Server capability already existed through MC-6.3. MC-6.7.1 reconciled the Systemd registry so Cloudflared remains Docker-owned, and MC-6.8 delivered the bounded redacted Logs façade/API/page. MC-6.13 Phases 2, 3, and 4A are also implemented, reviewed, committed, and pushed.
+MC-6.13 Phases 2, 3, 4A, and 4B are also implemented
 
-The current checkpoint is `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70`. MC-6.13 Phase 2 provides immutable evidence normalization, Phase 3 provides the pure deterministic `mc613-rules-v1` engine with ten evidence-linked rules, and Phase 4A provides pure bounded composition over those seams. Phases 4B–4E have not started and remain unauthorized. MC-6.9 remains the next separate design/inspection milestone; MC-6.10 and MC-6.11 remain planned, and MC-6.12 remains the future action-control boundary.
+Phases 4C–4E have not started and remain unauthorized; Phase 4B is private, authenticated, read-only, and non-authoritative.
 
 Production/runtime deployment remains separate from repository completion. The dashboard remains loopback-bound at `127.0.0.1:8787`; the current public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`. Notifications remain disabled, the SQLite/WAL/SHM read-only boundary remains mandatory, Cloudflared remains Docker-owned, and no-action API boundaries remain in force.
 

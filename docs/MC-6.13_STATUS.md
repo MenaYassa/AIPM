@@ -2,12 +2,12 @@
 
 **Status date:** 2026-08-24
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
-**Current commit:** `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70` — `feat: implement MC-6.13 Phase 4A composition`
+**Current commit:** `af1a10b1f150335df27fda5d915f44e4f14146f4` — `feat: add MC-6.13 advisor evaluation API boundary`
 **Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 4A push.
 
 ## Current status
 
-MC-6.13 Phases 2, 3, and 4A are complete, reviewed, committed, and pushed. Phase 4A adds only pure composition over the existing Phase 2 normalizer and Phase 3 rule engine. It accepts bounded immutable request metadata and caller-supplied observations, performs no runtime collection or infrastructure access, exposes no API or UI, invokes no LLM, and performs no action. Phases 4B, 4C, 4D, and 4E have **not started** and remain unauthorized.
+MC-6.13 Phases 2, 3, 4A, and 4B are complete, reviewed, committed, and pushed. Phase 4B establishes a private authenticated read-only `POST /api/advisor/evaluate` boundary that accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, reconstructs typed history envelopes, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. Phases 4C–4E have not started and remain unauthorized.
 
 ```text
 MC6.13_PHASE2_REVIEW=PASS
@@ -19,7 +19,10 @@ MC6.13_PHASE3_PUSH=COMPLETE
 MC6.13_PHASE4A_REVIEW=PASS
 MC6.13_PHASE4A_COMMIT=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
 MC6.13_PHASE4A_PUSH=COMPLETE
-MC6.13_PHASE4B_TO_4E_STARTED=NO
+MC6.13_PHASE4B_REVIEW=PASS
+MC6.13_PHASE4B_COMMIT=af1a10b1f150335df27fda5d915f44e4f14146f4
+MC6.13_PHASE4B_PUSH=COMPLETE
+MC6.13_PHASE4C_TO_4E_STARTED=NO
 ```
 
 ## Phase 2 — evidence normalization
@@ -128,7 +131,24 @@ Final Phase 3 validation:
 
 ## Phase 4 status
 
-Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. `AdvisorCompositionRequest` validates bounded caller metadata and recursively snapshots raw mappings/sequences; `compose_advisor()` directly composes the existing Phase 2 normalizer with the Phase 3 rule engine and returns the existing `AdvisorResponse` without aggregation or semantic rewriting. No façade integration, advisor API, dashboard/UI surface, TUI surface, LLM provider, scheduler, runtime adapter, or autonomous action path was added. Phases 4B–4E remain future, separately authorized work and must preserve the pure-domain boundary.
+Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. `AdvisorCompositionRequest` validates bounded caller metadata and recursively snapshots raw mappings/sequences; `compose_advisor()` directly composes the existing Phase 2 normalizer with the Phase 3 rule engine and returns the existing `AdvisorResponse` without aggregation or semantic rewriting. Phase 4B is implemented, reviewed, committed, and pushed at `af1a10b` as a private authenticated read-only API transport boundary over Phase 4A. No façade integration, advisor dashboard/UI surface, TUI surface, LLM provider, scheduler, runtime adapter, or autonomous action path was added. Phases 4C–4E remain future, separately authorized work and must preserve the pure-domain boundary.
+
+## Phase 4B — private authenticated advisor evaluation API
+
+Phase 4B adds the transport adapter in `src/aipm/capabilities/advisor/api.py` and wires it into the existing FastAPI application through `src/aipm/dashboard/server.py`. The route is `POST /api/advisor/evaluate`. It requires `request_id`, a caller-supplied timezone-aware `evaluation_time`, bounded `observations`, bounded `expected_sources`, and bounded typed `history_envelopes` input. It rejects unknown fields, reconstructs immutable Phase 3 history objects, invokes `AdvisorCompositionRequest` and `compose_advisor()` directly, and serializes the existing `AdvisorResponse` without semantic rewriting.
+
+Authentication is an injected private dependency and fails closed when unavailable. Rejected authentication returns safe 401; malformed transport input returns safe 400; domain validation returns safe 422; and unexpected internal failures return safe 500. Error responses contain only fixed codes/messages and bounded field descriptors, never raw exceptions, tracebacks, credentials, paths, SQL, commands, or internal topology. The route does not read a clock, collect live observations, access telemetry, invoke providers or LLMs, modify the dashboard UI, or perform actions. Phases 4C–4E remain future and separately authorized.
+
+### Phase 4B validation
+
+| Check | Result |
+|---|---:|
+| Focused Phase 4B suite | 17 passed |
+| Full repository suite | 516 passed, 1 existing Starlette/httpx deprecation warning |
+| Exact four-file implementation scope | PASS |
+| Error-boundary strict review | PASS |
+| Runtime/authority scan and protected-state checks | PASS |
+| Generated-artifact cleanup | PASS |
 
 ## Related documentation
 
@@ -142,12 +162,12 @@ Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e
 ```text
 MC6.13_PHASE4A=COMPLETE
 MC6.13_PHASE4A_COMMIT=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
-MC6.13_PHASE4B=NOT_STARTED
+MC6.13_PHASE4B=COMPLETE
 MC6.13_PHASE4C=NOT_STARTED
 MC6.13_PHASE4D=NOT_STARTED
 MC6.13_PHASE4E=NOT_STARTED
 MC6.13_RUNTIME_INTEGRATION=NOT_IMPLEMENTED
-MC6.13_API=NOT_IMPLEMENTED
+MC6.13_API=PRIVATE_AUTHENTICATED_READ_ONLY
 MC6.13_UI=NOT_IMPLEMENTED
 MC6.13_LLM=NOT_IMPLEMENTED
 MC6.13_AUTONOMOUS_ACTIONS=NOT_AUTHORIZED

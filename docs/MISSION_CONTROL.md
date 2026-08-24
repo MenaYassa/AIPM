@@ -387,17 +387,17 @@ MC-2.1 separates the 15-second fast state loop from independently scheduled, sin
 
 **Updated:** 2026-08-24
 
-Mission Control’s read-only cockpit implementation is complete through **MC-6.8**. The current repository checkpoint additionally includes MC-6.13 Phases 2, 3, and 4A, pushed at `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70`. The cockpit includes the shared MC-6 foundation and vanilla shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, and the existing telemetry/history/event/incident/notification read projections. MC-6.13 Phase 2/3/4A remains pure advisor domain composition and does not add a dashboard surface.
+Mission Control’s read-only cockpit implementation is complete through **MC-6.8**. The current repository checkpoint additionally includes MC-6.13 Phases 2, 3, 4A, and 4B, pushed at `af1a10b1f150335df27fda5d915f44e4f14146f4`. The cockpit includes the shared MC-6 foundation and vanilla shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, and the existing telemetry/history/event/incident/notification read projections. MC-6.13 Phase 2/3/4A remains pure advisor domain composition, while Phase 4B adds only a private authenticated advisor API and does not add a dashboard surface.
 
 MC-6.4 was reconciled rather than duplicated because Server Intelligence was already delivered through MC-6.3. MC-6.6.1 through MC-6.6.3 refined association correctness, taxonomy, filtering, and health evidence. MC-6.7.1 reconciled the seven-entry Systemd registry: Cloudflared is Docker-owned and is not represented as Systemd unless a genuine allow-listed unit exists.
 
-The next Mission Control milestone remains **MC-6.9 design/inspection only**. Its expected scope is bounded incident/history evidence, cursor pagination, comparison queries, timeline projections, and safe cross-links using existing MC-3 and read-only history repositories. MC-6.10 is planned for sanitized Settings and notification posture; MC-6.11 is planned for a shared Typer/Rich TUI; MC-6.12 remains the future action-control boundary; and MC-6.13 Phases 4B–4E remain future, unauthorized, and not started after the completed pure Phase 4A composition.
+MC-6.13 Phases 4C–4E remain future, unauthorized, and not started; Phase 4B is complete as a private authenticated, read-only transport boundary and does not imply dashboard UI, public exposure, live collection, LLM/provider functionality, or actions.
 
 ### Current operational gates
 
 Repository advisor work does not authorize or imply target-VPS application deployment. Runtime validation and any service rollout remain separate operational gates. The current dashboard ingress architecture is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`. The dashboard remains loopback-bound; Cloudflared/Docker configuration, credentials, live SQLite, and Systemd runtime changes are outside the MC-6.13 repository scope.
 
-Separately supplied production verification reports that the telemetry retention/lock-churn correction at `0ab4b0e859fff96add058cb3eb55e0ff408b1a83` reduced the previous retention-spin CPU to approximately 0%, preserved healthy sampling with five samples over five minutes, and produced no new `database is locked` entries after deployment. The dashboard path was also externally verified through `/healthz` and `/api/overview`. These are live VPS verification results, not repository test results or claims that Phase 4A changed the host. Orphan-process cleanup and configuration-twin deletion likewise remain external VPS state, not Git commits.
+claims that Phase 4A or Phase 4B changed the host.
 
 The successful Gate 2.1 staging harness remains preserved at:
 

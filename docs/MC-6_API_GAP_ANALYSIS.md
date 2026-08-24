@@ -2,9 +2,9 @@
 
 ## Purpose and contract rules
 
-This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 and the pure MC-6.13 Phase 2/3/4A advisor domain are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70`.
+This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 and MC-6.13 Phases 2/3/4A/4B are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `af1a10b1f150335df27fda5d915f44e4f14146f4`.
 
-The first MC-6 API release remains read-only and preserves all existing route names and response semantics. Existing clients must continue to receive stable `available`, `status`, `error`, freshness, and domain payload fields. Additive fields and new GET routes are preferred. Any POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoint is **FUTURE**. MC-6.13 Phase 2/3/4A adds no API route. Phase 4A is an internal pure composition seam; an eventual `/api/advisor` surface remains a separate Phase 4B/API decision.
+The first MC-6 API release remains read-only and preserves all existing route names and response semantics. The private authenticated `POST /api/advisor/evaluate` boundary is now landed in MC-6.13 Phase 4B. It accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. It is not public and does not collect live observations. Other POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoints remain **FUTURE**. MC-6.13 Phases 2/3/4A remain pure domain/composition layers; Phases 4C–4E remain separate future decisions.
 
 ## Current API inventory
 
@@ -221,7 +221,7 @@ Query parameters must be bounded and normalized consistently. A shared query val
 | P2 | SSE event stream | FUTURE/EXTEND | Useful after polling and reconnect semantics are stable. |
 | P2 | TUI adapter | NEW | Requires stable shared façade contracts. |
 | P3 | Authenticated action API | FUTURE | Must be separately designed and approved. |
-| P3 | AI Agent API | FUTURE / PHASE 4B+ | Phase 2/3 domain contracts and Phase 4A pure composition are landed, but no `/api/advisor` route exists. Depends on separate façade/API, identity, approval, audit, and action-boundary decisions. |
+| P3 | AI Agent API | COMPLETE / PHASE 4B | Private authenticated read-only `/api/advisor/evaluate` landed at `af1a10b`. It has bounded transport validation, safe 400/401/422/500 errors, direct Phase 4A delegation, and no live collection, LLM, provider, action, or public-exposure path. |
 
 ## Cross-interface contract
 
@@ -267,4 +267,4 @@ The TUI may use direct façades for local efficiency. It should not make HTTP ca
 - **EXISTS:** current overview, history, event, incident, notification, metrics, channel, policy, service-health, and static UI APIs.
 - **EXTEND:** stable filters, cursor pagination, server/project/Docker detail, history comparisons, incident evidence, notification summary, and effective settings posture.
 - **NEW:** shared TUI adapter and any later additive detail projections not already delivered.
-- **FUTURE:** `/api/advisor` and Phase 4B+ API/UI integration, action routes, authentication or ingress changes, SSE/WebSockets, notification activation, remediation, and LLM/provider integration. Phase 4A composition is landed but remains non-API and non-runtime.
+**FUTURE:** public advisor exposure, Phase 4C+ API/UI integration, action routes, public authentication/ingress changes, SSE/WebSockets, notification activation, remediation, and LLM/provider integration. The private Phase 4B route is landed but remains non-public, read-only, and non-runtime.
