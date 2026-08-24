@@ -6,6 +6,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from aipm.capabilities.advisor.api import AdvisorApi, AdvisorAuthenticator
 from aipm.capabilities.dashboard.api import DashboardApi
 from aipm.capabilities.dashboard.incidents_api import DashboardIncidentsApi
 from aipm.capabilities.dashboard.notifications_api import DashboardNotificationsApi
@@ -34,6 +35,8 @@ def create_app(
     systemd_api: DashboardSystemdApi | None = None,
     logs_api: DashboardLogsApi | None = None,
     settings_api: DashboardSettingsApi | None = None,
+    advisor_api: AdvisorApi | None = None,
+    advisor_authenticator: AdvisorAuthenticator | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
@@ -61,6 +64,7 @@ def create_app(
     logs_observation_api = context.logs
     settings_posture_api = context.settings
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
+    app.include_router((advisor_api or AdvisorApi(authenticator=advisor_authenticator)).router())
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
