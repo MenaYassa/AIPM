@@ -4,9 +4,9 @@
 
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
 
-**Checkpoint:** `d90d32f54edc5abf373ecd0308b4963e9a6cabcc` — `feat: add advisor telemetry observation adapter`
+**Checkpoint:** `e8f0b12d7473e3c021c536e738c8b3a414d116ad` — `feat: add fixture-only advisor presentation`
 
-**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 4D adapter push.
+**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 4C fixture presentation push.
 
 ## Executive summary
 
@@ -16,7 +16,7 @@ The completed implementation preserves the central operating rule:
 
 > **Mission Control observes the VPS; it does not change the VPS.**
 
-The current committed checkpoint completes **MC-6.13 Phase 4D**. Phases 2 and 3 established immutable evidence normalization and deterministic rules; Phase 4A established pure request validation and composition; Phase 4B adds the private authenticated read-only advisor evaluation API; and Phase 4D adds a telemetry-owned bounded snapshot/export plus a transport-neutral adapter for the approved private-VPS CPU, memory, and disk slice. The Phase 4D adapter preserves configured immutable `host_id`, caller-owned `request_id` and timezone-aware `evaluation_time`, source timestamps, deterministic evidence/history identity, and fail-closed invalid/unavailable/incomplete states, and stops at `AdvisorCompositionRequest` without invoking Phase 4A or Phase 3. Phase 4B.1, Phase 4C, and Phase 4E remain future and separately authorized. Production/runtime changes remain separate operational concerns and are not implied by the advisor commits.
+The current committed checkpoint completes **MC-6.13 fixture-only Phase 4C presentation**. Phases 2 and 3 established immutable evidence normalization and deterministic rules; Phase 4A established pure request validation and composition; Phase 4B adds the private authenticated read-only advisor evaluation API; Phase 4D adds a telemetry-owned bounded snapshot/export plus a transport-neutral adapter for the approved private-VPS CPU, memory, and disk slice; and Phase 4C adds a fixture-driven presentation on the existing `#/ai-agent` dashboard route. The Phase 4D adapter preserves configured immutable `host_id`, caller-owned `request_id` and timezone-aware `evaluation_time`, source timestamps, deterministic evidence/history identity, and fail-closed invalid/unavailable/incomplete states, and stops at `AdvisorCompositionRequest` without invoking Phase 4A or Phase 3. The Phase 4C presentation uses fixed bounded responses and performs no live advisor evaluation, telemetry acquisition, browser authentication, polling, composition, rules, providers, actions, or approvals. Phase 4B.1 remains blocked pending a human decision; live Phase 4C orchestration and Phase 4E remain future and separately authorized. Production/runtime changes remain separate operational concerns and are not implied by the advisor commits.
 
 ## Completed delivery ledger
 
@@ -45,6 +45,7 @@ The current committed checkpoint completes **MC-6.13 Phase 4D**. Phases 2 and 3 
 | MC-6.13 Phase 3 | Pure deterministic advisor rules, canonical field schema, bounded continuity envelope, exact evidence binding, traceable recommendations, and no authority/runtime integrations. | Complete and pushed at `a7ee2f1` |
 | MC-6.13 Phase 4A | Pure composition of the existing normalizer and rule engine with bounded immutable request metadata; no API/UI/LLM/runtime/action path. | Complete and pushed at `37d8a0e` |
 | MC-6.13 Phase 4B | Private authenticated read-only `POST /api/advisor/evaluate`; bounded transport, fail-closed auth, safe 400/401/422/500 errors, direct Phase 4A delegation, and existing response serialization. | Complete and pushed at `af1a10b` |
+| MC-6.13 Phase 4C | Fixture-only advisor presentation on the existing `#/ai-agent` route with bounded deterministic normal, degraded, unavailable, invalid, incomplete, and transport-error states; no live advisor integration or action path. | Complete and pushed at `e8f0b12` |
 | MC-6.13 Phase 4D | Telemetry-owned bounded snapshot/export and transport-neutral observation adapter for the private-VPS CPU, memory, and disk slice; immutable typed payload, configured host identity, caller-owned evaluation context, deterministic evidence/history mapping, and fail-closed degraded states. | Complete and pushed at `f0ae4bb` and `d90d32f` |
 
 ## Current capability surface
@@ -60,7 +61,7 @@ The dashboard currently provides GET-only observations for:
 - Host, container, project, resource, and tunnel history.
 - Events, incidents, notification posture, channels, policies, and metrics.
 
-MC-6.13 Phase 2/3/4A remain backend domain-only additions; Phase 4B adds only the private authenticated advisor API route; and Phase 4D adds only a telemetry-owned bounded export plus a transport-neutral adapter ending at `AdvisorCompositionRequest`. There is still no advisor dashboard view, TUI view, scheduler, LLM integration, live polling, API/UI integration for Phase 4D, or action path.
+MC-6.13 Phase 2/3/4A remain backend domain-only additions; Phase 4B adds only the private authenticated advisor API route; Phase 4D adds only a telemetry-owned bounded export plus a transport-neutral adapter ending at `AdvisorCompositionRequest`; and Phase 4C adds only a fixture-driven advisor presentation on the existing dashboard route. The fixture surface has no live advisor polling, browser authentication, telemetry acquisition, LLM integration, evaluation path, or action path. Existing Resource History remains separate and retains its original read-only endpoint and behavior.
 
 ## Read-only and ownership invariants
 
@@ -101,7 +102,7 @@ This is not part of the current read-only cockpit. Any future action architectur
 
 ### MC-6.13 — AI Advisor
 
-**Phase 2, Phase 3, Phase 4A, Phase 4B, and Phase 4D complete and pushed.** Phase 4B is a private authenticated transport boundary. Phase 4D is a private-VPS telemetry-owned bounded export and transport-neutral observation adapter ending at `AdvisorCompositionRequest`; it does not provide live dashboard operation, live polling, advisor evaluation, LLM/provider functionality, actions, or approvals. Phase 4B.1, Phase 4C, and Phase 4E remain future and separately authorized.
+**Phase 2, Phase 3, Phase 4A, Phase 4B, Phase 4C fixture presentation, and Phase 4D complete and pushed.** Phase 4B is a private authenticated transport boundary. Phase 4D is a private-VPS telemetry-owned bounded export and transport-neutral observation adapter ending at `AdvisorCompositionRequest`; Phase 4C is only a fixture-driven, non-live dashboard presentation with fixed bounded response states. The fixture surface does not provide live dashboard advisor operation, browser authentication, telemetry acquisition, polling, advisor evaluation, LLM/provider functionality, actions, or approvals. Phase 4B.1, live Phase 4C orchestration, and Phase 4E remain future and separately authorized.
 
 ## Deployment and operational gates
 
@@ -149,7 +150,7 @@ Mission Control does not replace this update roadmap. The dashboard remains a re
 
 The recommended order is:
 
-1. Keep MC-6.13 Phase 4B.1, Phase 4C, and Phase 4E explicitly unauthorized and not started; keep Phase 4B private and authenticated and Phase 4D bounded, typed, and non-runtime.
+1. Keep MC-6.13 Phase 4B.1 and live Phase 4C orchestration explicitly blocked or separately authorized; keep the landed Phase 4C surface fixture-only, Phase 4B private and authenticated, and Phase 4D bounded, typed, and non-runtime.
 2. Approve and perform **MC-6.9 design/inspection only** as a separate roadmap milestone if selected.
 3. Review any future composition work against the MC-6.13 pure-domain and MC-6.12A/B boundaries.
 4. Independently perform any approved target-VPS production readiness or runtime validation; repository commits do not imply deployment.
@@ -201,7 +202,7 @@ MC6.9=NEXT_DESIGN_ONLY
 MC6.10=PLANNED
 MC6.11=PLANNED
 MC6.12=FUTURE
-MC6.13=COMPLETE_THROUGH_PHASE4D
+MC6.13=COMPLETE_THROUGH_PHASE4C_FIXTURE_AND_PHASE4D
 MC6.13_PHASE2=COMPLETE
 MC6.13_PHASE3=COMPLETE
 MC6.13_PHASE4A=COMPLETE
@@ -209,7 +210,10 @@ MC6.13_PHASE4B=COMPLETE
 MC6.13_PHASE4D=COMPLETE
 MC6.13_PHASE4D_EXPORT_COMMIT=f0ae4bb79dd9370f0d6cc118df49a4d6c4b4b265
 MC6.13_PHASE4D_ADAPTER_COMMIT=d90d32f54edc5abf373ecd0308b4963e9a6cabcc
-MC6.13_PHASE4C_TO_4E=NOT_STARTED
+MC6.13_PHASE4C=LANDED_FIXTURE_ONLY
+MC6.13_PHASE4C_COMMIT=e8f0b12d7473e3c021c536e738c8b3a414d116ad
+MC6.13_PHASE4B1=BLOCKED_PENDING_HUMAN_DECISION
+MC6.13_PHASE4E=NOT_STARTED
 PRODUCTION_DEPLOYMENT=SEPARATE_APPROVAL_REQUIRED
 PUBLIC_INGRESS=EXISTING_BRIDGE_INGRESS
 NOTIFICATIONS=DISABLED

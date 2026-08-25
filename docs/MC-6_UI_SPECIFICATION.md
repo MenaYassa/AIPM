@@ -30,7 +30,7 @@ The top-level navigation is organized by operational domain rather than by backe
 | History | EXISTS / EXTEND | Add chart comparison, range presets, downsampling, and freshness context. |
 | Notifications | EXISTS / EXTEND | Show safety posture, audit, metrics, channels, and policies without secrets or activation controls. |
 | Settings | EXTEND | Show sanitized effective settings and deployment posture; never expose raw configuration or credential values. |
-| AI Agent | FUTURE | Reserved for an authenticated, approval-gated advisor/control plane. |
+| AI Agent | LANDED / FIXTURE ONLY | Existing `#/ai-agent` route presents bounded deterministic advisor-response fixtures; live authenticated advisor integration remains separately blocked and unauthorized. |
 
 The desktop shell uses a left navigation rail or compact top navigation, a persistent status strip, a main content region, and a contextual detail drawer. On mobile widths, the rail becomes a menu and detail drawers become full-screen panels.
 
@@ -172,7 +172,7 @@ Settings are not editable. Raw YAML and environment values are never returned. A
 
 ### AI Agent
 
-The AI Agent page is a reserved FUTURE area. It must not be rendered as if an agent can act in MC-6.1. The eventual design requires task intent, evidence, proposed plan, risk classification, user approval, execution sandbox, audit record, result verification, and rollback state.
+The AI Agent page currently provides a fixture-only presentation on the existing `#/ai-agent` route. It renders bounded deterministic representative `AdvisorResponse` states—normal, no findings, unavailable, stale, invalid, incomplete, and safe HTTP 400/401/422/500-style transport states—with explicit non-live labeling. It must not be rendered as if an agent can act or as if the page reflects current VPS state. Live browser authentication/session handling, live advisor orchestration, evaluation, actions, approvals, and any execution sandbox remain future work requiring separate authorization.
 
 ## Reusable UI components
 
@@ -291,11 +291,11 @@ Every page and component needs:
 
 **Updated:** 2026-08-25
 
-The approved vanilla static architecture remains implemented through MC-6.8. The repository also contains MC-6.13 Phase 2/3/4A pure advisor domain logic, the private authenticated Phase 4B advisor API at `af1a10b`, and the private-VPS telemetry-owned Phase 4D bounded export plus transport-neutral observation adapter. Phase 4D is backend-only and promotes only the approved CPU, memory, and disk slice into canonical advisor input; no advisor UI was added. The delivered navigation covers Dashboard, Server, Docker, Projects, Systemd, Logs, Incidents, History, Notifications, Settings, and the reserved AI Agent area. Dashboard, Server, Docker, Projects, Systemd, and Logs are functional observation pages; the remaining reserved pages retain safe placeholders or existing read-only projections where their milestone is not yet implemented.
+The approved vanilla static architecture remains implemented through MC-6.8. The repository also contains MC-6.13 Phase 2/3/4A pure advisor domain logic, the private authenticated Phase 4B advisor API at `af1a10b`, the private-VPS telemetry-owned Phase 4D bounded export plus transport-neutral observation adapter, and the fixture-only Phase 4C advisor presentation at commit `e8f0b12`. Phase 4D remains backend-only and promotes only the approved CPU, memory, and disk slice into canonical advisor input. The delivered navigation covers Dashboard, Server, Docker, Projects, Systemd, Logs, Incidents, History, Notifications, Settings, and the AI Agent fixture presentation. Dashboard, Server, Docker, Projects, Systemd, and Logs are functional observation pages; the AI Agent route is a bounded non-live fixture surface and does not represent current VPS state or perform advisor evaluation.
 
 The frontend uses the existing hash router, shared state helpers, centralized scheduler, `/static` module mount, escaped rendering, and explicit fresh/stale/unavailable/error/empty/unknown semantics. MC-6.8 adds one bounded Logs scheduler resource, backend-owned source selection, visible truncation/redaction state, and no download, stream, lifecycle, acknowledgement, or mutation controls.
 
-MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API transport boundary; and Phase 4D adds only a private-VPS telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`. Neither Phase 4B nor Phase 4D adds an advisor view, live polling scheduler, LLM/provider surface, or action surface.
+MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API transport boundary; Phase 4C adds only a fixture-driven, non-live presentation on the existing `#/ai-agent` route; and Phase 4D adds only a private-VPS telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`. The Phase 4C fixture surface has no live polling scheduler, browser authentication, telemetry acquisition, LLM/provider surface, advisor evaluation, or action surface.
 
 ## References
 
@@ -312,4 +312,4 @@ MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API t
 - **EXISTS:** current Dashboard sections, service pulse, Docker/container overview, project inventory, history, event stream, Incident Room, notification safety, search/filtering, and refresh behavior.
 - **EXTEND:** navigation shell, detail views, charts, filtering, settings posture, accessibility, component extraction, and responsive behavior.
 - **NEW:** Systemd page, Logs page, shared scheduler module, bounded log UI, and future TUI presentation.
-**FUTURE:** MC-6.13 Phase 4B.1 authentication/session work, Phase 4C+ advisor UI integration, public API exposure, action controls, new authentication or ingress changes, SSE/WebSockets, and any write-enabled settings or operations. Phase 4B’s private API and Phase 4D’s private-VPS adapter are not UI features.
+**FUTURE/BLOCKED:** MC-6.13 Phase 4B.1 authentication/session work, live Phase 4C advisor orchestration/integration, public API exposure, action controls, new authentication or ingress changes, SSE/WebSockets, and any write-enabled settings or operations. The landed Phase 4C route is fixture-only; Phase 4B’s private API and Phase 4D’s private-VPS adapter are not browser features.

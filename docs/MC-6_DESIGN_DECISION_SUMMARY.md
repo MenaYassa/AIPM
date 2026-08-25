@@ -18,7 +18,7 @@ Do not introduce a second telemetry system, event store, notification database, 
 | Deployment | Dashboard remains loopback-bound at `127.0.0.1:8787`; the current public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → loopback dashboard. |
 | Authentication | Local/SSH access first; authenticated public access is a separate future gate. |
 | Writes/actions | FUTURE only; require a distinct approval, authorization, audit, idempotency, verification, and rollback control plane. |
-| AI Agent | MC-6.13 Phases 2, 3, 4A, 4B, and 4D are landed; Phase 4B is a private authenticated read-only transport boundary over Phase 4A, while Phase 4D is a private-VPS telemetry-owned bounded export plus transport-neutral adapter ending at `AdvisorCompositionRequest` for CPU, memory, and disk. Phase 4B.1, 4C, and 4E, live polling, LLM/provider use, and execution remain future and separately gated. |
+| AI Agent | MC-6.13 Phases 2, 3, 4A, 4B, fixture-only 4C presentation, and 4D are landed; Phase 4B is a private authenticated read-only transport boundary over Phase 4A, Phase 4C is a bounded non-live presentation on the existing `#/ai-agent` route, and Phase 4D is a private-VPS telemetry-owned bounded export plus transport-neutral adapter ending at `AdvisorCompositionRequest` for CPU, memory, and disk. Phase 4B.1, live 4C orchestration, 4E, live polling, LLM/provider use, and execution remain future and separately gated. |
 
 ## Feature classification
 
@@ -35,9 +35,9 @@ No API or UI response may expose credentials, secret references, destination val
 
 ## Current implementation and recommended next step
 
-MC-6.13 Phases 2, 3, 4A, 4B, and 4D are also implemented. Phase 4D uses a telemetry-owned bounded export and transport-neutral observation adapter for the approved private-VPS CPU, memory, and disk slice; it is typed, deterministic, fail-closed, and ends at `AdvisorCompositionRequest`.
+MC-6.13 Phases 2, 3, 4A, 4B, fixture-only 4C presentation, and 4D are implemented. The current repository checkpoint is `e8f0b12d7473e3c021c536e738c8b3a414d116ad` (`feat: add fixture-only advisor presentation`). Phase 4D uses a telemetry-owned bounded export and transport-neutral observation adapter for the approved private-VPS CPU, memory, and disk slice; it is typed, deterministic, fail-closed, and ends at `AdvisorCompositionRequest`. Phase 4C uses fixed bounded response fixtures on the existing `#/ai-agent` route and does not evaluate live advice or collect current VPS state.
 
-Phase 4B.1, Phase 4C, and Phase 4E have not started and remain unauthorized; Phase 4B is private, authenticated, read-only, and non-authoritative, and Phase 4D does not provide live dashboard operation, live polling, advisor evaluation, LLM/provider functionality, or actions.
+Phase 4B.1 and live Phase 4C orchestration remain blocked or separately authorized, while Phase 4E has not started; Phase 4B is private, authenticated, read-only, and non-authoritative, and Phase 4D does not provide live dashboard operation, live polling, advisor evaluation, LLM/provider functionality, or actions.
 
 Production/runtime deployment remains separate from repository completion. The dashboard remains loopback-bound at `127.0.0.1:8787`; the current public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`. Notifications remain disabled, the SQLite/WAL/SHM read-only boundary remains mandatory, Cloudflared remains Docker-owned, and no-action API boundaries remain in force.
 
@@ -45,7 +45,7 @@ Production/runtime deployment remains separate from repository completion. The d
 
 ```text
 MC6_DESIGN_STATUS=COMPLETE
-IMPLEMENTATION_STATUS=COMPLETE_THROUGH_MC6_13_PHASE4D
+IMPLEMENTATION_STATUS=COMPLETE_THROUGH_MC6_13_PHASE4C_FIXTURE_AND_4D
 NEXT_MILESTONE=MC6_9_DESIGN_ONLY
 PRODUCTION_CHANGES=NONE
 WRITE_ACTIONS_AUTHORIZED=NO
