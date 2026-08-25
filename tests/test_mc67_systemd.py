@@ -204,9 +204,50 @@ def test_frontend_systemd_contract_is_static_mounted_and_action_free() -> None:
     static = Path(__file__).parents[1] / "src/aipm/dashboard/static"
     html = (static / "index.html").read_text(encoding="utf-8")
     module = (static / "mission-control-systemd.js").read_text(encoding="utf-8")
+    fixture_module = (static / "mission-control-advisor-fixture.js").read_text(encoding="utf-8")
     assert "/static/mission-control-systemd.js" in html
-    for marker in ("Systemd Observation", "systemdObservationState", "systemdUnits", "systemdDetail", "scheduler.register('systemd'", "observation-only"):
+    for marker in ("Systemd Observation", "systemdObservationState", "systemdUnits", "systemdDetail", "scheduler.register('systemd'"):
         assert marker in html
+
+    advisor_start = html.index('<div class="view advisor-fixture-view" data-view="ai-agent" id="advisorFixtureRoot" hidden>')
+    advisor_end = html.index('</div>\n      </main>', advisor_start) + len('</div>')
+    advisor_surface = html[advisor_start:advisor_end]
+    for marker in (
+        "Fixture only",
+        "No live data or browser clock",
+        "without live collection, evaluation, polling, or action controls",
+        "Fixture-driven presentation only",
+    ):
+        assert marker in advisor_surface
+    for forbidden in ("/api/advisor", "compose_advisor", "advisorruleengine", "approve", "approval", "remediation", "provider", "llm", "systemctl", "docker"):
+        assert forbidden not in advisor_surface.lower()
+
+    for marker in (
+        "Presented exactly as supplied by the fixture response.",
+        "Read-only explanatory output; no action controls.",
+        "Freshness, availability, invalidity, and coverage limits remain visible.",
+    ):
+        assert marker in fixture_module
+    fixture_lowered = fixture_module.lower()
+    for forbidden in (
+        "fetch(",
+        "xmlhttprequest",
+        "websocket",
+        "/api/advisor",
+        "compose_advisor",
+        "advisorruleengine",
+        "approval",
+        "remediation",
+        "provider",
+        "systemctl",
+        "docker",
+        "date.now",
+        "new date(",
+        "math.random",
+        "crypto.",
+    ):
+        assert forbidden not in fixture_lowered
+
     for marker in ("/api/systemd/units?limit=20", "/api/systemd/units/", "createSystemdController", "Health", "Evidence"):
         assert marker in module
     lowered = module.lower()

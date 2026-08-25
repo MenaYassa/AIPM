@@ -46,8 +46,15 @@ def test_only_dashboard_is_visible_by_default_and_placeholders_have_no_fake_metr
     assert 'data-view="history"' in text
     assert 'data-view="notifications" hidden' in text
     assert 'data-view="settings" hidden' in text
-    assert 'data-view="ai-agent" hidden' in text
-    assert text.count("Coming in MC-6.x") >= 2
+    ai_agent = text[text.index('data-view="ai-agent"') : text.index('data-view="ai-agent"') + 5000]
+    assert 'data-view="ai-agent"' in ai_agent
+    assert 'hidden' in ai_agent
+    assert 'id="advisorFixtureRoot"' in ai_agent
+    assert 'data-advisor-fixture="normal"' in ai_agent
+    assert 'data-advisor-fixture="http-500"' in ai_agent
+    assert text.count("Coming in MC-6.x") >= 1
+    assert "AI Agent · fixture presentation" in ai_agent
+    assert "No live data or browser clock" in ai_agent
     assert "Applications, not just containers." in text
     assert "projectCards" in text
     assert "projectDetail" in text
