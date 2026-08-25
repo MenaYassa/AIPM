@@ -2,9 +2,9 @@
 
 ## Scope and delivery rule
 
-This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 and MC-6.13 Phases 2, 3, 4A, and 4B have been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `af1a10b1f150335df27fda5d915f44e4f14146f4`.
+This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 and MC-6.13 Phases 2, 3, 4A, 4B, and 4D have been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `d90d32f54edc5abf373ecd0308b4963e9a6cabcc`.
 
-MC-6.9 through MC-6.12 and MC-6.13 Phases 4C–4E remain future milestones. MC-6.13 Phase 4B is complete as a private authenticated read-only API boundary.
+MC-6.9 through MC-6.12 and MC-6.13 Phase 4B.1, 4C, and 4E remain future milestones. MC-6.13 Phase 4B is complete as a private authenticated read-only API boundary, and Phase 4D is complete as a private-VPS telemetry-owned bounded export plus transport-neutral observation adapter ending at `AdvisorCompositionRequest`.
 
 ## Milestone map
 
@@ -24,7 +24,8 @@ MC-6.9 through MC-6.12 and MC-6.13 Phases 4C–4E remain future milestones. MC-6
 | MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Future, separate gate | Separate authorization required. |
 | MC-6.13 Phase 2/3 | EXTEND/NEW | Immutable evidence normalization and ten deterministic, evidence-linked advisor rules. | Complete and pushed at `a7ee2f1` | Pure domain logic only. |
 | MC-6.13 Phase 4A | EXTEND/NEW | Bounded immutable request contract and direct normalizer-to-rule-engine composition. | Complete and pushed at `37d8a0e` | No API, UI, LLM, runtime, scheduler, or action behavior. |
-| MC-6.13 Phase 4B | EXTEND/NEW | Private authenticated read-only `POST /api/advisor/evaluate` transport boundary over Phase 4A. | Complete and pushed at `af1a10b` | Bounded transport only; no public exposure, UI, live collection, LLM, runtime, scheduler, or action behavior; Phases 4C–4E remain separately gated. |
+| MC-6.13 Phase 4B | EXTEND/NEW | Private authenticated read-only `POST /api/advisor/evaluate` transport boundary over Phase 4A. | Complete and pushed at `af1a10b` | Bounded transport only; no public exposure, UI, live collection, LLM, runtime, scheduler, or action behavior; Phase 4B.1, 4C, 4D, and 4E are separate slices, with 4D now landed and 4B.1/4C/4E remaining separately gated. |
+| MC-6.13 Phase 4D | EXTEND/NEW | Telemetry-owned bounded snapshot/export and transport-neutral adapter for the private-VPS CPU, memory, and disk slice, producing canonical observations and `ResourceHistoryEnvelope` values and stopping at `AdvisorCompositionRequest`. | Complete and pushed at `f0ae4bb` and `d90d32f` | No dashboard/UI, live polling, LLM/provider, advisor evaluation, action, approval, or runtime-control behavior; Phase 4D remains separate from Phase 4B.1, 4C, and 4E. |
 
 ## MC-6.1 — contracts and UI foundation
 
@@ -262,11 +263,11 @@ Intent → Plan → Risk classification → Human approval → Action executor
 
 Actions must not be added to existing read façades. The action executor needs distinct service accounts/permissions, explicit allow-lists, per-action timeouts, concurrency control, audit records, and tested rollback. Public access and authentication are prerequisites.
 
-## MC-6.13 — AI Advisor Phase 2/3/4A/4B complete
+## MC-6.13 — AI Advisor Phase 2/3/4A/4B/4D complete
 
-Phase 2 established deterministic normalization from bounded caller-supplied observations into immutable `EvidenceBundle` values. Phase 3 established the pure `mc613-rules-v1` engine with ten deterministic evidence-linked rules. Phase 4A adds `AdvisorCompositionRequest` and `compose_advisor()` as a pure façade over those seams. Phase 4B adds only the private authenticated read-only `POST /api/advisor/evaluate` transport boundary with bounded JSON decoding, fail-closed authentication, safe 400/401/422/500 errors, typed history-envelope reconstruction, direct Phase 4A delegation, and existing `AdvisorResponse` serialization.
+Phase 2 established deterministic normalization from bounded caller-supplied observations into immutable `EvidenceBundle` values. Phase 3 established the pure `mc613-rules-v1` engine with ten deterministic evidence-linked rules. Phase 4A adds `AdvisorCompositionRequest` and `compose_advisor()` as a pure façade over those seams. Phase 4B adds only the private authenticated read-only `POST /api/advisor/evaluate` transport boundary with bounded JSON decoding, fail-closed authentication, safe 400/401/422/500 errors, typed history-envelope reconstruction, direct Phase 4A delegation, and existing `AdvisorResponse` serialization. Phase 4D adds a telemetry-owned bounded snapshot/export and a transport-neutral adapter for the approved private-VPS CPU, memory, and disk slice. The adapter preserves configured immutable `host_id`, caller-owned `request_id` and timezone-aware `evaluation_time`, source timestamps, deterministic evidence/history identity, and fail-closed invalid/unavailable/incomplete states; it maps into canonical observations and `ResourceHistoryEnvelope` values and stops at `AdvisorCompositionRequest`.
 
-It does not collect observations, access runtime/provider state, invoke an LLM
+Phase 4D does not provide dashboard/UI integration, live polling, advisor evaluation, LLM/provider functionality, actions, approvals, or runtime control. It does not collect observations itself, access runtime/provider state, or invoke an LLM.
 
 ## Migration and schema strategy
 
@@ -332,7 +333,7 @@ The default answer for all runtime and write operations is **not authorized**.
 
 ## Definition of done for the first MC-6 release
 
-the MC-6.13 advisor implementation is complete through Phase 4B, with no UI, live collector, LLM, provider, or action integration.
+the MC-6.13 advisor implementation is complete through Phase 4D, with no dashboard/UI integration, live polling, LLM, provider, advisor evaluation, or action integration.
 
 The first read-only MC-6 release is complete only when:
 

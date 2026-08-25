@@ -2,9 +2,9 @@
 
 ## Purpose and contract rules
 
-This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 and MC-6.13 Phases 2/3/4A/4B are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `af1a10b1f150335df27fda5d915f44e4f14146f4`.
+This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 and MC-6.13 Phases 2/3/4A/4B/4D are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `d90d32f54edc5abf373ecd0308b4963e9a6cabcc`.
 
-The first MC-6 API release remains read-only and preserves all existing route names and response semantics. The private authenticated `POST /api/advisor/evaluate` boundary is now landed in MC-6.13 Phase 4B. It accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. It is not public and does not collect live observations. Other POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoints remain **FUTURE**. MC-6.13 Phases 2/3/4A remain pure domain/composition layers; Phases 4C–4E remain separate future decisions.
+The first MC-6 API release remains read-only and preserves all existing route names and response semantics. The private authenticated `POST /api/advisor/evaluate` boundary is landed in MC-6.13 Phase 4B. It accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. It is not public and does not collect live observations. Phase 4D is landed as a telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`; it does not add a route, dashboard integration, live polling, or runtime collection. Other POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoints remain **FUTURE**. MC-6.13 Phases 2/3/4A remain pure domain/composition layers; Phase 4B.1, Phase 4C, and Phase 4E remain separate future decisions.
 
 ## Current API inventory
 
@@ -267,4 +267,5 @@ The TUI may use direct façades for local efficiency. It should not make HTTP ca
 - **EXISTS:** current overview, history, event, incident, notification, metrics, channel, policy, service-health, and static UI APIs.
 - **EXTEND:** stable filters, cursor pagination, server/project/Docker detail, history comparisons, incident evidence, notification summary, and effective settings posture.
 - **NEW:** shared TUI adapter and any later additive detail projections not already delivered.
-**FUTURE:** public advisor exposure, Phase 4C+ API/UI integration, action routes, public authentication/ingress changes, SSE/WebSockets, notification activation, remediation, and LLM/provider integration. The private Phase 4B route is landed but remains non-public, read-only, and non-runtime.
+- **LANDED OUTSIDE API:** Phase 4D telemetry-owned bounded export and transport-neutral observation adapter for the approved CPU, memory, and disk slice; it ends at `AdvisorCompositionRequest` and is not a public route or dashboard feature.
+**FUTURE:** public advisor exposure, Phase 4B.1 authentication/session work, Phase 4C+ API/UI integration, action routes, public authentication/ingress changes, SSE/WebSockets, notification activation, remediation, and LLM/provider integration. The private Phase 4B route is landed but remains non-public, read-only, and non-runtime.

@@ -1,13 +1,13 @@
 # MC-6.13 AI Advisor Status
 
-**Status date:** 2026-08-24
+**Status date:** 2026-08-25
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
-**Current commit:** `af1a10b1f150335df27fda5d915f44e4f14146f4` — `feat: add MC-6.13 advisor evaluation API boundary`
-**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 4A push.
+**Current commit:** `d90d32f54edc5abf373ecd0308b4963e9a6cabcc` — `feat: add advisor telemetry observation adapter`
+**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 4D adapter push.
 
 ## Current status
 
-MC-6.13 Phases 2, 3, 4A, and 4B are complete, reviewed, committed, and pushed. Phase 4B establishes a private authenticated read-only `POST /api/advisor/evaluate` boundary that accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, reconstructs typed history envelopes, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. Phases 4C–4E have not started and remain unauthorized.
+MC-6.13 Phases 2, 3, 4A, 4B, and 4D are complete, reviewed, committed, and pushed. Phase 4B establishes a private authenticated read-only `POST /api/advisor/evaluate` boundary that accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, reconstructs typed history envelopes, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. Phase 4D adds a private-VPS, telemetry-owned bounded snapshot/export and a transport-neutral observation adapter for the approved CPU, memory, and disk slice. The adapter preserves configured `host_id`, caller-owned `request_id` and timezone-aware `evaluation_time`, source timestamps, deterministic evidence/history identity, and fail-closed invalid/unavailable/incomplete states; it stops at `AdvisorCompositionRequest` and does not invoke Phase 4A or Phase 3. Phases 4C, 4B.1, and 4E remain future and separately authorized.
 
 ```text
 MC6.13_PHASE2_REVIEW=PASS
@@ -22,6 +22,10 @@ MC6.13_PHASE4A_PUSH=COMPLETE
 MC6.13_PHASE4B_REVIEW=PASS
 MC6.13_PHASE4B_COMMIT=af1a10b1f150335df27fda5d915f44e4f14146f4
 MC6.13_PHASE4B_PUSH=COMPLETE
+MC6.13_PHASE4D_EXPORT=COMPLETE
+MC6.13_PHASE4D_EXPORT_COMMIT=f0ae4bb79dd9370f0d6cc118df49a4d6c4b4b265
+MC6.13_PHASE4D_ADAPTER=COMPLETE
+MC6.13_PHASE4D_ADAPTER_COMMIT=d90d32f54edc5abf373ecd0308b4963e9a6cabcc
 MC6.13_PHASE4C_TO_4E_STARTED=NO
 ```
 
@@ -131,13 +135,13 @@ Final Phase 3 validation:
 
 ## Phase 4 status
 
-Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. `AdvisorCompositionRequest` validates bounded caller metadata and recursively snapshots raw mappings/sequences; `compose_advisor()` directly composes the existing Phase 2 normalizer with the Phase 3 rule engine and returns the existing `AdvisorResponse` without aggregation or semantic rewriting. Phase 4B is implemented, reviewed, committed, and pushed at `af1a10b` as a private authenticated read-only API transport boundary over Phase 4A. No façade integration, advisor dashboard/UI surface, TUI surface, LLM provider, scheduler, runtime adapter, or autonomous action path was added. Phases 4C–4E remain future, separately authorized work and must preserve the pure-domain boundary.
+Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. `AdvisorCompositionRequest` validates bounded caller metadata and recursively snapshots raw mappings/sequences; `compose_advisor()` directly composes the existing Phase 2 normalizer with the Phase 3 rule engine and returns the existing `AdvisorResponse` without aggregation or semantic rewriting. Phase 4B is implemented, reviewed, committed, and pushed at `af1a10b` as a private authenticated read-only API transport boundary over Phase 4A. Phase 4D is implemented, reviewed, committed, and pushed in two commits: `f0ae4bb` provides the telemetry-owned bounded snapshot/export and `d90d32f` maps its approved CPU, memory, and disk payload into canonical advisor observations and `ResourceHistoryEnvelope` values, stopping at `AdvisorCompositionRequest`. Phase 4D does not provide live dashboard operation, live polling, LLM/provider functionality, advisor evaluation, actions, or approvals. Phases 4C, 4B.1, and 4E remain future, separately authorized work and must preserve the pure-domain boundary.
 
 ## Phase 4B — private authenticated advisor evaluation API
 
 Phase 4B adds the transport adapter in `src/aipm/capabilities/advisor/api.py` and wires it into the existing FastAPI application through `src/aipm/dashboard/server.py`. The route is `POST /api/advisor/evaluate`. It requires `request_id`, a caller-supplied timezone-aware `evaluation_time`, bounded `observations`, bounded `expected_sources`, and bounded typed `history_envelopes` input. It rejects unknown fields, reconstructs immutable Phase 3 history objects, invokes `AdvisorCompositionRequest` and `compose_advisor()` directly, and serializes the existing `AdvisorResponse` without semantic rewriting.
 
-Authentication is an injected private dependency and fails closed when unavailable. Rejected authentication returns safe 401; malformed transport input returns safe 400; domain validation returns safe 422; and unexpected internal failures return safe 500. Error responses contain only fixed codes/messages and bounded field descriptors, never raw exceptions, tracebacks, credentials, paths, SQL, commands, or internal topology. The route does not read a clock, collect live observations, access telemetry, invoke providers or LLMs, modify the dashboard UI, or perform actions. Phases 4C–4E remain future and separately authorized.
+Authentication is an injected private dependency and fails closed when unavailable. Rejected authentication returns safe 401; malformed transport input returns safe 400; domain validation returns safe 422; and unexpected internal failures return safe 500. Error responses contain only fixed codes/messages and bounded field descriptors, never raw exceptions, tracebacks, credentials, paths, SQL, commands, or internal topology. The route does not read a clock, collect live observations, access telemetry, invoke providers or LLMs, modify the dashboard UI, or perform actions. Phase 4B.1, Phase 4C, and Phase 4E remain future and separately authorized; Phase 4D is separately landed as the telemetry-owned bounded export and observation adapter described above.
 
 ### Phase 4B validation
 
@@ -163,8 +167,10 @@ Authentication is an injected private dependency and fails closed when unavailab
 MC6.13_PHASE4A=COMPLETE
 MC6.13_PHASE4A_COMMIT=37d8a0ecca26f82f2a5bcfee54c26bee1e89bd70
 MC6.13_PHASE4B=COMPLETE
+MC6.13_PHASE4D=COMPLETE
+MC6.13_PHASE4D_EXPORT_COMMIT=f0ae4bb79dd9370f0d6cc118df49a4d6c4b4b265
+MC6.13_PHASE4D_ADAPTER_COMMIT=d90d32f54edc5abf373ecd0308b4963e9a6cabcc
 MC6.13_PHASE4C=NOT_STARTED
-MC6.13_PHASE4D=NOT_STARTED
 MC6.13_PHASE4E=NOT_STARTED
 MC6.13_RUNTIME_INTEGRATION=NOT_IMPLEMENTED
 MC6.13_API=PRIVATE_AUTHENTICATED_READ_ONLY

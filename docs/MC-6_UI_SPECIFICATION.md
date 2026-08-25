@@ -289,13 +289,13 @@ Every page and component needs:
 
 ## Current implementation status
 
-**Updated:** 2026-08-24
+**Updated:** 2026-08-25
 
-The approved vanilla static architecture remains implemented through MC-6.8. The repository also contains MC-6.13 Phase 2/3/4A pure advisor domain logic and the private authenticated Phase 4B advisor API at `af1a10b`, but no advisor UI was added. The delivered navigation covers Dashboard, Server, Docker, Projects, Systemd, Logs, Incidents, History, Notifications, Settings, and the reserved AI Agent area. Dashboard, Server, Docker, Projects, Systemd, and Logs are functional observation pages; the remaining reserved pages retain safe placeholders or existing read-only projections where their milestone is not yet implemented.
+The approved vanilla static architecture remains implemented through MC-6.8. The repository also contains MC-6.13 Phase 2/3/4A pure advisor domain logic, the private authenticated Phase 4B advisor API at `af1a10b`, and the private-VPS telemetry-owned Phase 4D bounded export plus transport-neutral observation adapter. Phase 4D is backend-only and promotes only the approved CPU, memory, and disk slice into canonical advisor input; no advisor UI was added. The delivered navigation covers Dashboard, Server, Docker, Projects, Systemd, Logs, Incidents, History, Notifications, Settings, and the reserved AI Agent area. Dashboard, Server, Docker, Projects, Systemd, and Logs are functional observation pages; the remaining reserved pages retain safe placeholders or existing read-only projections where their milestone is not yet implemented.
 
 The frontend uses the existing hash router, shared state helpers, centralized scheduler, `/static` module mount, escaped rendering, and explicit fresh/stale/unavailable/error/empty/unknown semantics. MC-6.8 adds one bounded Logs scheduler resource, backend-owned source selection, visible truncation/redaction state, and no download, stream, lifecycle, acknowledgement, or mutation controls.
 
-MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API transport boundary, not an advisor view, scheduler, LLM, or action surface;
+MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API transport boundary; and Phase 4D adds only a private-VPS telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`. Neither Phase 4B nor Phase 4D adds an advisor view, live polling scheduler, LLM/provider surface, or action surface.
 
 ## References
 
@@ -312,4 +312,4 @@ MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API t
 - **EXISTS:** current Dashboard sections, service pulse, Docker/container overview, project inventory, history, event stream, Incident Room, notification safety, search/filtering, and refresh behavior.
 - **EXTEND:** navigation shell, detail views, charts, filtering, settings posture, accessibility, component extraction, and responsive behavior.
 - **NEW:** Systemd page, Logs page, shared scheduler module, bounded log UI, and future TUI presentation.
-**FUTURE:** MC-6.13 Phase 4C+ advisor UI integration, public API exposure, action controls, new authentication or ingress changes, SSE/WebSockets, and any write-enabled settings or operations. Phase 4B’s private API is not a UI feature.
+**FUTURE:** MC-6.13 Phase 4B.1 authentication/session work, Phase 4C+ advisor UI integration, public API exposure, action controls, new authentication or ingress changes, SSE/WebSockets, and any write-enabled settings or operations. Phase 4B’s private API and Phase 4D’s private-VPS adapter are not UI features.

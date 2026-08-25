@@ -203,15 +203,15 @@ A React/Vite migration is not the first implementation step. It may be reconside
 
 ## Current implementation reconciliation
 
-**Updated:** 2026-08-24
+**Updated:** 2026-08-25
 
-The MC-6 architecture described above is implemented through **MC-6.8** plus MC-6.13 Phase 2/3/4A/4B. The completed slices include immutable evidence normalization, deterministic advisor rules, pure composition, and the private authenticated read-only advisor API. The Phase 4B route uses bounded transport decoding, fail-closed authentication, direct Phase 4A delegation, and existing response serialization. The current pushed checkpoint is `af1a10b1f150335df27fda5d915f44e4f14146f4`.
+The MC-6 architecture described above is implemented through **MC-6.8** plus MC-6.13 Phase 2/3/4A/4B/4D. The completed slices include immutable evidence normalization, deterministic advisor rules, pure composition, the private authenticated read-only advisor API, and a private-VPS telemetry-owned bounded snapshot/export with a transport-neutral advisor observation adapter. The Phase 4B route uses bounded transport decoding, fail-closed authentication, direct Phase 4A delegation, and existing response serialization. Phase 4D uses the telemetry owner boundary for SQLite/WAL/SHM interaction, promotes only the approved CPU, memory, and disk slice, and stops at `AdvisorCompositionRequest`. The current pushed checkpoint is `d90d32f54edc5abf373ecd0308b4963e9a6cabcc`.
 
-MC-6.13 Phase 2/3/4A uses an isolated pure advisor domain boundary over immutable evidence and caller-supplied context; Phase 4B adds only a private authenticated transport adapter over that boundary. No live observation collector, second telemetry/event store, provider ownership layer, scheduler, runtime adapter, LLM integration, UI surface, or action path was introduced.
+MC-6.13 Phase 2/3/4A uses an isolated pure advisor domain boundary over immutable evidence and caller-supplied context; Phase 4B adds only a private authenticated transport adapter over that boundary; and Phase 4D adds only the bounded telemetry export and canonical observation adapter. The Phase 4D adapter does not access SQLite, database paths, WAL/SHM, filesystem, network, current clocks, randomness, providers, actions, approvals, or runtime control, and does not invoke Phase 4A or Phase 3. No live observation poller, second telemetry/event store, provider ownership layer, scheduler, LLM integration, UI surface, or action path was introduced.
 
-MC-6.13 Phases 4C–4E remain future, unauthorized, and not started. Phase 4B is complete but remains private, authenticated, read-only, and transport-only.
+Phase 4B.1 remains blocked pending a separate human decision on browser authentication/session semantics. Phase 4C and Phase 4E remain future, unauthorized, and not started. Phase 4B remains private, authenticated, read-only, and transport-only; Phase 4D remains private-VPS, bounded, typed, and non-runtime.
 
-The deployment architecture remains separate from advisor implementation. The dashboard is loopback-bound at `127.0.0.1:8787`; the existing public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`. Notifications remain disabled, Cloudflared remains Docker-owned, and any future runtime or ingress change requires separate approval. The preserved Gate 2.1 harness SHA-256 is `9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7`.
+The deployment architecture remains separate from advisor implementation. The dashboard is loopback-bound at `127.0.0.1:8787`; the existing public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`. Notifications remain disabled, Cloudflared remains Docker-owned, and any future runtime or ingress change requires separate approval. Phase 4D does not provide live dashboard operation, live polling, API/UI integration, LLM/provider functionality, actions, or approvals. The preserved Gate 2.1 harness SHA-256 is `9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7`.
 
 ## Classification
 

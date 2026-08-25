@@ -385,13 +385,13 @@ MC-2.1 separates the 15-second fast state loop from independently scheduled, sin
 
 ## Current Mission Control status and next steps
 
-**Updated:** 2026-08-24
+**Updated:** 2026-08-25
 
-Mission Control’s read-only cockpit implementation is complete through **MC-6.8**. The current repository checkpoint additionally includes MC-6.13 Phases 2, 3, 4A, and 4B, pushed at `af1a10b1f150335df27fda5d915f44e4f14146f4`. The cockpit includes the shared MC-6 foundation and vanilla shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, and the existing telemetry/history/event/incident/notification read projections. MC-6.13 Phase 2/3/4A remains pure advisor domain composition, while Phase 4B adds only a private authenticated advisor API and does not add a dashboard surface.
+Mission Control’s read-only cockpit implementation is complete through **MC-6.8**. The current repository checkpoint additionally includes MC-6.13 Phases 2, 3, 4A, 4B, and 4D, pushed at `d90d32f54edc5abf373ecd0308b4963e9a6cabcc`. The cockpit includes the shared MC-6 foundation and vanilla shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, and the existing telemetry/history/event/incident/notification read projections. MC-6.13 Phase 2/3/4A remains pure advisor domain composition; Phase 4B adds only a private authenticated advisor API; and Phase 4D adds only a private-VPS telemetry-owned bounded export plus transport-neutral adapter for CPU, memory, and disk, ending at `AdvisorCompositionRequest` without dashboard integration.
 
 MC-6.4 was reconciled rather than duplicated because Server Intelligence was already delivered through MC-6.3. MC-6.6.1 through MC-6.6.3 refined association correctness, taxonomy, filtering, and health evidence. MC-6.7.1 reconciled the seven-entry Systemd registry: Cloudflared is Docker-owned and is not represented as Systemd unless a genuine allow-listed unit exists.
 
-MC-6.13 Phases 4C–4E remain future, unauthorized, and not started; Phase 4B is complete as a private authenticated, read-only transport boundary and does not imply dashboard UI, public exposure, live collection, LLM/provider functionality, or actions.
+MC-6.13 Phase 4B.1, Phase 4C, and Phase 4E remain future, unauthorized, and not started; Phase 4B is complete as a private authenticated, read-only transport boundary, and Phase 4D is complete as a bounded typed non-runtime adapter. Neither implies dashboard UI, public exposure, live polling, LLM/provider functionality, advisor evaluation, or actions.
 
 ### Current operational gates
 
