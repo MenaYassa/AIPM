@@ -48,6 +48,7 @@ class ConfigManager:
             telemetry_data = dict(data.get("telemetry", {}) or {})
             events_data = dict(data.get("events", {}) or {})
             notifications_data = dict(data.get("notifications", {}) or {})
+            host_id = data.get("host_id", "agent")
             if not isinstance(logging_data, dict) or not isinstance(discovery_data, dict) or not isinstance(telemetry_data, dict) or not isinstance(events_data, dict) or not isinstance(notifications_data, dict):
                 raise ValueError("logging, discovery, telemetry, events, and notifications must be mappings")
 
@@ -69,7 +70,7 @@ class ConfigManager:
             telemetry_config = TelemetryConfig(**telemetry_data)
             event_config = EventConfig(**events_data)
             self._validate(logging_config, discovery_config, telemetry_config, event_config, notification_config)
-            return AIPMConfig(logging=logging_config, discovery=discovery_config, telemetry=telemetry_config, events=event_config, notifications=notification_config)
+            return AIPMConfig(logging=logging_config, discovery=discovery_config, telemetry=telemetry_config, events=event_config, notifications=notification_config, host_id=host_id)
         except (TypeError, ValueError, yaml.YAMLError) as exc:
             raise AIPMError(f"Failed to load configuration from {self.config_path}: {exc}") from exc
         except OSError as exc:

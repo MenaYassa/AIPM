@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 
 from aipm.models.finding import Severity
 from aipm.models.notifications import NotificationTrigger
@@ -115,6 +116,9 @@ class NotificationConfig:
     policies: list[NotificationPolicyConfig] = field(default_factory=list)
 
 
+_HOST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,63}$")
+
+
 @dataclass
 class AIPMConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -122,3 +126,8 @@ class AIPMConfig:
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     events: EventConfig = field(default_factory=EventConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
+    host_id: str = "agent"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.host_id, str) or _HOST_ID_RE.fullmatch(self.host_id) is None:
+            raise ValueError("host_id must be a bounded non-empty identifier")

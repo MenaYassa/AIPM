@@ -4,7 +4,7 @@ import pytest
 
 from aipm.core.config import ConfigManager
 from aipm.core.exceptions import AIPMError
-from aipm.models.config import DiscoveryConfig, EventConfig
+from aipm.models.config import AIPMConfig, DiscoveryConfig, EventConfig
 
 
 def write_config(path: Path, telemetry: str) -> None:
@@ -12,6 +12,10 @@ def write_config(path: Path, telemetry: str) -> None:
         "logging: {}\ndiscovery:\n  search_paths: ['/tmp']\ntelemetry:\n" + telemetry,
         encoding="utf-8",
     )
+
+
+def test_host_id_defaults_to_approved_current_identity():
+    assert AIPMConfig().host_id == "agent"
 
 
 def test_event_defaults_are_safe():
@@ -34,11 +38,31 @@ def test_discovery_defaults_are_bounded():
 
 def test_telemetry_defaults_are_safe(tmp_path):
     config = ConfigManager(tmp_path / "config.yaml").config
+    assert config.host_id == "agent"
     assert config.telemetry.enabled is True
     assert config.telemetry.interval_seconds == 15
     assert config.telemetry.retention_days == 1
     assert config.telemetry.retention_interval_seconds == 900
     assert config.telemetry.database_path.endswith(".local/state/aipm/telemetry/mission_control.db")
+
+
+def test_configured_host_id_is_loaded_and_not_derived_from_hostname(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text("host_id: configured-vps\nlogging: {}\ndiscovery:\n  search_paths: ['/tmp']\ntelemetry:\n  database_path: /tmp/mc.db\n", encoding="utf-8")
+    monkeypatch.setattr("socket.gethostname", lambda: "untrusted-runtime-name")
+    config = ConfigManager(path).config
+    assert config.host_id == "configured-vps"
+
+
+@pytest.mark.parametrize(
+    "host_id_yaml",
+    ["''", "'   '", "agent/unsafe", "'agent with spaces'", "'" + "a" * 65 + "'", "7", "null", "[agent]"],
+)
+def test_invalid_host_id_fails_clearly(tmp_path, host_id_yaml):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"host_id: {host_id_yaml}\nlogging: {{}}\ndiscovery:\n  search_paths: ['/tmp']\ntelemetry:\n  database_path: /tmp/mc.db\n", encoding="utf-8")
+    with pytest.raises(AIPMError, match="Failed to load configuration"):
+        ConfigManager(path)
 
 
 @pytest.mark.parametrize(
