@@ -1,12 +1,12 @@
 # AIPM Mission Control Status and Roadmap
 
-**Status date:** 2026-08-25
+**Status date:** 2026-08-26
 
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
 
-**Checkpoint:** `e8f0b12d7473e3c021c536e738c8b3a414d116ad` — `feat: add fixture-only advisor presentation`
+**Checkpoint:** `6d6bd63b59f6117c5f6c1ac087506846b1a11e8a` — `feat: add live advisor orchestration`
 
-**Remote parity:** `HEAD == origin/main`; working tree clean after the Phase 4C fixture presentation push.
+**Remote parity:** `HEAD == origin/main`; the live advisor orchestration implementation is landed. This documentation synchronization is pending its own review/commit.
 
 ## Executive summary
 
@@ -16,7 +16,7 @@ The completed implementation preserves the central operating rule:
 
 > **Mission Control observes the VPS; it does not change the VPS.**
 
-The current committed checkpoint completes **MC-6.13 fixture-only Phase 4C presentation**. Phases 2 and 3 established immutable evidence normalization and deterministic rules; Phase 4A established pure request validation and composition; Phase 4B adds the private authenticated read-only advisor evaluation API; Phase 4D adds a telemetry-owned bounded snapshot/export plus a transport-neutral adapter for the approved private-VPS CPU, memory, and disk slice; and Phase 4C adds a fixture-driven presentation on the existing `#/ai-agent` dashboard route. The Phase 4D adapter preserves configured immutable `host_id`, caller-owned `request_id` and timezone-aware `evaluation_time`, source timestamps, deterministic evidence/history identity, and fail-closed invalid/unavailable/incomplete states, and stops at `AdvisorCompositionRequest` without invoking Phase 4A or Phase 3. The Phase 4C presentation uses fixed bounded responses and performs no live advisor evaluation, telemetry acquisition, application-level browser authentication, polling, composition, rules, providers, actions, or approvals. Phase 4B.1 records the selected Cloudflare Access edge-only boundary; AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Live Phase 4C orchestration, stronger identity-aware application behavior, and Phase 4E remain future and separately authorized. Production/runtime changes remain separate operational concerns and are not implied by the advisor commits.
+The current committed checkpoint completes **MC-6.13 live read-only Phase 4C.1 orchestration** in addition to the fixture capability. Phases 2 and 3 established immutable evidence normalization and deterministic rules; Phase 4A established pure request validation and composition; Phase 4B adds the private authenticated read-only advisor evaluation API; Phase 4D adds a telemetry-owned bounded snapshot/export plus a transport-neutral adapter for the approved private-VPS CPU, memory, and disk slice; Phase 4C adds explicit fixture presentation; and Phase 4C.1 adds the live read-only `GET /api/advisor` path. The live path uses configured `host_id`, service-owned evaluation context, a bounded five-minute export, the Phase 4D adapter, and the existing Phase 4A composition boundary. The fixture capability remains explicit and separate. Phase 4B.1 records the selected Cloudflare Access edge-only boundary; AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Phase 4E, stronger identity-aware application behavior, actions, approvals, remediation, and LLM/provider functionality remain future and separately authorized. Production/runtime changes remain separate operational concerns and are not implied by the advisor commits.
 
 ## Completed delivery ledger
 
@@ -46,6 +46,7 @@ The current committed checkpoint completes **MC-6.13 fixture-only Phase 4C prese
 | MC-6.13 Phase 4A | Pure composition of the existing normalizer and rule engine with bounded immutable request metadata; no API/UI/LLM/runtime/action path. | Complete and pushed at `37d8a0e` |
 | MC-6.13 Phase 4B | Private authenticated read-only `POST /api/advisor/evaluate`; bounded transport, fail-closed auth, safe 400/401/422/500 errors, direct Phase 4A delegation, and existing response serialization. | Complete and pushed at `af1a10b` |
 | MC-6.13 Phase 4C | Fixture-only advisor presentation on the existing `#/ai-agent` route with bounded deterministic normal, degraded, unavailable, invalid, incomplete, and transport-error states; no live advisor integration or action path. | Complete and pushed at `e8f0b12` |
+| MC-6.13 Phase 4C.1 | Server-owned live read-only `GET /api/advisor` orchestration through telemetry-owned export, Phase 4D adapter, and Phase 4A composition; explicit fixture mode remains separate and no actions are exposed. | Complete and pushed at `6d6bd63` |
 | MC-6.13 Phase 4D | Telemetry-owned bounded snapshot/export and transport-neutral observation adapter for the private-VPS CPU, memory, and disk slice; immutable typed payload, configured host identity, caller-owned evaluation context, deterministic evidence/history mapping, and fail-closed degraded states. | Complete and pushed at `f0ae4bb` and `d90d32f` |
 
 ## Current capability surface
@@ -61,7 +62,7 @@ The dashboard currently provides GET-only observations for:
 - Host, container, project, resource, and tunnel history.
 - Events, incidents, notification posture, channels, policies, and metrics.
 
-MC-6.13 Phase 2/3/4A remain backend domain-only additions; Phase 4B adds only the private authenticated advisor API route behind the selected Cloudflare Access edge protection; Phase 4D adds only a telemetry-owned bounded export plus a transport-neutral adapter ending at `AdvisorCompositionRequest`; and Phase 4C adds only a fixture-driven advisor presentation on the existing dashboard route. The fixture surface has no live advisor polling, application-level browser authentication/session, telemetry acquisition, LLM integration, evaluation path, or action path. AIPM relies on private edge protection and does not verify Cloudflare JWTs or proxy identity headers. Existing Resource History remains separate and retains its original read-only endpoint and behavior.
+MC-6.13 Phase 2/3/4A remain backend domain boundaries; Phase 4B provides the private authenticated advisor API route behind the selected Cloudflare Access edge protection; Phase 4D provides the telemetry-owned bounded export plus a transport-neutral adapter ending at `AdvisorCompositionRequest`; Phase 4C provides explicit fixture presentation; and Phase 4C.1 provides the live read-only `GET /api/advisor` provider path. The live path uses one bounded request, server-owned evaluation context, and no browser-side telemetry access or polling. Fixture mode remains explicit and separate. AIPM relies on private edge protection and does not verify Cloudflare JWTs or proxy identity headers. Existing Resource History remains separate and retains its original read-only endpoint and behavior.
 
 ## Read-only and ownership invariants
 
@@ -102,7 +103,7 @@ This is not part of the current read-only cockpit. Any future action architectur
 
 ### MC-6.13 — AI Advisor
 
-**Phase 2, Phase 3, Phase 4A, Phase 4B, Phase 4C fixture presentation, and Phase 4D complete and pushed.** Phase 4B is a private authenticated transport boundary behind the selected Cloudflare Access edge protection. Phase 4D is a private-VPS telemetry-owned bounded export and transport-neutral observation adapter ending at `AdvisorCompositionRequest`; Phase 4C is only a fixture-driven, non-live dashboard presentation with fixed bounded response states. The fixture surface does not provide live dashboard advisor operation, application-level browser authentication/session, telemetry acquisition, polling, advisor evaluation, LLM/provider functionality, actions, or approvals. Phase 4B.1 records the edge-only decision; stronger application identity behavior, live Phase 4C orchestration, and Phase 4E remain future and separately authorized.
+**Phase 2, Phase 3, Phase 4A, Phase 4B, Phase 4C fixture presentation, Phase 4C.1 live orchestration, and Phase 4D complete and pushed.** Phase 4B is a private authenticated transport boundary behind the selected Cloudflare Access edge protection. Phase 4D is a private-VPS telemetry-owned bounded export and transport-neutral observation adapter ending at `AdvisorCompositionRequest`; Phase 4C remains an explicit fixture capability; and Phase 4C.1 provides the live read-only `GET /api/advisor` path through the telemetry owner, adapter, and composition boundary. The live path uses a server-owned evaluation context, bounded five-minute window, no browser polling, no client-side telemetry access, and no actions or approvals. Phase 4B.1 records the edge-only decision; stronger application identity behavior, Phase 4E, actions, approvals, remediation, and LLM/provider functionality remain future and separately authorized.
 
 ## Deployment and operational gates
 
@@ -202,7 +203,7 @@ MC6.9=NEXT_DESIGN_ONLY
 MC6.10=PLANNED
 MC6.11=PLANNED
 MC6.12=FUTURE
-MC6.13=COMPLETE_THROUGH_PHASE4C_FIXTURE_AND_PHASE4D
+MC6.13=COMPLETE_THROUGH_PHASE4C1_AND_PHASE4D
 MC6.13_PHASE2=COMPLETE
 MC6.13_PHASE3=COMPLETE
 MC6.13_PHASE4A=COMPLETE
@@ -212,10 +213,16 @@ MC6.13_PHASE4D_EXPORT_COMMIT=f0ae4bb79dd9370f0d6cc118df49a4d6c4b4b265
 MC6.13_PHASE4D_ADAPTER_COMMIT=d90d32f54edc5abf373ecd0308b4963e9a6cabcc
 MC6.13_PHASE4C=LANDED_FIXTURE_ONLY
 MC6.13_PHASE4C_COMMIT=e8f0b12d7473e3c021c536e738c8b3a414d116ad
+MC6.13_PHASE4C1=LANDED_LIVE_READ_ONLY
+MC6.13_PHASE4C1_COMMIT=6d6bd63b59f6117c5f6c1ac087506846b1a11e8a
 MC6.13_PHASE4B1=DECISION_RECORDED_EDGE_ONLY
 MC6.13_PHASE4E=NOT_STARTED
 PRODUCTION_DEPLOYMENT=SEPARATE_APPROVAL_REQUIRED
 PUBLIC_INGRESS=CLOUDFLARE_ACCESS_EDGE_ONLY
+MC6.13_LIVE_HISTORY_CAPTURE=INSUFFICIENT_COVERAGE_EXPECTED
+MC6.13_UI_HISTORY_COVERAGE=15/15_SOURCE_RECORDS_NOT_TEMPORAL
+MC6.13_LEGACY_UBUNTU_DB_CONSUMER=UNKNOWN
+MC6.13_DATABASE_ACTION_REQUIRED=NO
 NOTIFICATIONS=DISABLED
 ```
 

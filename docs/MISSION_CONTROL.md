@@ -385,17 +385,35 @@ MC-2.1 separates the 15-second fast state loop from independently scheduled, sin
 
 ## Current Mission Control status and next steps
 
-**Updated:** 2026-08-25
+**Updated:** 2026-08-26
 
-Mission Control’s read-only cockpit implementation is complete through **MC-6.8**. The current repository checkpoint additionally includes MC-6.13 Phases 2, 3, 4A, 4B, fixture-only 4C presentation, and 4D, pushed at `e8f0b12d7473e3c021c536e738c8b3a414d116ad`. The cockpit includes the shared MC-6 foundation and vanilla shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, the existing telemetry/history/event/incident/notification read projections, and the bounded non-live advisor fixture presentation on `#/ai-agent`. MC-6.13 Phase 2/3/4A remains pure advisor domain composition; Phase 4B adds only a private authenticated advisor API; Phase 4D adds only a private-VPS telemetry-owned bounded export plus transport-neutral adapter for CPU, memory, and disk, ending at `AdvisorCompositionRequest`; and Phase 4C adds no live collection or evaluation.
+Mission Control’s read-only cockpit implementation is complete through **MC-6.8**. The current repository checkpoint additionally includes MC-6.13 Phases 2, 3, 4A, 4B, fixture-only 4C presentation, live read-only 4C.1 orchestration, and 4D, pushed at `6d6bd63b59f6117c5f6c1ac087506846b1a11e8a`. The cockpit includes the shared MC-6 foundation and vanilla shell, Server/Host Intelligence, Docker intelligence, Project/Application Intelligence, allow-listed Systemd observation, bounded redacted Logs, the existing telemetry/history/event/incident/notification read projections, and the advisor live/fixture presentation on `#/ai-agent`. MC-6.13 Phase 2/3/4A remains pure advisor domain composition; Phase 4B adds only a private authenticated advisor API; Phase 4D adds only a private-VPS telemetry-owned bounded export plus transport-neutral adapter for CPU, memory, and disk, ending at `AdvisorCompositionRequest`; and Phase 4C.1 adds the server-owned live read-only `GET /api/advisor` path through that export, adapter, and composition boundary.
 
 MC-6.4 was reconciled rather than duplicated because Server Intelligence was already delivered through MC-6.3. MC-6.6.1 through MC-6.6.3 refined association correctness, taxonomy, filtering, and health evidence. MC-6.7.1 reconciled the seven-entry Systemd registry: Cloudflared is Docker-owned and is not represented as Systemd unless a genuine allow-listed unit exists.
 
-MC-6.13 Phase 4C is landed only as a fixture-driven, non-live presentation on the existing `#/ai-agent` route. Cloudflare Access protects the documented public ingress, and AIPM relies on that private edge authentication boundary without implementing JWT verification, identity middleware, session storage, or proxy-header trust. Live Phase 4C orchestration, application-level identity behavior, telemetry acquisition, advisor evaluation, and Phase 4E remain future, unauthorized, and not started. Phase 4B is complete as a private authenticated, read-only transport boundary, and Phase 4D is complete as a bounded typed non-runtime adapter. Neither the fixture presentation nor the backend phases imply public exposure beyond the protected edge, live polling, LLM/provider functionality, actions, or approvals.
+MC-6.13 Phase 4C remains the explicit fixture-driven presentation capability on the existing `#/ai-agent` route, while Phase 4C.1 is landed as the live read-only `GET /api/advisor` path. Cloudflare Access protects the documented public ingress, and AIPM relies on that private edge authentication boundary without implementing JWT verification, identity middleware, session storage, or proxy-header trust. The live path uses a server-owned evaluation context, a bounded five-minute telemetry export, the Phase 4D adapter, and the Phase 4A composition boundary; it provides no polling, actions, approvals, remediation, or LLM/provider functionality. Phase 4B remains a private authenticated, read-only transport boundary and Phase 4D remains the telemetry-owned typed export/adapter boundary. Phase 4E and stronger application identity behavior remain future, separately authorized work.
 
 ### Current operational gates
 
 Repository advisor work does not authorize or imply target-VPS application deployment. Runtime validation and any service rollout remain separate operational gates. The current dashboard ingress architecture is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`; Cloudflare Access is the confirmed edge authentication boundary for that public hostname. AIPM relies on the private edge protection and does not verify Cloudflare JWTs or identity headers. The dashboard remains loopback-bound; Cloudflared/Docker configuration, credentials, live SQLite, and Systemd runtime changes are outside the MC-6.13 repository scope.
+
+### MC-6.13 Phase 4C.1 production completeness capture
+
+The supplied read-only production capture used the canonical telemetry database `/home/mina/.local/state/aipm/telemetry/mission_control.db`, a deployed telemetry cadence of `60s`, and a `300s` evaluation window. Five sample runs were available, spanning `240s`. CPU, memory, and disk each reported `insufficient` with reason `insufficient_coverage`, while `invalid_source_rows=0`. The result is expected because the valid history did not span the complete five-minute window.
+
+The advisor UI’s `history 15/15` is source coverage, not temporal completeness. It represents fifteen observed history metric records out of fifteen expected records, not fifteen points per metric or a five-minute span. The three identical `missing_evidence — Resource-history window for agent is incomplete` records are expected, one for each incomplete CPU, memory, and disk history envelope. No Phase 3 completeness semantics were changed.
+
+The legacy `/home/ubuntu/.local/state/aipm/telemetry/mission_control.db` ownership investigation is closed unresolved and must not infer inactivity from sandbox evidence:
+
+```text
+ACTIVE_CONSUMER=UNKNOWN
+PROCESS=UNKNOWN
+SERVICE=UNKNOWN
+DOCKER_CONSUMER=UNKNOWN
+DATABASE_ACTION_REQUIRED=NO
+```
+
+The canonical managed writer and dashboard/advisor reader path remains the mina database path. No deletion, permission change, service change, or database action is implied.
 
 claims that Phase 4A or Phase 4B changed the host.
 
