@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aipm.models.advisor import AdvisorScope
+from aipm.models.advisor import AdvisorScope, ResourceHistorySummaryState
 from aipm.models.history import HostHistoryPoint
 from aipm.repositories.telemetry.read_snapshot import (
     SnapshotCompleteness,
@@ -50,25 +50,27 @@ def _host_sample(at: datetime, *, available: bool = True, cpu: object = 85.0) ->
     )
 
 
-def _snapshot(*, samples: tuple[HostHistoryPoint, ...] | None = None, completeness: SnapshotCompleteness = SnapshotCompleteness.SUFFICIENT, invalid_source_rows: int = 0) -> TelemetrySnapshotExport:
+def _snapshot(*, samples: tuple[HostHistoryPoint, ...] | None = None, completeness: SnapshotCompleteness = SnapshotCompleteness.SUFFICIENT, invalid_source_rows: int = 0, cadence_seconds: float = 150.0) -> TelemetrySnapshotExport:
     samples = samples if samples is not None else tuple(
         _host_sample(WINDOW_START + timedelta(seconds=offset))
         for offset in (0, 150, 300)
     )
+    offsets = tuple(int((sample.sampled_at - WINDOW_START).total_seconds()) for sample in samples)
+    coverage = (samples[-1].sampled_at - samples[0].sampled_at).total_seconds() if len(samples) >= 2 else 0.0
     metadata = tuple(
-        TelemetryMetricCompleteness(metric, completeness, len(samples), 300.0 if len(samples) >= 2 else 0.0)
+        TelemetryMetricCompleteness(metric, completeness, len(samples), coverage)
         for metric in ("cpu_percent", "memory_percent", "disk_percent")
     )
     parents = tuple(
-        TelemetrySnapshotParent(index + 1, WINDOW_START + timedelta(seconds=offset), True)
-        for index, offset in enumerate((0, 150, 300))
+        TelemetrySnapshotParent(index + 1, sample.sampled_at, True)
+        for index, sample in enumerate(samples)
     )
     return TelemetrySnapshotExport(
         host_id="agent",
         evaluation_time=EVALUATION_TIME,
         window_start=WINDOW_START,
         window_end=EVALUATION_TIME,
-        cadence_seconds=150.0,
+        cadence_seconds=cadence_seconds,
         sample_runs=parents,
         host_samples=samples,
         metric_completeness=metadata,
@@ -86,7 +88,12 @@ def _request(snapshot: TelemetrySnapshotExport, *, request_id: str = "adapter-re
 
 
 def test_maps_cpu_memory_disk_and_preserves_caller_context():
-    snapshot = _snapshot()
+    snapshot = _snapshot(
+        samples=tuple(
+            _host_sample(WINDOW_START + timedelta(seconds=offset), cpu=value)
+            for offset, value in ((0, 80.0), (150, 85.0), (300, 90.0))
+        )
+    )
     request = _request(snapshot, request_id="caller-request")
 
     assert isinstance(request, AdvisorCompositionRequest)
@@ -110,6 +117,11 @@ def test_maps_cpu_memory_disk_and_preserves_caller_context():
     assert all(envelope.window_start == WINDOW_START for envelope in request.history_envelopes)
     assert all(envelope.window_end == EVALUATION_TIME for envelope in request.history_envelopes)
     assert all(envelope.complete for envelope in request.history_envelopes)
+    assert [summary.metric for summary in request.resource_history_summary] == ["cpu_percent", "memory_percent", "disk_percent"]
+    assert all(summary.state is ResourceHistorySummaryState.COMPLETE for summary in request.resource_history_summary)
+    assert all(summary.valid_point_count == 3 and summary.temporal_span_seconds == 300.0 for summary in request.resource_history_summary)
+    assert request.resource_history_summary[0].peak_value == 90.0
+    assert request.resource_history_summary[0].peak_observed_at == WINDOW_START + timedelta(seconds=300)
 
 
 def test_source_timestamps_and_evidence_identity_are_deterministic():
@@ -140,6 +152,7 @@ def test_incomplete_and_invalid_source_states_fail_closed():
     assert invalid_cpu["state"] == "invalid"
     assert invalid_cpu["fields"] == {}
     assert all(not envelope.complete for envelope in invalid.history_envelopes)
+    assert all(summary.state is ResourceHistorySummaryState.INVALID for summary in invalid.resource_history_summary)
 
 
 def test_unavailable_host_resource_is_explicit_without_fabricated_value():
@@ -154,6 +167,27 @@ def test_unavailable_host_resource_is_explicit_without_fabricated_value():
         assert "value" not in record["fields"]
         assert record["observed_at"] == WINDOW_START
     assert all(not envelope.points for envelope in request.history_envelopes)
+    assert all(summary.state is ResourceHistorySummaryState.UNAVAILABLE for summary in request.resource_history_summary)
+
+
+def test_complete_and_incomplete_production_shaped_history_summaries_preserve_semantics():
+    complete_samples = tuple(
+        _host_sample(WINDOW_START + timedelta(seconds=offset), cpu=20.0 + offset / 10.0)
+        for offset in (0, 60, 120, 180, 240, 300)
+    )
+    complete = _request(_snapshot(samples=complete_samples, cadence_seconds=60.0))
+    assert all(summary.state is ResourceHistorySummaryState.COMPLETE for summary in complete.resource_history_summary)
+    assert all(summary.valid_point_count == 6 and summary.temporal_span_seconds == 300.0 and summary.cadence_seconds == 60.0 for summary in complete.resource_history_summary)
+    assert complete.resource_history_summary[0].peak_value == 50.0
+    assert complete.resource_history_summary[0].peak_observed_at == EVALUATION_TIME
+
+    incomplete_samples = tuple(
+        _host_sample(WINDOW_START + timedelta(seconds=offset), cpu=20.0)
+        for offset in (0, 60, 120, 180, 240)
+    )
+    incomplete = _request(_snapshot(samples=incomplete_samples, completeness=SnapshotCompleteness.INSUFFICIENT, cadence_seconds=60.0))
+    assert all(summary.state is ResourceHistorySummaryState.INCOMPLETE for summary in incomplete.resource_history_summary)
+    assert all(summary.valid_point_count == 5 and summary.temporal_span_seconds == 240.0 for summary in incomplete.resource_history_summary)
 
 
 def test_prohibited_telemetry_fields_never_cross_adapter_boundary():

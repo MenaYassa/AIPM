@@ -22,6 +22,9 @@ MAX_PROVENANCE = 32
 MAX_LINKS = 32
 MAX_COVERAGE = 32
 MAX_REFS = 32
+MAX_RESOURCE_HISTORY_SUMMARIES = 3
+MAX_RESOURCE_HISTORY_SUMMARY_SPAN_SECONDS = 86_400.0
+RESOURCE_HISTORY_METRICS = ("cpu_percent", "memory_percent", "disk_percent")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
@@ -95,6 +98,14 @@ class AdvisorStatus(StrEnum):
     PARTIAL = "partial"
     UNAVAILABLE = "unavailable"
     ERROR = "error"
+
+
+class ResourceHistorySummaryState(StrEnum):
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+    UNAVAILABLE = "unavailable"
+    STALE = "stale"
+    INVALID = "invalid"
 
 
 class RecommendationStatus(StrEnum):
@@ -607,6 +618,51 @@ class Recommendation:
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceHistorySummary:
+    metric: str
+    state: ResourceHistorySummaryState
+    valid_point_count: int
+    temporal_span_seconds: float
+    cadence_seconds: float
+    peak_value: float | None = None
+    peak_observed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.metric not in RESOURCE_HISTORY_METRICS:
+            raise AdvisorValidationError("Invalid resource-history summary metric")
+        object.__setattr__(self, "state", _enum(self.state, ResourceHistorySummaryState, "resource-history summary state"))
+        if isinstance(self.valid_point_count, bool) or not isinstance(self.valid_point_count, int) or not 0 <= self.valid_point_count <= MAX_EVIDENCE_ITEMS:
+            raise AdvisorValidationError("Invalid resource-history summary point count")
+        if isinstance(self.temporal_span_seconds, bool) or not isinstance(self.temporal_span_seconds, (int, float)) or not math.isfinite(float(self.temporal_span_seconds)) or not 0 <= float(self.temporal_span_seconds) <= MAX_RESOURCE_HISTORY_SUMMARY_SPAN_SECONDS:
+            raise AdvisorValidationError("Invalid resource-history summary span")
+        object.__setattr__(self, "temporal_span_seconds", float(self.temporal_span_seconds))
+        if isinstance(self.cadence_seconds, bool) or not isinstance(self.cadence_seconds, (int, float)) or not math.isfinite(float(self.cadence_seconds)) or not 0 < float(self.cadence_seconds) <= MAX_RESOURCE_HISTORY_SUMMARY_SPAN_SECONDS:
+            raise AdvisorValidationError("Invalid resource-history summary cadence")
+        object.__setattr__(self, "cadence_seconds", float(self.cadence_seconds))
+        if self.peak_value is None:
+            if self.peak_observed_at is not None:
+                raise AdvisorValidationError("Peak timestamp requires peak value")
+        else:
+            if isinstance(self.peak_value, bool) or not isinstance(self.peak_value, (int, float)) or not math.isfinite(float(self.peak_value)) or not 0 <= float(self.peak_value) <= 100:
+                raise AdvisorValidationError("Invalid resource-history summary peak")
+            if not isinstance(self.peak_observed_at, datetime) or self.peak_observed_at.tzinfo is None or self.peak_observed_at.utcoffset() is None:
+                raise AdvisorValidationError("Peak value requires timezone-aware peak timestamp")
+            object.__setattr__(self, "peak_value", float(self.peak_value))
+            object.__setattr__(self, "peak_observed_at", self.peak_observed_at.astimezone(timezone.utc))
+
+    def canonical(self) -> dict[str, Any]:
+        return {
+            "metric": self.metric,
+            "state": self.state.value,
+            "valid_point_count": self.valid_point_count,
+            "temporal_span_seconds": self.temporal_span_seconds,
+            "cadence_seconds": self.cadence_seconds,
+            "peak_value": self.peak_value,
+            "peak_observed_at": self.peak_observed_at.isoformat() if self.peak_observed_at else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AdvisorResponse:
     schema_version: str
     request_id: str
@@ -621,6 +677,7 @@ class AdvisorResponse:
     uncertainties: tuple[Uncertainty, ...] = ()
     provenance: tuple[ProvenanceReference, ...] = ()
     evidence_coverage: tuple[Coverage, ...] = ()
+    resource_history_summary: tuple[ResourceHistorySummary, ...] = ()
     links: tuple[SafeLink, ...] = ()
     next_cursor: str | None = None
 
@@ -671,6 +728,13 @@ class AdvisorResponse:
                 raise AdvisorValidationError("Recommendation references response data outside envelope")
         coverage = tuple(sorted(self.evidence_coverage, key=lambda item: item.source_id))
         object.__setattr__(self, "evidence_coverage", coverage)
+        summaries = tuple(self.resource_history_summary)
+        if len(summaries) > MAX_RESOURCE_HISTORY_SUMMARIES or any(not isinstance(item, ResourceHistorySummary) for item in summaries):
+            raise AdvisorValidationError("Invalid resource-history summary collection")
+        if len({item.metric for item in summaries}) != len(summaries):
+            raise AdvisorValidationError("Duplicate resource-history summary metric")
+        metric_order = {metric: index for index, metric in enumerate(RESOURCE_HISTORY_METRICS)}
+        object.__setattr__(self, "resource_history_summary", tuple(sorted(summaries, key=lambda item: metric_order[item.metric])))
         object.__setattr__(self, "links", _links(self.links))
         if self.next_cursor is not None:
             object.__setattr__(self, "next_cursor", _normalize_identifier(self.next_cursor, "next cursor"))
@@ -695,6 +759,7 @@ class AdvisorResponse:
             "uncertainties": [item.canonical() for item in self.uncertainties],
             "provenance": [item.canonical() for item in self.provenance],
             "evidence_coverage": [item.canonical() for item in self.evidence_coverage],
+            "resource_history_summary": [item.canonical() for item in self.resource_history_summary],
             "links": [item.canonical() for item in self.links],
             "next_cursor": self.next_cursor,
         }
@@ -724,6 +789,8 @@ __all__ = [
     "ProvenanceReference",
     "Recommendation",
     "RecommendationStatus",
+    "ResourceHistorySummary",
+    "ResourceHistorySummaryState",
     "SafeLink",
     "Uncertainty",
     "UncertaintyKind",

@@ -2,6 +2,7 @@ const MAX_FINDINGS = 50;
 const MAX_RECOMMENDATIONS = 25;
 const MAX_UNCERTAINTIES = 32;
 const MAX_COVERAGE = 32;
+const MAX_HISTORY_SUMMARY = 3;
 const MAX_FIELDS = 10;
 
 function freeze(value) {
@@ -194,6 +195,7 @@ export function buildAdvisorPresentation(response) {
     recommendations: response.recommendations.slice(0, MAX_RECOMMENDATIONS),
     uncertainties: response.uncertainties.slice(0, MAX_UNCERTAINTIES),
     evidence_coverage: response.evidence_coverage.slice(0, MAX_COVERAGE),
+    resource_history_summary: Array.isArray(response.resource_history_summary) ? response.resource_history_summary.slice(0, MAX_HISTORY_SUMMARY) : [],
   });
 }
 
@@ -209,6 +211,16 @@ function escapeHtml(value) {
 
 function statusClass(status) {
   return ['fresh', 'partial', 'stale', 'unavailable', 'error'].includes(status) ? status : 'unknown';
+}
+
+function historySummaryStateLabel(state) {
+  return {
+    complete: 'Complete evidence',
+    incomplete: 'Incomplete evidence',
+    unavailable: 'Evidence unavailable',
+    stale: 'Stale evidence',
+    invalid: 'Invalid evidence',
+  }[state] || 'Evidence state unknown';
 }
 
 function responseMarkup(view) {
@@ -231,8 +243,16 @@ function responseMarkup(view) {
   const coverageMarkup = view.evidence_coverage.length
     ? view.evidence_coverage.map((coverage) => `<div class="advisor-coverage-row"><span>${escapeHtml(coverage.source_id)}</span><strong>${escapeHtml(coverage.observed)} / ${escapeHtml(coverage.expected)}</strong><small>stale ${escapeHtml(coverage.stale)} · unavailable ${escapeHtml(coverage.unavailable)} · invalid ${escapeHtml(coverage.invalid)} · omitted ${escapeHtml(coverage.omitted)}</small></div>`).join('')
     : '<div class="empty">No coverage records in this fixture.</div>';
+  const historySummaryMarkup = view.resource_history_summary.length
+    ? view.resource_history_summary.map((summary) => {
+      const peak = summary.peak_value == null
+        ? 'peak unavailable'
+        : `peak ${escapeHtml(summary.peak_value)}% at ${escapeHtml(summary.peak_observed_at)}`;
+      return `<article class="advisor-item" data-resource-history-metric="${escapeHtml(summary.metric)}"><div class="advisor-item-head"><strong>${escapeHtml(summary.metric)}</strong><span class="badge ${statusClass(summary.state)}">${escapeHtml(historySummaryStateLabel(summary.state))}</span></div><p>${escapeHtml(summary.valid_point_count)} valid points across ${escapeHtml(summary.temporal_span_seconds)} seconds at ${escapeHtml(summary.cadence_seconds)} seconds cadence.</p><small>${peak}</small></article>`;
+    }).join('')
+    : '<div class="empty">No resource-history summary supplied.</div>';
 
-  return `<div class="advisor-state" aria-live="polite"><div class="advisor-response-meta"><span class="badge ${statusClass(view.status)}">${escapeHtml(view.status)}</span><span>${view.available ? 'Evidence available' : 'Evidence unavailable'}</span><span>Scope: ${escapeHtml(view.scope)}</span></div><p class="subtle">Request ${escapeHtml(view.request_id)} · Evaluation ${escapeHtml(view.evaluation_time)} · Generated ${escapeHtml(view.generated_at)}</p><div class="advisor-grid"><section class="advisor-panel"><div class="section-head"><div><h3>Findings</h3><p>Presented exactly as supplied by the advisor response.</p></div><span class="pill">${view.findings.length}</span></div>${findingMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Recommendations</h3><p>Read-only explanatory output; no action controls.</p></div><span class="pill">${view.recommendations.length}</span></div>${recommendationMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Uncertainty</h3><p>Freshness, availability, invalidity, and coverage limits remain visible.</p></div><span class="pill">${view.uncertainties.length}</span></div>${uncertaintyMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Evidence coverage</h3><p>Bounded source counts from the response.</p></div><span class="pill">${view.evidence_coverage.length}</span></div>${coverageMarkup}</section></div></div>`;
+  return `<div class="advisor-state" aria-live="polite"><div class="advisor-response-meta"><span class="badge ${statusClass(view.status)}">${escapeHtml(view.status)}</span><span>${view.available ? 'Evidence available' : 'Evidence unavailable'}</span><span>Scope: ${escapeHtml(view.scope)}</span></div><p class="subtle">Request ${escapeHtml(view.request_id)} · Evaluation ${escapeHtml(view.evaluation_time)} · Generated ${escapeHtml(view.generated_at)}</p><div class="advisor-grid"><section class="advisor-panel"><div class="section-head"><div><h3>Findings</h3><p>Presented exactly as supplied by the advisor response.</p></div><span class="pill">${view.findings.length}</span></div>${findingMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Recommendations</h3><p>Read-only explanatory output; no action controls.</p></div><span class="pill">${view.recommendations.length}</span></div>${recommendationMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Uncertainty</h3><p>Freshness, availability, invalidity, and coverage limits remain visible.</p></div><span class="pill">${view.uncertainties.length}</span></div>${uncertaintyMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Evidence coverage</h3><p>Bounded source counts from the response.</p></div><span class="pill">${view.evidence_coverage.length}</span></div>${coverageMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Resource history</h3><p>Evidence sufficiency is separate from findings and recommendations.</p></div><span class="pill">${view.resource_history_summary.length}</span></div>${historySummaryMarkup}</section></div></div>`;
 }
 
 export function renderAdvisorResponse(root, response, label = 'live') {

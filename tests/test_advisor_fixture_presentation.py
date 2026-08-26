@@ -108,6 +108,64 @@ console.log(JSON.stringify({
     assert result["recommendation"]["evidence_refs"] == ["telemetry-history-memory-001"]
 
 
+def test_resource_history_summary_is_bounded_and_separate_from_findings() -> None:
+    result = _node(
+        """
+const elements = new Map([
+  ['[data-advisor-fixture-body]', { innerHTML: '' }],
+  ['[data-advisor-fixture-label]', { textContent: '' }],
+]);
+const response = {
+  ...fixture.getAdvisorFixture('empty'),
+  resource_history_summary: [
+    { metric: 'disk_percent', state: 'complete', valid_point_count: 6, temporal_span_seconds: 300, cadence_seconds: 60, peak_value: 56.1, peak_observed_at: '2026-08-26T13:35:10+00:00' },
+    { metric: 'cpu_percent', state: 'complete', valid_point_count: 6, temporal_span_seconds: 300, cadence_seconds: 60, peak_value: 35.1, peak_observed_at: '2026-08-26T13:35:10+00:00' },
+    { metric: 'memory_percent', state: 'complete', valid_point_count: 6, temporal_span_seconds: 300, cadence_seconds: 60, peak_value: 56.4, peak_observed_at: '2026-08-26T13:35:10+00:00' },
+  ],
+};
+const presentation = fixture.renderAdvisorResponse({ querySelector: (selector) => elements.get(selector) }, response, 'live');
+console.log(JSON.stringify({
+  metrics: presentation.resource_history_summary.map((item) => item.metric),
+  html: elements.get('[data-advisor-fixture-body]').innerHTML,
+  findings: presentation.findings.length,
+  recommendations: presentation.recommendations.length,
+}));
+"""
+    )
+    assert result["metrics"] == ["disk_percent", "cpu_percent", "memory_percent"]
+    assert 'data-resource-history-metric="cpu_percent"' in result["html"]
+    assert "Complete evidence" in result["html"]
+    assert "35.1" in result["html"]
+    assert "Evidence sufficiency is separate from findings and recommendations." in result["html"]
+    assert result["findings"] == 0
+    assert result["recommendations"] == 0
+
+
+def test_degraded_resource_history_summary_states_remain_explicit() -> None:
+    result = _node(
+        """
+const elements = new Map([
+  ['[data-advisor-fixture-body]', { innerHTML: '' }],
+  ['[data-advisor-fixture-label]', { textContent: '' }],
+]);
+const response = {
+  ...fixture.getAdvisorFixture('empty'),
+  resource_history_summary: [
+    { metric: 'cpu_percent', state: 'incomplete', valid_point_count: 5, temporal_span_seconds: 240, cadence_seconds: 60, peak_value: 35, peak_observed_at: '2026-08-26T13:34:10+00:00' },
+    { metric: 'memory_percent', state: 'unavailable', valid_point_count: 0, temporal_span_seconds: 0, cadence_seconds: 60, peak_value: null, peak_observed_at: null },
+    { metric: 'disk_percent', state: 'invalid', valid_point_count: 0, temporal_span_seconds: 0, cadence_seconds: 60, peak_value: null, peak_observed_at: null },
+  ],
+};
+fixture.renderAdvisorResponse({ querySelector: (selector) => elements.get(selector) }, response, 'live');
+console.log(JSON.stringify({ html: elements.get('[data-advisor-fixture-body]').innerHTML }));
+"""
+    )
+    assert "Incomplete evidence" in result["html"]
+    assert "Evidence unavailable" in result["html"]
+    assert "Invalid evidence" in result["html"]
+    assert "maximum_gap" not in result["html"]
+
+
 def test_empty_and_degraded_states_remain_visible() -> None:
     result = _node(
         """

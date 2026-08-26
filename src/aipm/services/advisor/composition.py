@@ -9,12 +9,19 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any
 
-from aipm.models.advisor import AdvisorResponse, AdvisorScope, AdvisorValidationError, ProvenanceReference
+from aipm.models.advisor import (
+    AdvisorResponse,
+    AdvisorScope,
+    AdvisorValidationError,
+    MAX_RESOURCE_HISTORY_SUMMARIES,
+    ProvenanceReference,
+    ResourceHistorySummary,
+)
 from aipm.services.advisor.normalizer import EvidenceNormalizer
 from aipm.services.advisor.rules import AdvisorRuleEngine, ResourceHistoryEnvelope
 
@@ -92,6 +99,7 @@ class AdvisorCompositionRequest:
     expected_sources: tuple[str, ...] | Mapping[str, int] = ()
     provenance: tuple[ProvenanceReference | Mapping[str, Any], ...] = ()
     history_envelopes: tuple[ResourceHistoryEnvelope, ...] = ()
+    resource_history_summary: tuple[ResourceHistorySummary, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.request_id, str) or _REQUEST_ID_RE.fullmatch(self.request_id) is None:
@@ -112,6 +120,11 @@ class AdvisorCompositionRequest:
         if any(not isinstance(envelope, ResourceHistoryEnvelope) for envelope in self.history_envelopes):
             raise CompositionError("history_envelopes must contain typed immutable envelopes")
         object.__setattr__(self, "history_envelopes", tuple(self.history_envelopes))
+        if not isinstance(self.resource_history_summary, (tuple, list)) or len(self.resource_history_summary) > MAX_RESOURCE_HISTORY_SUMMARIES:
+            raise CompositionError("resource_history_summary must be a bounded sequence")
+        if any(not isinstance(summary, ResourceHistorySummary) for summary in self.resource_history_summary):
+            raise CompositionError("resource_history_summary must contain typed immutable values")
+        object.__setattr__(self, "resource_history_summary", tuple(self.resource_history_summary))
 
 
 def compose_advisor(request: AdvisorCompositionRequest) -> AdvisorResponse:
@@ -126,12 +139,13 @@ def compose_advisor(request: AdvisorCompositionRequest) -> AdvisorResponse:
         expected_sources=request.expected_sources,
         provenance=request.provenance,
     )
-    return AdvisorRuleEngine().evaluate(
+    response = AdvisorRuleEngine().evaluate(
         bundle,
         request_id=request.request_id,
         evaluation_time=request.evaluation_time,
         history_envelopes=request.history_envelopes,
     )
+    return replace(response, resource_history_summary=request.resource_history_summary)
 
 
 __all__ = [

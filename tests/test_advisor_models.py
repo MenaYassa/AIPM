@@ -20,6 +20,8 @@ from aipm.models.advisor import (
     ProvenanceReference,
     Recommendation,
     RecommendationStatus,
+    ResourceHistorySummary,
+    ResourceHistorySummaryState,
     SafeLink,
     Uncertainty,
     UncertaintyKind,
@@ -301,6 +303,39 @@ def test_recommendation_must_reference_existing_finding_and_its_evidence() -> No
         )
     with pytest.raises(AdvisorValidationError):
         recommendation(evidence_refs=("not-finding-evidence",)).validate_against_findings((finding(),))
+
+
+def test_resource_history_summary_is_bounded_ordered_and_peak_paired() -> None:
+    peak_at = EVALUATION_TIME - timedelta(seconds=30)
+    summaries = (
+        ResourceHistorySummary("disk_percent", ResourceHistorySummaryState.COMPLETE, 6, 300, 60, 56.1, peak_at),
+        ResourceHistorySummary("cpu_percent", "complete", 6, 300, 60, 35.1, peak_at),
+        ResourceHistorySummary("memory_percent", ResourceHistorySummaryState.COMPLETE, 6, 300, 60, 56.4, peak_at),
+    )
+    response = AdvisorResponse(
+        schema_version="1.0",
+        request_id="request-summary",
+        available=True,
+        status=AdvisorStatus.FRESH,
+        evaluation_time=EVALUATION_TIME,
+        generated_at=EVALUATION_TIME,
+        freshness_deadline=EVALUATION_TIME + timedelta(minutes=5),
+        scope=AdvisorScope.HOST,
+        resource_history_summary=summaries,
+    )
+
+    assert [item.metric for item in response.resource_history_summary] == ["cpu_percent", "memory_percent", "disk_percent"]
+    assert response.resource_history_summary[0].peak_value == 35.1
+    assert response.resource_history_summary[0].peak_observed_at == peak_at
+    assert response.canonical()["resource_history_summary"][0]["metric"] == "cpu_percent"
+    assert response.stable_id == response.stable_id
+
+    with pytest.raises(AdvisorValidationError):
+        ResourceHistorySummary("network_percent", "complete", 6, 300, 60)
+    with pytest.raises(AdvisorValidationError):
+        ResourceHistorySummary("cpu_percent", "complete", 129, 300, 60)
+    with pytest.raises(AdvisorValidationError):
+        ResourceHistorySummary("cpu_percent", "complete", 6, 300, 60, 35.1)
 
 
 def test_response_orders_outputs_and_enforces_availability_state() -> None:

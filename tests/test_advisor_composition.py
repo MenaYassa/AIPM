@@ -6,7 +6,14 @@ from types import MappingProxyType
 
 import pytest
 
-from aipm.models.advisor import AdvisorScope, AdvisorStatus, EvidenceState, UncertaintyKind
+from aipm.models.advisor import (
+    AdvisorScope,
+    AdvisorStatus,
+    EvidenceState,
+    ResourceHistorySummary,
+    ResourceHistorySummaryState,
+    UncertaintyKind,
+)
 from aipm.services.advisor.composition import (
     AdvisorCompositionRequest,
     CompositionError,
@@ -39,6 +46,28 @@ def request(observations: list[dict], *, evaluation_time: datetime = EVALUATION,
         observations=observations,
         **kwargs,
     )
+
+
+def test_resource_history_summary_is_transport_only_and_preserves_rule_output() -> None:
+    summary = ResourceHistorySummary(
+        metric="cpu_percent",
+        state=ResourceHistorySummaryState.COMPLETE,
+        valid_point_count=6,
+        temporal_span_seconds=300.0,
+        cadence_seconds=60.0,
+        peak_value=35.1,
+        peak_observed_at=EVALUATION,
+    )
+    req = request([observation()], resource_history_summary=(summary,))
+    response = compose_advisor(req)
+    baseline = compose_advisor(request([observation()]))
+
+    assert req.resource_history_summary == (summary,)
+    assert response.resource_history_summary == (summary,)
+    assert response.findings == baseline.findings
+    assert response.recommendations == baseline.recommendations
+    assert response.uncertainties == baseline.uncertainties
+    assert response.evidence_coverage == baseline.evidence_coverage
 
 
 def test_successful_raw_observation_composes_to_advisor_response() -> None:
@@ -79,6 +108,15 @@ def test_request_is_immutable_and_snapshots_nested_observation_containers() -> N
     assert dict(req.observations[0]["fields"]) == {"service_status": "healthy"}
     with pytest.raises(AttributeError):
         req.request_id = "changed"  # type: ignore[misc]
+
+
+def test_resource_history_summary_request_is_bounded_and_typed() -> None:
+    summary = ResourceHistorySummary("cpu_percent", "incomplete", 5, 240.0, 60.0)
+    assert request([observation()], resource_history_summary=[summary]).resource_history_summary == (summary,)
+    with pytest.raises(CompositionError):
+        request([observation()], resource_history_summary=(summary,) * 4)
+    with pytest.raises(CompositionError):
+        request([observation()], resource_history_summary=({"metric": "cpu_percent"},))  # type: ignore[arg-type]
 
 
 def test_request_bounds_and_malformed_observations_fail_closed() -> None:

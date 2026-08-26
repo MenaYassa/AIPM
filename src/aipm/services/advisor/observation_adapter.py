@@ -13,7 +13,12 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from aipm.models.advisor import AdvisorScope, EvidenceState
+from aipm.models.advisor import (
+    AdvisorScope,
+    EvidenceState,
+    ResourceHistorySummary,
+    ResourceHistorySummaryState,
+)
 from aipm.repositories.telemetry.read_snapshot import (
     RESOURCE_METRICS,
     SnapshotCompleteness,
@@ -130,6 +135,31 @@ def _history_envelope(
     )
 
 
+def _history_summary(
+    snapshot: TelemetrySnapshotExport,
+    envelope: ResourceHistoryEnvelope,
+    metadata: TelemetryMetricCompleteness,
+) -> ResourceHistorySummary:
+    if snapshot.invalid_source_rows:
+        state = ResourceHistorySummaryState.INVALID
+    elif metadata.status is SnapshotCompleteness.SUFFICIENT:
+        state = ResourceHistorySummaryState.COMPLETE
+    elif not envelope.points:
+        state = ResourceHistorySummaryState.UNAVAILABLE
+    else:
+        state = ResourceHistorySummaryState.INCOMPLETE
+    peak = max(envelope.points, key=lambda point: point.value, default=None)
+    return ResourceHistorySummary(
+        metric=envelope.metric,
+        state=state,
+        valid_point_count=len(envelope.points),
+        temporal_span_seconds=envelope.coverage_seconds,
+        cadence_seconds=envelope.cadence_seconds,
+        peak_value=peak.value if peak is not None else None,
+        peak_observed_at=peak.observed_at if peak is not None else None,
+    )
+
+
 def adapt_telemetry_snapshot(
     snapshot: TelemetrySnapshotExport,
     *,
@@ -194,6 +224,10 @@ def adapt_telemetry_snapshot(
         )
         for metric in RESOURCE_METRICS
     )
+    resource_history_summary = tuple(
+        _history_summary(snapshot, envelope, metadata_by_metric[envelope.metric])
+        for envelope in envelopes
+    )
     expected_count = max(1, len(snapshot.sample_runs)) * len(RESOURCE_METRICS)
     return AdvisorCompositionRequest(
         request_id=request_id,
@@ -202,6 +236,7 @@ def adapt_telemetry_snapshot(
         scope=scope,
         expected_sources={"history": expected_count},
         history_envelopes=envelopes,
+        resource_history_summary=resource_history_summary,
     )
 
 
