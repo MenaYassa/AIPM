@@ -46,7 +46,7 @@ The following classification is the design baseline for MC-6. **EXISTS** means t
 | Web UI navigation | EXTEND | The existing single page is retained and progressively organized into sections/routes without an immediate framework rewrite. |
 | SSH/TUI | NEW | A Typer/Rich read-only `aipm mission-control` or `aipm dashboard tui` surface should consume the same façades and mappers. |
 | Remediation and operations | FUTURE | Start/stop/restart, Compose changes, Git updates, backups/restores, systemd mutation, shell, Docker exec, and AI-directed actions are not part of the first MC-6 implementation. |
-| Authentication and authorization | FUTURE / PRECONDITION | Loopback plus SSH port forwarding is the first access posture. A non-loopback deployment requires an independently approved authentication and authorization boundary. |
+| Authentication and authorization | EDGE-PROTECTED / APPLICATION IDENTITY FUTURE | Cloudflare Access is the selected edge authentication boundary for the documented public ingress. AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust; stronger identity-aware behavior remains separately gated. |
 | AI Agent | FIXTURE-ONLY PRESENTATION / FUTURE CONTROL | The existing `#/ai-agent` route presents bounded non-live response fixtures; agent planning, tool use, approvals, action execution, and audit still require a separate control-plane design. |
 
 ## Target logical architecture
@@ -115,7 +115,7 @@ The read-only guarantee has multiple independent layers and MC-6 must preserve a
 3. **Filesystem-layer restriction.** The target service must fail closed when the database directory and database sidecars are not protected against writes. `ProtectSystem=strict`, `ProtectHome=read-only`, `ReadOnlyPaths=...`, and the validated file-mode boundary remain required.
 4. **Process/service-layer restriction.** The dashboard remains loopback-only and uses `NoNewPrivileges=true`, `PrivateTmp=true`, and `RestrictSUIDSGID=true`. The unsupported `CapabilityBoundingSet=` directive remains absent.
 5. **Response-layer restriction.** Mappers return safe structured states. Secrets, tokens, authorization material, destination values, environment variable values, raw command output containing credentials, and unnecessary private paths are redacted or omitted.
-6. **Operational-layer restriction.** No public ingress, Cloudflare mutation, notification activation, worker startup, Docker mutation, systemd mutation, or live database backup/checkpoint operation is part of MC-6 design work.
+6. **Operational-layer restriction.** No new public ingress, Cloudflare mutation, notification activation, worker startup, Docker mutation, systemd mutation, or live database backup/checkpoint operation is part of MC-6 design work. The existing public path is protected by the selected Cloudflare Access edge boundary and remains infrastructure-owned.
 
 ## Real-time and history strategy
 
@@ -135,7 +135,7 @@ The HTTP mapper and TUI renderer may differ in presentation shape, but both must
 
 The AIPM dashboard remains loopback-bound on `127.0.0.1:8787`. The current public path is an existing bridge-bound ingress: Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`. The public hostname is `vpanel.03092017.xyz`; nginx forwards only to the loopback dashboard.
 
-This existing ingress does not grant AIPM application authority, credential access, or action routes. Any future ingress or authentication change requires explicit identity, authorization, threat modeling, rate limits, session controls, and secret-safe error handling. No browser-held provider credential is acceptable.
+Cloudflare Access is the selected and confirmed authentication boundary for this existing public ingress. AIPM relies on the private edge protection and does not verify Cloudflare JWTs or identity headers, provide identity middleware, manage browser sessions, or trust proxy headers. The edge boundary does not grant AIPM application authority, credential access, or action routes. Stronger identity-aware application behavior remains a separate future decision and would require explicit identity, authorization, threat modeling, rate limits, session/CSRF controls where applicable, and secret-safe error handling. No browser-held provider credential is acceptable.
 
 ## Deployment topology
 
@@ -184,7 +184,7 @@ A React/Vite migration is not the first implementation step. It may be reconside
 4. **Storage:** reuse the existing SQLite database and repositories; no second telemetry or event store.
 5. **Systemd:** introduce a read-only observation adapter as NEW, but keep systemd mutation entirely FUTURE.
 6. **Logs:** introduce bounded, redacted, read-only log access as NEW; no arbitrary shell execution.
-7. **Access:** the dashboard remains loopback-bound; the existing public path uses a bridge-bound nginx listener at `172.20.0.1:8788` forwarding to `127.0.0.1:8787`. Any new ingress or authentication change remains separately gated.
+7. **Access:** the dashboard remains loopback-bound; the existing public path uses a bridge-bound nginx listener at `172.20.0.1:8788` forwarding to `127.0.0.1:8787`, with Cloudflare Access as the selected edge authentication boundary. AIPM relies on that private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Any stronger identity-aware application behavior remains separately gated.
 8. **Actions:** all writes and remediation are FUTURE and require a dedicated approval/control plane.
 9. **TUI:** build after shared façade contracts stabilize; share backend/core contracts, not HTTP scraping.
 10. **Delivery:** implement in small, independently testable vertical slices with explicit rollback at every stage.
@@ -209,7 +209,7 @@ The MC-6 architecture described above is implemented through **MC-6.8** plus MC-
 
 MC-6.13 Phase 2/3/4A uses an isolated pure advisor domain boundary over immutable evidence and caller-supplied context; Phase 4B adds only a private authenticated transport adapter over that boundary; Phase 4C adds only a fixture-driven, non-live presentation on the existing dashboard route; and Phase 4D adds only the bounded telemetry export and canonical observation adapter. The Phase 4C surface does not access SQLite, database paths, WAL/SHM, filesystem, network, current clocks, randomness, providers, actions, approvals, or runtime control, and does not invoke Phase 4A or Phase 3. The Phase 4D adapter does not access those browser/runtime authorities either. No live observation poller, second telemetry/event store, provider ownership layer, advisor evaluation path, LLM integration, or action path was introduced.
 
-Phase 4B.1 remains blocked pending a separate human decision on browser authentication/session semantics. The fixture-only Phase 4C presentation is landed; live Phase 4C orchestration and Phase 4E remain future, unauthorized, and not started. Phase 4B remains private, authenticated, read-only, and transport-only; Phase 4D remains private-VPS, bounded, typed, and non-runtime.
+Phase 4B.1 records the selected Cloudflare Access edge-only boundary. AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. The fixture-only Phase 4C presentation is landed; live Phase 4C orchestration, stronger application identity behavior, and Phase 4E remain future, unauthorized, and not started. Phase 4B remains private, authenticated, read-only, and transport-only; Phase 4D remains private-VPS, bounded, typed, and non-runtime.
 
 The deployment architecture remains separate from advisor implementation. The dashboard is loopback-bound at `127.0.0.1:8787`; the existing public path is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`. Notifications remain disabled, Cloudflared remains Docker-owned, and any future runtime or ingress change requires separate approval. Phase 4C is only a non-live fixture presentation; Phase 4D does not provide live dashboard operation, live polling, API/UI integration, LLM/provider functionality, actions, or approvals. The preserved Gate 2.1 harness SHA-256 is `9e12cdc01f901381ff34b16dd68c11a14cf1158e1c32bbde928bce13c6c238e7`.
 

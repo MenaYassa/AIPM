@@ -4,7 +4,7 @@
 
 This analysis compares the current MC-5 API surface with the MC-6 cockpit vision. MC-6.1 through MC-6.8 and MC-6.13 Phases 2/3/4A/4B, fixture-only 4C presentation, and 4D are now implemented; this document remains the compatibility and gap reference for the completed surface and remaining milestones. The current checkpoint is `e8f0b12d7473e3c021c536e738c8b3a414d116ad`.
 
-The first MC-6 API release remains read-only and preserves all existing route names and response semantics. The private authenticated `POST /api/advisor/evaluate` boundary is landed in MC-6.13 Phase 4B. It accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. It is not public and does not collect live observations. Phase 4D is landed as a telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`; it does not add a route, dashboard integration, live polling, or runtime collection. Other POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoints remain **FUTURE**. MC-6.13 Phases 2/3/4A remain pure domain/composition layers; the Phase 4C fixture presentation is landed on the existing dashboard route but live Phase 4C API/UI orchestration, Phase 4B.1, and Phase 4E remain separate future decisions.
+The first MC-6 API release remains read-only and preserves all existing route names and response semantics. The private authenticated `POST /api/advisor/evaluate` boundary is landed in MC-6.13 Phase 4B. It accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. It is not public and does not collect live observations. Phase 4D is landed as a telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`; it does not add a route, dashboard integration, live polling, or runtime collection. Other POST, PUT, PATCH, DELETE, acknowledgement, activation, retry, restart, update, shell, or remediation endpoints remain **FUTURE**. MC-6.13 Phases 2/3/4A remain pure domain/composition layers; the Phase 4C fixture presentation is landed on the existing dashboard route. Cloudflare Access is the selected edge authentication boundary for the documented public ingress; AIPM relies on private edge protection and does not verify Cloudflare JWTs or identity headers. Live Phase 4C API/UI orchestration and Phase 4E remain separate future decisions, while stronger application-level identity behavior remains a separate decision.
 
 ## Current API inventory
 
@@ -179,9 +179,9 @@ The settings projection must return booleans, bounded numeric values, safe enum 
 
 ### Authentication and future actions
 
-**Classification: FUTURE.**
+**Classification: EDGE-PROTECTED / APPLICATION IDENTITY FUTURE.**
 
-The current loopback-only dashboard is suitable for local access or an operator SSH port-forward. No new authentication API is required for the first read-only local release. Public exposure requires a separate authenticated ingress and authorization design.
+Cloudflare Access is the selected and confirmed authentication boundary for the documented public ingress. AIPM relies on the private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. The existing private `POST /api/advisor/evaluate` route remains a bounded transport boundary; stronger identity-aware application behavior, if later required, needs a separate decision and authorization.
 
 Future action routes must not be designed as ordinary extensions to current GET façades. They require:
 
@@ -268,4 +268,4 @@ The TUI may use direct façades for local efficiency. It should not make HTTP ca
 - **EXTEND:** stable filters, cursor pagination, server/project/Docker detail, history comparisons, incident evidence, notification summary, and effective settings posture.
 - **NEW:** shared TUI adapter and any later additive detail projections not already delivered.
 - **LANDED OUTSIDE API:** Phase 4D telemetry-owned bounded export and transport-neutral observation adapter for the approved CPU, memory, and disk slice; it ends at `AdvisorCompositionRequest` and is not a public route or dashboard feature.
-**FUTURE:** public advisor exposure, Phase 4B.1 authentication/session work, live Phase 4C API/UI orchestration, action routes, public authentication/ingress changes, SSE/WebSockets, notification activation, remediation, and LLM/provider integration. The private Phase 4B route and fixture-only Phase 4C presentation are landed but remain non-public, read-only, and non-runtime.
+**FUTURE:** public advisor exposure, stronger application identity/session behavior, live Phase 4C API/UI orchestration, action routes, new authentication/ingress changes beyond the selected Cloudflare Access edge boundary, SSE/WebSockets, notification activation, remediation, and LLM/provider integration. The private Phase 4B route remains behind the selected edge protection, and the fixture-only Phase 4C presentation remains non-public, read-only, and non-runtime.

@@ -7,7 +7,7 @@
 
 ## Current status
 
-MC-6.13 Phases 2, 3, 4A, 4B, 4D, and the fixture-only Phase 4C presentation are complete, reviewed, committed, and pushed. Phase 4B establishes a private authenticated read-only `POST /api/advisor/evaluate` boundary that accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, reconstructs typed history envelopes, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. Phase 4D adds a private-VPS, telemetry-owned bounded snapshot/export and a transport-neutral observation adapter for the approved CPU, memory, and disk slice. The adapter preserves configured `host_id`, caller-owned `request_id` and timezone-aware `evaluation_time`, source timestamps, deterministic evidence/history identity, and fail-closed invalid/unavailable/incomplete states; it stops at `AdvisorCompositionRequest` and does not invoke Phase 4A or Phase 3. Phase 4C adds only a fixture-driven presentation on the existing `#/ai-agent` dashboard route: it uses fixed bounded responses, has no live advisor API or browser authentication, and does not collect telemetry or evaluate advice. Phase 4B.1 remains blocked pending a human decision; live Phase 4C orchestration and Phase 4E remain future and separately authorized.
+MC-6.13 Phases 2, 3, 4A, 4B, 4D, and the fixture-only Phase 4C presentation are complete, reviewed, committed, and pushed. Phase 4B establishes a private authenticated read-only `POST /api/advisor/evaluate` boundary that accepts only bounded caller-supplied input, fails closed when authentication is unavailable or rejected, reconstructs typed history envelopes, delegates directly to Phase 4A, and returns the existing `AdvisorResponse`. Phase 4D adds a private-VPS, telemetry-owned bounded snapshot/export and a transport-neutral observation adapter for the approved CPU, memory, and disk slice. The adapter preserves configured `host_id`, caller-owned `request_id` and timezone-aware `evaluation_time`, source timestamps, deterministic evidence/history identity, and fail-closed invalid/unavailable/incomplete states; it stops at `AdvisorCompositionRequest` and does not invoke Phase 4A or Phase 3. Phase 4C adds only a fixture-driven presentation on the existing `#/ai-agent` dashboard route: it uses fixed bounded responses, has no live advisor API or browser authentication, and does not collect telemetry or evaluate advice. Phase 4B.1 is decided as Cloudflare Access edge-only protection for the documented public hostname; AIPM does not verify Cloudflare JWTs or identity headers, and stronger identity-aware application behavior remains a separate future decision. Live Phase 4C orchestration and Phase 4E remain future and separately authorized.
 
 ### Phase 4C boundary
 
@@ -15,7 +15,13 @@ MC-6.13 Phases 2, 3, 4A, 4B, 4D, and the fixture-only Phase 4C presentation are 
 
 **LANDED BACKEND:** Telemetry owner bounded export → `TelemetrySnapshotExport` → Phase 4D observation adapter → `AdvisorCompositionRequest` → existing Phase 4A boundary. This backend chain is not called by the fixture presentation.
 
-**FUTURE/BLOCKED:** Authenticated browser/session boundary → live Phase 4C orchestration → explicitly authorized composition/evaluation. Phase 4B.1 remains blocked pending the required human decision; no browser authentication or live advisor integration is established by Phase 4C.
+**EDGE BOUNDARY:** Cloudflare Access protects the documented public ingress; AIPM relies on that private edge protection and does not implement JWT verification, identity middleware, sessions, or proxy-header trust.
+
+### Phase 4B.1 decision
+
+Cloudflare Access is the selected and confirmed authentication boundary for the documented public ingress. AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. This decision does not authorize live Phase 4C integration or stronger application-level identity behavior; either requires a separate decision.
+
+**FUTURE/BLOCKED:** Live Phase 4C orchestration and explicitly authorized composition/evaluation remain separate future work. The fixture presentation remains non-live and disconnected from the edge boundary.
 
 ```text
 MC6.13_PHASE2_REVIEW=PASS
@@ -36,7 +42,7 @@ MC6.13_PHASE4D_ADAPTER=COMPLETE
 MC6.13_PHASE4D_ADAPTER_COMMIT=d90d32f54edc5abf373ecd0308b4963e9a6cabcc
 MC6.13_PHASE4C=LANDED_FIXTURE_ONLY
 MC6.13_PHASE4C_COMMIT=e8f0b12d7473e3c021c536e738c8b3a414d116ad
-MC6.13_PHASE4B1=BLOCKED_PENDING_HUMAN_DECISION
+MC6.13_PHASE4B1=DECISION_RECORDED_EDGE_ONLY
 MC6.13_PHASE4E=NOT_STARTED
 ```
 
@@ -146,7 +152,7 @@ Final Phase 3 validation:
 
 ## Phase 4 status
 
-Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. `AdvisorCompositionRequest` validates bounded caller metadata and recursively snapshots raw mappings/sequences; `compose_advisor()` directly composes the existing Phase 2 normalizer with the Phase 3 rule engine and returns the existing `AdvisorResponse` without aggregation or semantic rewriting. Phase 4B is implemented, reviewed, committed, and pushed at `af1a10b` as a private authenticated read-only API transport boundary over Phase 4A. Phase 4D is implemented, reviewed, committed, and pushed in two commits: `f0ae4bb` provides the telemetry-owned bounded snapshot/export and `d90d32f` maps its approved CPU, memory, and disk payload into canonical advisor observations and `ResourceHistoryEnvelope` values, stopping at `AdvisorCompositionRequest`. Phase 4C is implemented, reviewed, committed, and pushed at `e8f0b12` as a fixture-only presentation on the existing dashboard route. It renders fixed normal, degraded, unavailable, invalid, incomplete, and transport-error response states without live collection, browser evaluation, polling, composition, rules, providers, actions, or approvals. Phase 4D remains backend-only and does not provide dashboard operation. Phase 4B.1 remains blocked pending a human decision; live Phase 4C orchestration and Phase 4E remain future, separately authorized work and must preserve the pure-domain boundary.
+Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. `AdvisorCompositionRequest` validates bounded caller metadata and recursively snapshots raw mappings/sequences; `compose_advisor()` directly composes the existing Phase 2 normalizer with the Phase 3 rule engine and returns the existing `AdvisorResponse` without aggregation or semantic rewriting. Phase 4B is implemented, reviewed, committed, and pushed at `af1a10b` as a private authenticated read-only API transport boundary over Phase 4A, behind the selected Cloudflare Access edge protection. Phase 4D is implemented, reviewed, committed, and pushed in two commits: `f0ae4bb` provides the telemetry-owned bounded snapshot/export and `d90d32f` maps its approved CPU, memory, and disk payload into canonical advisor observations and `ResourceHistoryEnvelope` values, stopping at `AdvisorCompositionRequest`. Phase 4C is implemented, reviewed, committed, and pushed at `e8f0b12` as a fixture-only presentation on the existing dashboard route. It renders fixed normal, degraded, unavailable, invalid, incomplete, and transport-error response states without live collection, browser evaluation, polling, composition, rules, providers, actions, or approvals. Phase 4D remains backend-only and does not provide dashboard operation. Phase 4B.1 records the selected Cloudflare Access edge-only decision; AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Live Phase 4C orchestration and Phase 4E remain future, separately authorized work and must preserve the pure-domain boundary.
 
 ## Phase 4B — private authenticated advisor evaluation API
 
@@ -183,7 +189,7 @@ MC6.13_PHASE4D_EXPORT_COMMIT=f0ae4bb79dd9370f0d6cc118df49a4d6c4b4b265
 MC6.13_PHASE4D_ADAPTER_COMMIT=d90d32f54edc5abf373ecd0308b4963e9a6cabcc
 MC6.13_PHASE4C=LANDED_FIXTURE_ONLY
 MC6.13_PHASE4C_COMMIT=e8f0b12d7473e3c021c536e738c8b3a414d116ad
-MC6.13_PHASE4B1=BLOCKED_PENDING_HUMAN_DECISION
+MC6.13_PHASE4B1=DECISION_RECORDED_EDGE_ONLY
 MC6.13_PHASE4E=NOT_STARTED
 MC6.13_RUNTIME_INTEGRATION=NOT_IMPLEMENTED
 MC6.13_API=PRIVATE_AUTHENTICATED_READ_ONLY

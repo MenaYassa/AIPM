@@ -30,7 +30,7 @@ The top-level navigation is organized by operational domain rather than by backe
 | History | EXISTS / EXTEND | Add chart comparison, range presets, downsampling, and freshness context. |
 | Notifications | EXISTS / EXTEND | Show safety posture, audit, metrics, channels, and policies without secrets or activation controls. |
 | Settings | EXTEND | Show sanitized effective settings and deployment posture; never expose raw configuration or credential values. |
-| AI Agent | LANDED / FIXTURE ONLY | Existing `#/ai-agent` route presents bounded deterministic advisor-response fixtures; live authenticated advisor integration remains separately blocked and unauthorized. |
+| AI Agent | LANDED / FIXTURE ONLY | Existing `#/ai-agent` route presents bounded deterministic advisor-response fixtures. The documented public ingress is protected by Cloudflare Access; live authenticated advisor integration remains separately blocked and unauthorized. |
 
 The desktop shell uses a left navigation rail or compact top navigation, a persistent status strip, a main content region, and a contextual detail drawer. On mobile widths, the rail becomes a menu and detail drawers become full-screen panels.
 
@@ -172,7 +172,7 @@ Settings are not editable. Raw YAML and environment values are never returned. A
 
 ### AI Agent
 
-The AI Agent page currently provides a fixture-only presentation on the existing `#/ai-agent` route. It renders bounded deterministic representative `AdvisorResponse` states—normal, no findings, unavailable, stale, invalid, incomplete, and safe HTTP 400/401/422/500-style transport states—with explicit non-live labeling. It must not be rendered as if an agent can act or as if the page reflects current VPS state. Live browser authentication/session handling, live advisor orchestration, evaluation, actions, approvals, and any execution sandbox remain future work requiring separate authorization.
+The AI Agent page currently provides a fixture-only presentation on the existing `#/ai-agent` route. It renders bounded deterministic representative `AdvisorResponse` states—normal, no findings, unavailable, stale, invalid, incomplete, and safe HTTP 400/401/422/500-style transport states—with explicit non-live labeling. It must not be rendered as if an agent can act or as if the page reflects current VPS state. The documented public ingress is protected by Cloudflare Access; AIPM does not implement browser authentication/session handling, JWT verification, or proxy-header trust. Live advisor orchestration, evaluation, actions, approvals, and any execution sandbox remain future work requiring separate authorization.
 
 ## Reusable UI components
 
@@ -295,7 +295,7 @@ The approved vanilla static architecture remains implemented through MC-6.8. The
 
 The frontend uses the existing hash router, shared state helpers, centralized scheduler, `/static` module mount, escaped rendering, and explicit fresh/stale/unavailable/error/empty/unknown semantics. MC-6.8 adds one bounded Logs scheduler resource, backend-owned source selection, visible truncation/redaction state, and no download, stream, lifecycle, acknowledgement, or mutation controls.
 
-MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API transport boundary; Phase 4C adds only a fixture-driven, non-live presentation on the existing `#/ai-agent` route; and Phase 4D adds only a private-VPS telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`. The Phase 4C fixture surface has no live polling scheduler, browser authentication, telemetry acquisition, LLM/provider surface, advisor evaluation, or action surface.
+MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API transport boundary behind the selected Cloudflare Access edge protection; Phase 4C adds only a fixture-driven, non-live presentation on the existing `#/ai-agent` route; and Phase 4D adds only a private-VPS telemetry-owned bounded export and transport-neutral adapter ending at `AdvisorCompositionRequest`. The Phase 4C fixture surface has no live polling scheduler, application-level browser authentication/session, telemetry acquisition, LLM/provider surface, advisor evaluation, or action surface. AIPM relies on private edge protection and does not verify the edge identity assertion.
 
 ## References
 
@@ -312,4 +312,4 @@ MC-6.13 Phase 2/3/4A add no UI; Phase 4B adds only a private authenticated API t
 - **EXISTS:** current Dashboard sections, service pulse, Docker/container overview, project inventory, history, event stream, Incident Room, notification safety, search/filtering, and refresh behavior.
 - **EXTEND:** navigation shell, detail views, charts, filtering, settings posture, accessibility, component extraction, and responsive behavior.
 - **NEW:** Systemd page, Logs page, shared scheduler module, bounded log UI, and future TUI presentation.
-**FUTURE/BLOCKED:** MC-6.13 Phase 4B.1 authentication/session work, live Phase 4C advisor orchestration/integration, public API exposure, action controls, new authentication or ingress changes, SSE/WebSockets, and any write-enabled settings or operations. The landed Phase 4C route is fixture-only; Phase 4B’s private API and Phase 4D’s private-VPS adapter are not browser features.
+**FUTURE/BLOCKED:** Stronger application-level identity/session work, live Phase 4C advisor orchestration/integration, public API exposure, action controls, new authentication or ingress changes beyond the selected Cloudflare Access edge boundary, SSE/WebSockets, and any write-enabled settings or operations. The landed Phase 4C route is fixture-only; Phase 4B’s private API and Phase 4D’s private-VPS adapter are not browser features.

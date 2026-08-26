@@ -118,7 +118,7 @@ ReadWritePaths=/var/lib/aipm
 WantedBy=multi-user.target
 ```
 
-The dashboard needs read access to the Docker socket to inspect containers. That permission is powerful. Prefer a dedicated host policy and a protected Cloudflare Access application over exposing the port directly to the internet.
+The dashboard needs read access to the Docker socket to inspect containers. That permission is powerful. The documented public hostname is protected by the confirmed Cloudflare Access edge boundary; retain a dedicated host policy and do not expose the dashboard port directly to the internet.
 
 ## Verification checklist
 
@@ -375,7 +375,7 @@ Event and incident retention is independent from high-frequency telemetry retent
 
 ## MC-4.5 production hardening
 
-MC-4.5 hardens notification retries, suppression windows, delivery claims, schema integrity, retention, UNKNOWN reconciliation, metrics, and startup validation. Review [`MC-4.5_PRODUCTION_RUNBOOK.md`](MC-4.5_PRODUCTION_RUNBOOK.md) before enabling notifications. The dashboard remains loopback-only by default; public access requires independently verified authenticated Cloudflare Access or equivalent ingress. No production Cloudflare or systemd mutation is performed by this milestone.
+MC-4.5 hardens notification retries, suppression windows, delivery claims, schema integrity, retention, UNKNOWN reconciliation, metrics, and startup validation. Review [`MC-4.5_PRODUCTION_RUNBOOK.md`](MC-4.5_PRODUCTION_RUNBOOK.md) before enabling notifications. The dashboard remains loopback-only by default; the documented public hostname is protected by the confirmed Cloudflare Access edge boundary. No production Cloudflare or systemd mutation is performed by this milestone.
 
 
 ## MC-2.1 Telemetry Performance & Sampling
@@ -391,11 +391,11 @@ Mission Control’s read-only cockpit implementation is complete through **MC-6.
 
 MC-6.4 was reconciled rather than duplicated because Server Intelligence was already delivered through MC-6.3. MC-6.6.1 through MC-6.6.3 refined association correctness, taxonomy, filtering, and health evidence. MC-6.7.1 reconciled the seven-entry Systemd registry: Cloudflared is Docker-owned and is not represented as Systemd unless a genuine allow-listed unit exists.
 
-MC-6.13 Phase 4C is landed only as a fixture-driven, non-live presentation on the existing `#/ai-agent` route. Phase 4B.1 remains blocked pending a human decision; live Phase 4C orchestration, browser authentication, telemetry acquisition, advisor evaluation, and Phase 4E remain future, unauthorized, and not started. Phase 4B is complete as a private authenticated, read-only transport boundary, and Phase 4D is complete as a bounded typed non-runtime adapter. Neither the fixture presentation nor the backend phases imply public exposure, live polling, LLM/provider functionality, actions, or approvals.
+MC-6.13 Phase 4C is landed only as a fixture-driven, non-live presentation on the existing `#/ai-agent` route. Cloudflare Access protects the documented public ingress, and AIPM relies on that private edge authentication boundary without implementing JWT verification, identity middleware, session storage, or proxy-header trust. Live Phase 4C orchestration, application-level identity behavior, telemetry acquisition, advisor evaluation, and Phase 4E remain future, unauthorized, and not started. Phase 4B is complete as a private authenticated, read-only transport boundary, and Phase 4D is complete as a bounded typed non-runtime adapter. Neither the fixture presentation nor the backend phases imply public exposure beyond the protected edge, live polling, LLM/provider functionality, actions, or approvals.
 
 ### Current operational gates
 
-Repository advisor work does not authorize or imply target-VPS application deployment. Runtime validation and any service rollout remain separate operational gates. The current dashboard ingress architecture is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`. The dashboard remains loopback-bound; Cloudflared/Docker configuration, credentials, live SQLite, and Systemd runtime changes are outside the MC-6.13 repository scope.
+Repository advisor work does not authorize or imply target-VPS application deployment. Runtime validation and any service rollout remain separate operational gates. The current dashboard ingress architecture is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`; Cloudflare Access is the confirmed edge authentication boundary for that public hostname. AIPM relies on the private edge protection and does not verify Cloudflare JWTs or identity headers. The dashboard remains loopback-bound; Cloudflared/Docker configuration, credentials, live SQLite, and Systemd runtime changes are outside the MC-6.13 repository scope.
 
 claims that Phase 4A or Phase 4B changed the host.
 

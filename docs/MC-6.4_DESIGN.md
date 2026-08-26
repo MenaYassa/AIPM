@@ -109,7 +109,7 @@ The classifications below describe the current repository after MC-6.3, not an i
 | Logs | **NEW, deferred** | Belongs to the later Logs milestone, not MC-6.4. |
 | Docker detail | **EXTEND, deferred** | Belongs to MC-6.5 in the roadmap. |
 | Project detail | **EXTEND, deferred** | Belongs to MC-6.6 in the roadmap. |
-| Authentication/public ingress | **FUTURE** | Separate security and deployment gate. |
+| Authentication/public ingress | **EDGE-PROTECTED / APPLICATION IDENTITY FUTURE** | Cloudflare Access is the confirmed edge authentication boundary for the documented public ingress; stronger application identity behavior remains a separate security and deployment decision. |
 | Actions/remediation | **FUTURE** | Separate authorization, approval, audit, idempotency, and rollback control plane. |
 
 ## 5. Existing code, data, and services to reuse
