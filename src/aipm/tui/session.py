@@ -23,6 +23,7 @@ VIEWS = (
     "incidents",
     "timeline",
     "history",
+    "notifications",
     "settings",
 )
 
@@ -181,6 +182,8 @@ class TuiSession:
                 if history is None:
                     return {"available": False, "status": "unavailable", "error": "Historical telemetry unavailable"}
                 return history.host("24h", 50)
+            if view == "notifications":
+                return self.context.notifications.notifications(limit=20)
             if view == "settings":
                 return self.context.settings.posture()
         except Exception:

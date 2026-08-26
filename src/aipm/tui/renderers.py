@@ -31,6 +31,7 @@ _VIEW_LABELS = {
     "incidents": "Incidents",
     "timeline": "Incident timeline",
     "history": "History",
+    "notifications": "Notifications",
     "settings": "Settings & Notification Posture",
 }
 
@@ -78,6 +79,8 @@ def project_view(view: str, response: Mapping[str, Any]) -> TuiProjection:
 
     if view == "settings":
         return _project_settings(response, title, available=available, status=status)
+    if view == "notifications":
+        return _project_notifications(response, title, available=available, status=status)
     if view == "logs":
         entries = response.get("entries")
         sources = response.get("sources")
@@ -132,6 +135,37 @@ def project_view(view: str, response: Mapping[str, Any]) -> TuiProjection:
         records=tuple(records),
         next_cursor=next_cursor,
         has_more=has_more,
+    )
+
+
+def _project_notifications(response: Mapping[str, Any], title: str, *, available: bool, status: str) -> TuiProjection:
+    items = response.get("notifications")
+    lines = [
+        ("Observation", _safe_text(response.get("status"), "unknown")),
+    ]
+    if response.get("error"):
+        lines.append(("Message", _safe_text(response.get("error"))))
+    lines.append(("Notifications", str(len(items)) if isinstance(items, list) else "—"))
+    records: list[tuple[str, str]] = []
+    if isinstance(items, list):
+        for item in items[:20]:
+            if not isinstance(item, Mapping):
+                continue
+            identifier = item.get("id")
+            item_status = item.get("status") or "unknown"
+            severity = item.get("severity") or "unknown"
+            records.append(
+                (
+                    _safe_text(identifier, "notification"),
+                    _safe_text(item_status) + " / " + _safe_text(severity),
+                )
+            )
+    return TuiProjection(
+        title=title,
+        status=status,
+        available=available,
+        lines=tuple(lines[:24]),
+        records=tuple(records[:20]),
     )
 
 

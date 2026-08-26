@@ -74,6 +74,30 @@ class FakeHistory:
         return {"available": True, "status": "fresh", "points": [], "has_more": False}
 
 
+class FakeNotifications:
+    def __init__(self):
+        self.calls = []
+
+    def notifications(self, **kwargs):
+        self.calls.append(kwargs)
+        assert kwargs == {"limit": 20}
+        return {
+            "available": True,
+            "status": "ok",
+            "notifications": [
+                {
+                    "id": 7,
+                    "status": "pending",
+                    "severity": "warning",
+                    "body": "DO_NOT_PRINT",
+                    "destination": "DO_NOT_PRINT",
+                    "secret_ref": "DO_NOT_PRINT",
+                    "provider": "DO_NOT_PRINT",
+                },
+            ],
+        }
+
+
 class FakeSettings:
     def posture(self):
         return {
@@ -99,6 +123,7 @@ def fake_context():
         logs=FakeLogs(),
         incidents=FakeIncidents(),
         history=FakeHistory(),
+        notifications=FakeNotifications(),
         settings=FakeSettings(),
     )
 
@@ -188,6 +213,57 @@ def test_missing_timeline_identity_is_not_observed_not_empty_success():
     assert projection.available is False
     assert projection.status == "not_observed"
     assert any(label == "Message" for label, _ in projection.lines)
+
+
+def test_notifications_view_delegates_once_with_fixed_bound():
+    context = fake_context()
+    session = TuiSession(context, console=Console(file=StringIO(), force_terminal=False))
+    projection = session.render_view("notifications")
+    assert projection.title == "Notifications"
+    assert projection.available is True
+    assert context.notifications.calls == [{"limit": 20}]
+    assert projection.has_more is False
+
+
+def test_notifications_renderer_exposes_only_safe_metadata():
+    projection = project_view(
+        "notifications",
+        {
+            "available": True,
+            "status": "ok",
+            "notifications": [
+                {
+                    "id": 42,
+                    "status": "failed",
+                    "severity": "critical",
+                    "body": "PRIVATE_BODY",
+                    "destination": "PRIVATE_DESTINATION",
+                    "secret_ref": "PRIVATE_SECRET",
+                    "provider": "PRIVATE_PROVIDER",
+                },
+            ],
+        },
+    )
+    output, stream = console_buffer()
+    render_projection(output, projection)
+    text = stream.getvalue()
+    assert "42" in text
+    assert "failed / critical" in text
+    for forbidden in ("PRIVATE_BODY", "PRIVATE_DESTINATION", "PRIVATE_SECRET", "PRIVATE_PROVIDER"):
+        assert forbidden not in text
+
+
+def test_notifications_unavailable_response_is_rendered_safely():
+    projection = project_view(
+        "notifications",
+        {"available": False, "status": "unavailable", "error": "Notification data unavailable", "notifications": []},
+    )
+    output, stream = console_buffer()
+    render_projection(output, projection)
+    text = stream.getvalue()
+    assert projection.available is False
+    assert "unavailable" in text.lower()
+    assert "Notification data unavailable" in text
 
 
 def test_unavailable_settings_metrics_are_not_rendered_as_zero():
