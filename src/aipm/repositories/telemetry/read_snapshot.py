@@ -220,6 +220,32 @@ class _SQLiteTelemetryReadSnapshot(AbstractContextManager["_SQLiteTelemetryReadS
         self._check_budget()
         return int(self._connection.execute("PRAGMA query_only").fetchone()[0]) == 1
 
+    def latest_completed_sample_boundary(self, at_or_before: datetime) -> datetime:
+        """Return the latest host-backed sample boundary at or before a clock value."""
+
+        self._ensure_open()
+        self._check_budget()
+        boundary = _aware_utc(at_or_before, "at_or_before")
+        row = self._connection.execute(
+            """
+            SELECT sample_runs.sampled_at
+            FROM sample_runs
+            WHERE sample_runs.sampled_at <= ?
+              AND EXISTS (
+                  SELECT 1
+                  FROM host_samples
+                  WHERE host_samples.run_id = sample_runs.id
+              )
+            ORDER BY sample_runs.sampled_at DESC, sample_runs.id DESC
+            LIMIT 1
+            """,
+            (int(boundary.timestamp()),),
+        ).fetchone()
+        self._check_budget()
+        if row is None:
+            raise TelemetrySnapshotError("No completed telemetry sample boundary is available")
+        return _from_timestamp(row["sampled_at"])
+
     def read_sample_runs(self, start: datetime, end: datetime, limit: int) -> tuple[TelemetrySnapshotParent, ...]:
         self._ensure_open()
         self._check_budget()
@@ -382,6 +408,24 @@ class _SQLiteTelemetryReadSnapshot(AbstractContextManager["_SQLiteTelemetryReadS
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.close()
+
+
+def resolve_completed_sample_boundary(
+    config: AIPMConfig,
+    *,
+    at_or_before: datetime,
+    monotonic: Callable[[], float] | None = None,
+) -> datetime:
+    """Resolve a completed telemetry-owned sample boundary without exposing storage."""
+
+    if not isinstance(config, AIPMConfig):
+        raise TelemetrySnapshotError("Telemetry boundary resolution requires AIPMConfig")
+    if monotonic is None:
+        monotonic = time.monotonic
+    if not callable(monotonic):
+        raise TelemetrySnapshotError("Telemetry boundary resolution requires a monotonic clock")
+    with _SQLiteTelemetryReadSnapshot._open_owned(config.telemetry.database_path, monotonic=monotonic) as snapshot:
+        return snapshot.latest_completed_sample_boundary(at_or_before)
 
 
 def export_telemetry_snapshot(
@@ -610,5 +654,6 @@ __all__ = [
     "TelemetrySnapshotParent",
     "TelemetrySnapshotError",
     "TelemetrySnapshotExport",
+    "resolve_completed_sample_boundary",
     "export_telemetry_snapshot",
 ]

@@ -10,8 +10,10 @@ from aipm.models.advisor import UncertaintyKind
 from aipm.repositories.telemetry.read_snapshot import (
     SnapshotCompleteness,
     TelemetrySnapshotError,
+    TelemetrySnapshotExport,
     TelemetrySnapshotParent,
     export_telemetry_snapshot,
+    resolve_completed_sample_boundary,
 )
 from aipm.repositories.telemetry.sqlite import SQLiteHistoryRepository
 from aipm.services.advisor.normalizer import normalize_observations
@@ -191,6 +193,71 @@ def test_owner_export_returns_bounded_immutable_payload_with_configured_identity
     assert payload.stable_id == payload.stable_id
     with pytest.raises(AttributeError):
         payload.host_id = "other"
+
+
+def test_owner_resolves_latest_completed_sample_boundary_at_or_before_clock(tmp_path):
+    path = tmp_path / "telemetry.db"
+    window_start = EVALUATION_TIME - timedelta(minutes=5)
+    for offset in (0, 60, 120, 180, 240, 300):
+        _seed(path, at=window_start + timedelta(seconds=offset))
+
+    boundary = resolve_completed_sample_boundary(
+        _export_config(path),
+        at_or_before=EVALUATION_TIME + timedelta(seconds=37),
+        monotonic=lambda: 1.0,
+    )
+
+    assert boundary == EVALUATION_TIME
+
+
+def test_owner_export_with_unaligned_five_samples_remains_incomplete(tmp_path):
+    path = tmp_path / "telemetry.db"
+    window_start = EVALUATION_TIME - timedelta(minutes=5)
+    for offset in (30, 90, 150, 210, 270):
+        _seed(path, at=window_start + timedelta(seconds=offset))
+    config = AIPMConfig(
+        host_id="agent",
+        telemetry=TelemetryConfig(interval_seconds=60, database_path=str(path)),
+    )
+
+    payload = export_telemetry_snapshot(
+        config,
+        evaluation_time=EVALUATION_TIME,
+        window_start=window_start,
+        window_end=EVALUATION_TIME,
+        monotonic=lambda: 1.0,
+    )
+
+    assert len(payload.sample_runs) == 5
+    assert len(payload.host_samples) == 5
+    assert payload.completeness is SnapshotCompleteness.INSUFFICIENT
+    assert all(item.coverage_seconds == 240.0 for item in payload.metric_completeness)
+    assert all(item.reason == "insufficient_coverage" for item in payload.metric_completeness)
+
+
+def test_owner_export_with_six_boundary_aligned_samples_preserves_five_minute_completeness(tmp_path):
+    path = tmp_path / "telemetry.db"
+    window_start = EVALUATION_TIME - timedelta(minutes=5)
+    for offset in (0, 60, 120, 180, 240, 300):
+        _seed(path, at=window_start + timedelta(seconds=offset))
+    config = AIPMConfig(
+        host_id="agent",
+        telemetry=TelemetryConfig(interval_seconds=60, database_path=str(path)),
+    )
+
+    payload = export_telemetry_snapshot(
+        config,
+        evaluation_time=EVALUATION_TIME,
+        window_start=window_start,
+        window_end=EVALUATION_TIME,
+        monotonic=lambda: 1.0,
+    )
+
+    assert len(payload.sample_runs) == 6
+    assert len(payload.host_samples) == 6
+    assert payload.completeness is SnapshotCompleteness.SUFFICIENT
+    assert all(item.coverage_seconds == 300.0 for item in payload.metric_completeness)
+    assert all(item.status is SnapshotCompleteness.SUFFICIENT for item in payload.metric_completeness)
 
 
 def test_owner_export_stable_identity_ignores_prohibited_parent_state(tmp_path):

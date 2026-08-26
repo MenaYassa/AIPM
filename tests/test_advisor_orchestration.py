@@ -76,6 +76,7 @@ def test_service_owns_deterministic_context_and_connects_export_adapter_composit
     service = AdvisorOrchestrationService(
         config(),
         clock=lambda: EVALUATION_TIME,
+        boundary_resolver=lambda _config, **_kwargs: EVALUATION_TIME,
         exporter=exporter,
         adapter=adapter,
         composer=composer,
@@ -95,10 +96,43 @@ def test_service_owns_deterministic_context_and_connects_export_adapter_composit
     assert captured["request"].scope is AdvisorScope.HOST
 
 
+def test_service_aligns_clock_to_completed_telemetry_boundary_before_export():
+    captured: dict[str, object] = {}
+
+    def boundary_resolver(received_config, **kwargs):
+        captured["boundary_config"] = received_config
+        captured["clock_time"] = kwargs["at_or_before"]
+        return EVALUATION_TIME
+
+    def exporter(received_config, **kwargs):
+        captured["export_config"] = received_config
+        captured.update(kwargs)
+        return snapshot(kwargs["evaluation_time"])
+
+    service = AdvisorOrchestrationService(
+        config(),
+        clock=lambda: EVALUATION_TIME + timedelta(seconds=37),
+        boundary_resolver=boundary_resolver,
+        exporter=exporter,
+    )
+
+    response = service.evaluate()
+
+    assert isinstance(response, AdvisorResponse)
+    assert captured["boundary_config"] is service.config
+    assert captured["clock_time"] == EVALUATION_TIME + timedelta(seconds=37)
+    assert captured["evaluation_time"] == EVALUATION_TIME
+    assert captured["window_start"] == EVALUATION_TIME - timedelta(minutes=5)
+    assert captured["window_end"] == EVALUATION_TIME
+    assert response.evaluation_time == EVALUATION_TIME
+    assert response.generated_at == EVALUATION_TIME
+
+
 def test_service_uses_real_phase4d_adapter_and_phase4a_composition_without_database_access() -> None:
     service = AdvisorOrchestrationService(
         config(),
         clock=lambda: EVALUATION_TIME,
+        boundary_resolver=lambda _config, **_kwargs: EVALUATION_TIME,
         exporter=lambda _config, **kwargs: snapshot(kwargs["evaluation_time"]),
     )
 

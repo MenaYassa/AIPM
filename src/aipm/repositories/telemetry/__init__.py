@@ -9,6 +9,7 @@ from aipm.repositories.telemetry.read_snapshot import (
     TelemetrySnapshotParent,
     TelemetrySnapshotError,
     TelemetrySnapshotExport,
+    resolve_completed_sample_boundary,
     export_telemetry_snapshot,
 )
 from aipm.repositories.telemetry.sqlite import SQLiteHistoryRepository
@@ -21,6 +22,7 @@ __all__ = [
     "TelemetrySnapshotParent",
     "TelemetrySnapshotError",
     "TelemetrySnapshotExport",
+    "resolve_completed_sample_boundary",
     "export_telemetry_snapshot",
     "INITIAL_HISTORY_WINDOW_SECONDS",
     "MAX_SNAPSHOT_CHILD_ROWS",

@@ -17,6 +17,7 @@ from aipm.repositories.telemetry.read_snapshot import (
     INITIAL_HISTORY_WINDOW_SECONDS,
     TelemetrySnapshotExport,
     export_telemetry_snapshot,
+    resolve_completed_sample_boundary,
 )
 from aipm.services.advisor.composition import AdvisorCompositionRequest, compose_advisor
 from aipm.services.advisor.observation_adapter import adapt_telemetry_snapshot
@@ -27,6 +28,7 @@ class AdvisorOrchestrationError(RuntimeError):
 
 
 AdvisorClock = Callable[[], datetime]
+AdvisorBoundaryResolver = Callable[..., datetime]
 AdvisorSnapshotExporter = Callable[..., TelemetrySnapshotExport]
 AdvisorAdapter = Callable[..., AdvisorCompositionRequest]
 AdvisorComposer = Callable[[AdvisorCompositionRequest], AdvisorResponse]
@@ -56,16 +58,18 @@ class AdvisorOrchestrationService:
         config: AIPMConfig,
         *,
         clock: AdvisorClock = _default_clock,
+        boundary_resolver: AdvisorBoundaryResolver = resolve_completed_sample_boundary,
         exporter: AdvisorSnapshotExporter = export_telemetry_snapshot,
         adapter: AdvisorAdapter = adapt_telemetry_snapshot,
         composer: AdvisorComposer = compose_advisor,
     ) -> None:
         if not isinstance(config, AIPMConfig):
             raise AdvisorOrchestrationError("Advisor orchestration requires AIPMConfig")
-        if not callable(clock) or not callable(exporter) or not callable(adapter) or not callable(composer):
+        if not callable(clock) or not callable(boundary_resolver) or not callable(exporter) or not callable(adapter) or not callable(composer):
             raise AdvisorOrchestrationError("Advisor orchestration dependencies must be callable")
         self.config = config
         self.clock = clock
+        self.boundary_resolver = boundary_resolver
         self.exporter = exporter
         self.adapter = adapter
         self.composer = composer
@@ -75,7 +79,18 @@ class AdvisorOrchestrationService:
 
         if not self.config.telemetry.enabled:
             raise AdvisorOrchestrationError("Advisor telemetry is unavailable")
-        evaluation_time = _utc(self.clock())
+        clock_time = _utc(self.clock())
+        try:
+            evaluation_time = _utc(
+                self.boundary_resolver(
+                    self.config,
+                    at_or_before=clock_time,
+                )
+            )
+        except AdvisorOrchestrationError:
+            raise
+        except Exception as exc:
+            raise AdvisorOrchestrationError("Unable to resolve a completed telemetry sample boundary") from exc
         window_end = evaluation_time
         window_start = evaluation_time - timedelta(seconds=INITIAL_HISTORY_WINDOW_SECONDS)
         request_id = _request_id(self.config.host_id, evaluation_time)
