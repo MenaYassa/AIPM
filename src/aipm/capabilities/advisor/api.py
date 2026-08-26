@@ -30,6 +30,7 @@ from aipm.services.advisor.composition import (
     compose_advisor,
 )
 from aipm.services.advisor.normalizer import MAX_EXPECTED_SOURCES, NormalizationError
+from aipm.services.advisor.orchestration import AdvisorOrchestrationError
 from aipm.services.advisor.rules import MAX_HISTORY_POINTS, ResourceHistoryEnvelope, ResourceHistoryPoint
 
 
@@ -53,6 +54,7 @@ class AdvisorAuthenticationRejected(PermissionError):
 
 AdvisorAuthenticator = Callable[[Request], object | bool | None]
 AdvisorComposer = Callable[[AdvisorCompositionRequest], AdvisorResponse]
+AdvisorOrchestrator = Callable[[], AdvisorResponse]
 
 
 def _error_payload(code: str, message: str, fields: tuple[dict[str, str], ...] = ()) -> dict[str, Any]:
@@ -218,12 +220,35 @@ def _decode_payload(payload: Any) -> AdvisorCompositionRequest:
 class AdvisorApi:
     """Private authenticated read-only transport over the Phase 4A seam."""
 
-    def __init__(self, *, authenticator: AdvisorAuthenticator | None = None, composer: AdvisorComposer = compose_advisor) -> None:
+    def __init__(
+        self,
+        *,
+        authenticator: AdvisorAuthenticator | None = None,
+        composer: AdvisorComposer = compose_advisor,
+        orchestrator: AdvisorOrchestrator | None = None,
+    ) -> None:
         self.authenticator = authenticator
         self.composer = composer
+        self.orchestrator = orchestrator
 
     def router(self) -> APIRouter:
         router = APIRouter()
+
+        @router.get("/api/advisor")
+        def evaluate_live() -> JSONResponse:
+            if self.orchestrator is None:
+                return _response(503, "ADVISOR_UNAVAILABLE", "Advisor evaluation is unavailable")
+            try:
+                response = self.orchestrator()
+                if not isinstance(response, AdvisorResponse):
+                    raise TypeError("orchestrator returned an invalid response")
+                return JSONResponse(status_code=200, content=response.canonical())
+            except AdvisorOrchestrationError:
+                return _response(503, "ADVISOR_UNAVAILABLE", "Advisor evaluation is unavailable")
+            except (CompositionError, AdvisorValidationError, NormalizationError, TypeError, ValueError):
+                return _response(503, "ADVISOR_UNAVAILABLE", "Advisor evaluation is unavailable")
+            except Exception:
+                return _response(500, "INTERNAL_ERROR", "Advisor evaluation failed")
 
         @router.post(ADVISOR_ROUTE)
         async def evaluate(request: Request) -> JSONResponse:
@@ -270,10 +295,15 @@ class AdvisorApi:
         return router
 
 
-def create_advisor_router(*, authenticator: AdvisorAuthenticator | None = None, composer: AdvisorComposer = compose_advisor) -> APIRouter:
+def create_advisor_router(
+    *,
+    authenticator: AdvisorAuthenticator | None = None,
+    composer: AdvisorComposer = compose_advisor,
+    orchestrator: AdvisorOrchestrator | None = None,
+) -> APIRouter:
     """Build the isolated advisor router with an explicit fail-closed auth boundary."""
 
-    return AdvisorApi(authenticator=authenticator, composer=composer).router()
+    return AdvisorApi(authenticator=authenticator, composer=composer, orchestrator=orchestrator).router()
 
 
 __all__ = [
@@ -282,5 +312,6 @@ __all__ = [
     "AdvisorAuthenticationRejected",
     "AdvisorAuthenticationUnavailable",
     "AdvisorAuthenticator",
+    "AdvisorOrchestrator",
     "create_advisor_router",
 ]

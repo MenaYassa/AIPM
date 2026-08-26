@@ -6,7 +6,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from aipm.capabilities.advisor.api import AdvisorApi, AdvisorAuthenticator
+from aipm.capabilities.advisor.api import AdvisorApi, AdvisorAuthenticator, AdvisorOrchestrator
 from aipm.capabilities.dashboard.api import DashboardApi
 from aipm.capabilities.dashboard.incidents_api import DashboardIncidentsApi
 from aipm.capabilities.dashboard.notifications_api import DashboardNotificationsApi
@@ -19,6 +19,7 @@ from aipm.capabilities.dashboard.logs_api import DashboardLogsApi
 from aipm.capabilities.dashboard.settings_api import DashboardSettingsApi
 from aipm.capabilities.dashboard.context import MissionControlContext
 from aipm.core.app import Application
+from aipm.services.advisor.orchestration import AdvisorOrchestrationService
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -37,6 +38,7 @@ def create_app(
     settings_api: DashboardSettingsApi | None = None,
     advisor_api: AdvisorApi | None = None,
     advisor_authenticator: AdvisorAuthenticator | None = None,
+    advisor_orchestrator: AdvisorOrchestrator | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
     app_context = application or Application.create()
@@ -64,7 +66,11 @@ def create_app(
     logs_observation_api = context.logs
     settings_posture_api = context.settings
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
-    app.include_router((advisor_api or AdvisorApi(authenticator=advisor_authenticator)).router())
+    def default_live_orchestrator():
+        return AdvisorOrchestrationService(app_context.config).evaluate()
+
+    live_orchestrator = advisor_orchestrator or default_live_orchestrator
+    app.include_router((advisor_api or AdvisorApi(authenticator=advisor_authenticator, orchestrator=live_orchestrator)).router())
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

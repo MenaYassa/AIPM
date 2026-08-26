@@ -46,15 +46,29 @@ def test_only_dashboard_is_visible_by_default_and_placeholders_have_no_fake_metr
     assert 'data-view="history"' in text
     assert 'data-view="notifications" hidden' in text
     assert 'data-view="settings" hidden' in text
-    ai_agent = text[text.index('data-view="ai-agent"') : text.index('data-view="ai-agent"') + 5000]
+    advisor_start = text.index('<div class="view advisor-fixture-view" data-view="ai-agent" id="advisorFixtureRoot" hidden>')
+    advisor_end = text.index('</div>\n      </main>', advisor_start) + len('</div>')
+    ai_agent = text[advisor_start:advisor_end]
     assert 'data-view="ai-agent"' in ai_agent
     assert 'hidden' in ai_agent
     assert 'id="advisorFixtureRoot"' in ai_agent
+    assert 'data-advisor-mode="live"' in ai_agent
+    assert 'data-advisor-mode="fixture"' in ai_agent
     assert 'data-advisor-fixture="normal"' in ai_agent
     assert 'data-advisor-fixture="http-500"' in ai_agent
+    assert 'data-advisor-fixture-controls' in ai_agent
+    assert 'data-advisor-live-controls' in ai_agent
+    assert "AI Agent · live advisor" in ai_agent
+    assert "No action controls" in ai_agent
     assert text.count("Coming in MC-6.x") >= 1
-    assert "AI Agent · fixture presentation" in ai_agent
-    assert "No live data or browser clock" in ai_agent
+    provider = (STATIC_DIR / "mission-control-advisor-provider.js").read_text(encoding="utf-8")
+    provider_lower = provider.lower()
+    assert "export const advisor_live_route = '/api/advisor';" in provider_lower
+    assert "fetchimpl(advisor_live_route, { cache: 'no-store' })" in provider_lower
+    assert "renderfixture" in provider_lower
+    assert "renderlive" in provider_lower
+    for marker in ("method: 'post'", "method: 'put'", "method: 'patch'", "method: 'delete'", "websocket", "eventsource", "xmlhttprequest", "sqlite", "filesystem", "systemctl", "docker", "git", "cloudflared", "document.cookie", "localstorage", "setinterval", "settimeout"):
+        assert marker not in provider_lower
     assert "Applications, not just containers." in text
     assert "projectCards" in text
     assert "projectDetail" in text

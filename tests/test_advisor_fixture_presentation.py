@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 MODULE = ROOT / "src/aipm/dashboard/static/mission-control-advisor-fixture.js"
 INDEX = ROOT / "src/aipm/dashboard/static/index.html"
+PROVIDER = ROOT / "src/aipm/dashboard/static/mission-control-advisor-provider.js"
 
 
 def _node(expression: str) -> dict:
@@ -165,18 +166,123 @@ def test_fixture_module_has_no_live_access_or_browser_clock() -> None:
         assert token not in lowered
 
 
-def test_ai_agent_route_is_fixture_only_and_resource_history_is_unchanged() -> None:
+def test_live_provider_uses_only_bounded_get_and_keeps_fixture_mode_explicit() -> None:
+    source = PROVIDER.read_text()
+    lowered = source.lower()
+    assert "const advisor_live_route = '/api/advisor';" in lowered
+    assert "fetchimpl(advisor_live_route, { cache: 'no-store' })" in lowered
+    assert "post /api/advisor/evaluate" not in lowered
+    for token in ("new date(", "date.now", "math.random", "setinterval", "settimeout", "sqlite", "filesystem", "systemctl", "docker", "git"):
+        assert token not in lowered
+    assert "renderfixture" in lowered
+    assert "renderlive" in lowered
+
+
+def test_ai_agent_route_has_explicit_live_and_fixture_modes_and_resource_history_is_unchanged() -> None:
     source = INDEX.read_text()
     advisor_start = source.index('<div class="view advisor-fixture-view" data-view="ai-agent" id="advisorFixtureRoot" hidden>')
     advisor_end = source.index('</div>\n      </main>', advisor_start) + len('</div>')
     ai_agent = source[advisor_start:advisor_end]
     assert 'id="advisorFixtureRoot"' in ai_agent
+    assert 'data-advisor-mode="live"' in ai_agent
+    assert 'data-advisor-mode="fixture"' in ai_agent
     assert 'data-advisor-fixture="normal"' in ai_agent
     assert 'data-advisor-fixture="http-500"' in ai_agent
-    assert "fixture presentation" in ai_agent.lower()
+    assert "fixture mode" in ai_agent.lower()
+    assert "mission-control-advisor-provider.js" in source
     assert "/api/advisor/evaluate" not in ai_agent
     assert "export_telemetry_snapshot" not in ai_agent
     assert "compose_advisor" not in ai_agent
     assert "scheduler.register('history',loadHistory,{intervalMs:60000})" in source
     assert "fetch(`/api/history/host?range=${encodeURIComponent(historyRange)}&limit=240`" in source
     assert "No historical samples" in source
+
+
+def _node_provider(expression: str) -> dict:
+    script = f"""
+import * as provider from {json.dumps(PROVIDER.as_uri())};
+import * as fixture from {json.dumps(MODULE.as_uri())};
+{expression}
+"""
+    result = subprocess.run(
+        ["node", "--input-type=module", "--eval", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
+def test_live_provider_fetches_once_and_fixture_mode_does_not_mix_data() -> None:
+    result = _node_provider(
+        """
+const elements = new Map([
+  ['[data-advisor-fixture-controls]', {hidden: false}],
+  ['[data-advisor-live-controls]', {hidden: false}],
+  ['[data-advisor-mode-label]', {textContent: ''}],
+  ['[data-advisor-fixture-label]', {textContent: ''}],
+  ['[data-advisor-fixture-body]', {innerHTML: ''}],
+]);
+const root = {
+  dataset: {},
+  querySelector(selector) { return elements.get(selector); },
+};
+let calls = 0;
+let request;
+const instance = provider.createAdvisorProvider(root, {
+  fetchImpl: async (url, options) => {
+    calls += 1;
+    request = {url, options};
+    return {ok: true, status: 200, json: async () => fixture.getAdvisorFixture('empty')};
+  },
+});
+const live = await instance.renderLive();
+const liveBody = elements.get('[data-advisor-fixture-body]').innerHTML;
+const selectedFixture = instance.renderFixture('normal');
+console.log(JSON.stringify({
+  mode: instance.mode,
+  calls,
+  url: request.url,
+  cache: request.options.cache,
+  liveStatus: live.status,
+  fixtureStatus: selectedFixture.status,
+  fixtureBody: elements.get('[data-advisor-fixture-body]').innerHTML,
+  liveBodyHadNormalFinding: liveBody.includes('Host memory pressure observed'),
+  fixtureBodyHasNormalFinding: elements.get('[data-advisor-fixture-body]').innerHTML.includes('Host memory pressure observed'),
+}));
+"""
+    )
+    assert result["mode"] == "fixture"
+    assert result["calls"] == 1
+    assert result["url"] == "/api/advisor"
+    assert result["cache"] == "no-store"
+    assert result["liveStatus"] == "fresh"
+    assert result["fixtureStatus"] == "fresh"
+    assert result["liveBodyHadNormalFinding"] is False
+    assert result["fixtureBodyHasNormalFinding"] is True
+
+
+def test_live_provider_maps_transport_failure_to_safe_bounded_error() -> None:
+    result = _node_provider(
+        """
+const elements = new Map([
+  ['[data-advisor-fixture-controls]', {hidden: false}],
+  ['[data-advisor-live-controls]', {hidden: false}],
+  ['[data-advisor-mode-label]', {textContent: ''}],
+  ['[data-advisor-fixture-label]', {textContent: ''}],
+  ['[data-advisor-fixture-body]', {innerHTML: ''}],
+]);
+const root = {dataset: {}, querySelector(selector) { return elements.get(selector); }};
+const instance = provider.createAdvisorProvider(root, {
+  fetchImpl: async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({error: {code: 'ADVISOR_UNAVAILABLE', message: 'Advisor evaluation is unavailable', fields: []}}),
+  }),
+});
+const output = await instance.renderLive();
+console.log(JSON.stringify({kind: output.kind, status: output.status, code: output.code, mode: instance.mode}));
+"""
+    )
+    assert result == {"kind": "transport_error", "status": 503, "code": "ADVISOR_UNAVAILABLE", "mode": "live"}

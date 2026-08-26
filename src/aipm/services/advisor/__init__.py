@@ -8,6 +8,7 @@ from aipm.services.advisor.composition import (
     compose_advisor,
 )
 from aipm.services.advisor.normalizer import EvidenceNormalizer, NormalizationError, normalize_observations
+from aipm.services.advisor.orchestration import AdvisorOrchestrationError, AdvisorOrchestrationService
 from aipm.services.advisor.rules import (
     AdvisorRuleEngine,
     PHASE3_FIELD_SCHEMA,
@@ -25,6 +26,8 @@ from aipm.services.advisor.rules import (
 
 __all__ = (
     "AdvisorCompositionRequest",
+    "AdvisorOrchestrationError",
+    "AdvisorOrchestrationService",
     "AdvisorRuleEngine",
     "CompositionError",
     "EvidenceNormalizer",

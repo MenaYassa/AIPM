@@ -232,15 +232,19 @@ function responseMarkup(view) {
     ? view.evidence_coverage.map((coverage) => `<div class="advisor-coverage-row"><span>${escapeHtml(coverage.source_id)}</span><strong>${escapeHtml(coverage.observed)} / ${escapeHtml(coverage.expected)}</strong><small>stale ${escapeHtml(coverage.stale)} · unavailable ${escapeHtml(coverage.unavailable)} · invalid ${escapeHtml(coverage.invalid)} · omitted ${escapeHtml(coverage.omitted)}</small></div>`).join('')
     : '<div class="empty">No coverage records in this fixture.</div>';
 
-  return `<div class="advisor-state" aria-live="polite"><div class="advisor-response-meta"><span class="badge ${statusClass(view.status)}">${escapeHtml(view.status)}</span><span>${view.available ? 'Evidence available' : 'Evidence unavailable'}</span><span>Scope: ${escapeHtml(view.scope)}</span></div><p class="subtle">Request ${escapeHtml(view.request_id)} · Evaluation ${escapeHtml(view.evaluation_time)} · Generated ${escapeHtml(view.generated_at)}</p><div class="advisor-grid"><section class="advisor-panel"><div class="section-head"><div><h3>Findings</h3><p>Presented exactly as supplied by the fixture response.</p></div><span class="pill">${view.findings.length}</span></div>${findingMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Recommendations</h3><p>Read-only explanatory output; no action controls.</p></div><span class="pill">${view.recommendations.length}</span></div>${recommendationMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Uncertainty</h3><p>Freshness, availability, invalidity, and coverage limits remain visible.</p></div><span class="pill">${view.uncertainties.length}</span></div>${uncertaintyMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Evidence coverage</h3><p>Bounded source counts from the response.</p></div><span class="pill">${view.evidence_coverage.length}</span></div>${coverageMarkup}</section></div></div>`;
+  return `<div class="advisor-state" aria-live="polite"><div class="advisor-response-meta"><span class="badge ${statusClass(view.status)}">${escapeHtml(view.status)}</span><span>${view.available ? 'Evidence available' : 'Evidence unavailable'}</span><span>Scope: ${escapeHtml(view.scope)}</span></div><p class="subtle">Request ${escapeHtml(view.request_id)} · Evaluation ${escapeHtml(view.evaluation_time)} · Generated ${escapeHtml(view.generated_at)}</p><div class="advisor-grid"><section class="advisor-panel"><div class="section-head"><div><h3>Findings</h3><p>Presented exactly as supplied by the advisor response.</p></div><span class="pill">${view.findings.length}</span></div>${findingMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Recommendations</h3><p>Read-only explanatory output; no action controls.</p></div><span class="pill">${view.recommendations.length}</span></div>${recommendationMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Uncertainty</h3><p>Freshness, availability, invalidity, and coverage limits remain visible.</p></div><span class="pill">${view.uncertainties.length}</span></div>${uncertaintyMarkup}</section><section class="advisor-panel"><div class="section-head"><div><h3>Evidence coverage</h3><p>Bounded source counts from the response.</p></div><span class="pill">${view.evidence_coverage.length}</span></div>${coverageMarkup}</section></div></div>`;
+}
+
+export function renderAdvisorResponse(root, response, label = 'live') {
+  if (!root) throw new Error('Advisor response root is required');
+  const presentation = buildAdvisorPresentation(response);
+  root.querySelector('[data-advisor-fixture-body]').innerHTML = responseMarkup(presentation);
+  root.querySelector('[data-advisor-fixture-label]').textContent = label;
+  return presentation;
 }
 
 export function renderAdvisorFixture(root, key = 'normal') {
-  if (!root) throw new Error('Advisor fixture root is required');
-  const presentation = buildAdvisorPresentation(getAdvisorFixture(key));
-  root.querySelector('[data-advisor-fixture-body]').innerHTML = responseMarkup(presentation);
-  root.querySelector('[data-advisor-fixture-label]').textContent = key;
-  return presentation;
+  return renderAdvisorResponse(root, getAdvisorFixture(key), key);
 }
 
 export function createAdvisorFixtureController(root) {

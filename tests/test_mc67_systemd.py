@@ -205,6 +205,7 @@ def test_frontend_systemd_contract_is_static_mounted_and_action_free() -> None:
     html = (static / "index.html").read_text(encoding="utf-8")
     module = (static / "mission-control-systemd.js").read_text(encoding="utf-8")
     fixture_module = (static / "mission-control-advisor-fixture.js").read_text(encoding="utf-8")
+    provider_module = (static / "mission-control-advisor-provider.js").read_text(encoding="utf-8")
     assert "/static/mission-control-systemd.js" in html
     for marker in ("Systemd Observation", "systemdObservationState", "systemdUnits", "systemdDetail", "scheduler.register('systemd'"):
         assert marker in html
@@ -213,17 +214,20 @@ def test_frontend_systemd_contract_is_static_mounted_and_action_free() -> None:
     advisor_end = html.index('</div>\n      </main>', advisor_start) + len('</div>')
     advisor_surface = html[advisor_start:advisor_end]
     for marker in (
-        "Fixture only",
-        "No live data or browser clock",
-        "without live collection, evaluation, polling, or action controls",
-        "Fixture-driven presentation only",
+        "AI Agent · live advisor",
+        "Cloudflare Access edge",
+        "No action controls",
+        "service-owned evaluation",
+        'data-advisor-mode="live"',
+        'data-advisor-mode="fixture"',
+        "Refresh live assessment",
     ):
         assert marker in advisor_surface
-    for forbidden in ("/api/advisor", "compose_advisor", "advisorruleengine", "approve", "approval", "remediation", "provider", "llm", "systemctl", "docker"):
+    for forbidden in ("compose_advisor", "advisorruleengine", "approve", "approval", "remediation", "llm", "systemctl", "docker", "sqlite", "filesystem", "document.cookie"):
         assert forbidden not in advisor_surface.lower()
 
     for marker in (
-        "Presented exactly as supplied by the fixture response.",
+        "Presented exactly as supplied by the advisor response.",
         "Read-only explanatory output; no action controls.",
         "Freshness, availability, invalidity, and coverage limits remain visible.",
     ):
@@ -247,6 +251,14 @@ def test_frontend_systemd_contract_is_static_mounted_and_action_free() -> None:
         "crypto.",
     ):
         assert forbidden not in fixture_lowered
+
+    provider_lowered = provider_module.lower()
+    assert "const advisor_live_route = '/api/advisor';" in provider_lowered
+    assert "fetchimpl(advisor_live_route, { cache: 'no-store' })" in provider_lowered
+    assert "renderfixture" in provider_lowered
+    assert "renderlive" in provider_lowered
+    for forbidden in ("method:", "websocket", "xmlhttprequest", "sqlite", "filesystem", "document.cookie", "localstorage", "systemctl", "docker", "git", "setinterval", "settimeout", "math.random", "new date(", "date.now"):
+        assert forbidden not in provider_lowered
 
     for marker in ("/api/systemd/units?limit=20", "/api/systemd/units/", "createSystemdController", "Health", "Evidence"):
         assert marker in module
