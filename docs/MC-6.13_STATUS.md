@@ -2,12 +2,12 @@
 
 **Status date:** 2026-08-26
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
-**Current commit:** `6d6bd63b59f6117c5f6c1ac087506846b1a11e8a` — `feat: add live advisor orchestration`
-**Remote parity:** `HEAD == origin/main`; the live orchestration implementation is landed. This documentation synchronization is intentionally pending its own review/commit.
+**Current commit:** `ead26b68155baee6c38e1f47ad124ae676ea56f7` — `feat: add bounded advisor observability summary`
+**Remote parity:** `HEAD == origin/main`; Phase 4E is landed and the supplied production validation passed. This documentation synchronization is intentionally pending its own review/commit.
 
 ## Current status
 
-MC-6.13 Phases 2, 3, 4A, 4B, 4C.1, and 4D are complete, reviewed, committed, and pushed. Phase 4B establishes a private authenticated read-only `POST /api/advisor/evaluate` boundary for bounded caller-supplied evaluation. Phase 4D adds a private-VPS, telemetry-owned bounded snapshot/export and a transport-neutral observation adapter for the approved CPU, memory, and disk slice. Phase 4C.1 adds the server-owned live read-only `GET /api/advisor` orchestration path: it obtains configured `host_id` and cadence, uses a service-owned evaluation context, requests a bounded five-minute export, delegates through the Phase 4D adapter and Phase 4A composition boundary, and presents the bounded `AdvisorResponse` while preserving explicit fixture mode. Phase 4B.1 is decided as Cloudflare Access edge-only protection for the documented public hostname; AIPM does not verify Cloudflare JWTs or identity headers, and stronger identity-aware application behavior remains a separate future decision. Phase 4E remains future and separately authorized.
+MC-6.13 Phases 2, 3, 4A, 4B, 4C.1, 4C.2, 4C.3, 4D, and 4E are complete, reviewed, committed, and pushed. Phase 4B establishes a private authenticated read-only `POST /api/advisor/evaluate` boundary for bounded caller-supplied evaluation. Phase 4D adds a private-VPS, telemetry-owned bounded snapshot/export and a transport-neutral observation adapter for the approved CPU, memory, and disk slice. Phase 4C.1 adds the server-owned live read-only `GET /api/advisor` orchestration path, and Phase 4C.2 aligns evaluation to a completed telemetry sample boundary without changing the five-minute completeness contract. Phase 4C.3 confirms that complete evidence with no threshold-triggering conditions correctly produces zero findings and recommendations. Phase 4E adds an additive bounded `resource_history_summary` presentation field derived from preserved typed history evidence, while preserving explicit fixture mode. Phase 4B.1 is decided as Cloudflare Access edge-only protection for the documented public hostname; AIPM does not verify Cloudflare JWTs or identity headers, and stronger identity-aware application behavior remains a separate future decision.
 
 ### Phase 4C boundary
 
@@ -23,13 +23,27 @@ MC-6.13 Phases 2, 3, 4A, 4B, 4C.1, and 4D are complete, reviewed, committed, and
 
 Cloudflare Access is the selected and confirmed authentication boundary for the documented public ingress. AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Stronger identity-aware application behavior remains a separate future decision.
 
-**FUTURE/BLOCKED:** Phase 4E, actions, approvals, remediation, LLM/provider integration, and stronger application identity behavior remain separate future work.
+**FUTURE/BLOCKED:** Actions, approvals, remediation, LLM/provider integration, and stronger application identity behavior remain separate future work.
 
 ### Phase 4C.1 production completeness capture
 
 The supplied read-only production capture confirms that the canonical live telemetry database is `/home/mina/.local/state/aipm/telemetry/mission_control.db`, the deployed telemetry cadence is `60s`, and the advisor requests a `300s` evaluation window. The captured window contains five sample runs spanning `240s`. CPU, memory, and disk each report `insufficient` with reason `insufficient_coverage`, while `invalid_source_rows=0`. This is the expected fail-closed result because the available valid history does not span the complete five-minute window.
 
 The dashboard’s `history 15/15` is explicitly **source coverage, not temporal completeness**: it represents fifteen observed history metric records out of fifteen expected records, not fifteen points per metric or a five-minute span. The three identical `missing_evidence — Resource-history window for agent is incomplete` records are expected, one for each incomplete CPU, memory, and disk history envelope. No Phase 3 completeness semantics or adapter behavior is changed.
+
+### Phase 4E production validation
+
+The deployed Phase 4E commit is `ead26b68155baee6c38e1f47ad124ae676ea56f7`. The operator performed only the authorized `aipm-dashboard.service` restart; no telemetry, database, configuration, source, infrastructure, authentication, Cloudflare, Systemd unit, Docker, nginx, or other runtime modification was reported. The first post-checkout response lacked the additive field because the old dashboard process was still running; the response after restart returned HTTP 200 with `resource_history_summary` present.
+
+The validated live response was `status=fresh`, `available=true`, with `evaluation_time == generated_at` at `2026-08-26T18:02:10+00:00`, zero uncertainties, zero findings, and zero recommendations. The bounded summary appeared in deterministic CPU, memory, disk order and exposed no `maximum_gap` field:
+
+| Metric | State | Valid points | Temporal span | Cadence | Peak | Peak observed at |
+|---|---|---:|---:|---:|---:|---|
+| CPU | `complete` | 6 | 300s | 60s | 30.2% | `2026-08-26T17:57:10+00:00` |
+| Memory | `complete` | 6 | 300s | 60s | 58.8% | `2026-08-26T17:57:10+00:00` |
+| Disk | `complete` | 6 | 300s | 60s | 56.4% | `2026-08-26T17:57:10+00:00` |
+
+Complete evidence is an evidence-sufficiency state, not a health claim. It does not itself create a finding or recommendation; the zero result is correct for this complete low-pressure evaluation. Incomplete, stale, unavailable, and invalid evidence semantics remain explicit and fail closed.
 
 The legacy database investigation is closed without inferring inactivity from sandbox evidence:
 
@@ -63,7 +77,12 @@ MC6.13_PHASE4D_ADAPTER_COMMIT=d90d32f54edc5abf373ecd0308b4963e9a6cabcc
 MC6.13_PHASE4C=LANDED_FIXTURE_ONLY
 MC6.13_PHASE4C_COMMIT=e8f0b12d7473e3c021c536e738c8b3a414d116ad
 MC6.13_PHASE4B1=DECISION_RECORDED_EDGE_ONLY
-MC6.13_PHASE4E=NOT_STARTED
+MC6.13_PHASE4C2=LANDED
+MC6.13_PHASE4C2_COMMIT=5e0730cdd46580bfcf6368e8e3216b32772084dd
+MC6.13_PHASE4C3=VALIDATED_COMPLETE_EVIDENCE
+MC6.13_PHASE4E=LANDED
+MC6.13_PHASE4E_COMMIT=ead26b68155baee6c38e1f47ad124ae676ea56f7
+MC6.13_PHASE4E_PRODUCTION_VALIDATION=PASS
 ```
 
 ## Phase 2 — evidence normalization
@@ -172,13 +191,13 @@ Final Phase 3 validation:
 
 ## Phase 4 status
 
-Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. Phase 4B is implemented, reviewed, committed, and pushed at `af1a10b` as a private authenticated read-only API transport boundary over Phase 4A, behind the selected Cloudflare Access edge protection. Phase 4D is implemented, reviewed, committed, and pushed in two commits: `f0ae4bb` provides the telemetry-owned bounded snapshot/export and `d90d32f` maps its approved CPU, memory, and disk payload into canonical advisor observations and `ResourceHistoryEnvelope` values, stopping at `AdvisorCompositionRequest`. Phase 4C is implemented, reviewed, committed, and pushed at `e8f0b12` as the explicit fixture-only presentation capability. Phase 4C.1 is implemented, reviewed, committed, and pushed at `6d6bd63` as the live read-only `GET /api/advisor` orchestration and provider path. It uses Cloudflare Access edge protection, a server-owned evaluation context, a bounded five-minute telemetry export, the Phase 4D adapter, and the existing Phase 4A composition boundary. Explicit fixture mode remains available and separate. Phase 4B.1 records the selected Cloudflare Access edge-only decision; AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Phase 4E, actions, approvals, remediation, and LLM/provider integration remain future, separately authorized work.
+Phase 4A composition is implemented, reviewed, committed, and pushed at `37d8a0e`. Phase 4B is implemented, reviewed, committed, and pushed at `af1a10b` as a private authenticated read-only API transport boundary over Phase 4A, behind the selected Cloudflare Access edge protection. Phase 4D is implemented, reviewed, committed, and pushed in two commits: `f0ae4bb` provides the telemetry-owned bounded snapshot/export and `d90d32f` maps its approved CPU, memory, and disk payload into canonical advisor observations and `ResourceHistoryEnvelope` values, stopping at `AdvisorCompositionRequest`. Phase 4C is implemented, reviewed, committed, and pushed at `e8f0b12` as the explicit fixture-only presentation capability. Phase 4C.1 is implemented, reviewed, committed, and pushed at `6d6bd63` as the live read-only `GET /api/advisor` orchestration and provider path. Phase 4C.2 is implemented, reviewed, committed, and pushed at `5e0730c` as the telemetry-owned completed-sample alignment boundary, and Phase 4E is implemented, reviewed, committed, and pushed at `ead26b6` as the additive bounded resource-history observability summary. The live path uses Cloudflare Access edge protection, a server-owned evaluation context, a bounded five-minute telemetry export, the Phase 4D adapter, and the existing Phase 4A composition boundary; explicit fixture mode remains available and separate. Phase 4B.1 records the selected Cloudflare Access edge-only decision; AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Actions, approvals, remediation, and LLM/provider integration remain future, separately authorized work.
 
 ## Phase 4B — private authenticated advisor evaluation API
 
 Phase 4B adds the transport adapter in `src/aipm/capabilities/advisor/api.py` and wires it into the existing FastAPI application through `src/aipm/dashboard/server.py`. The route is `POST /api/advisor/evaluate`. It requires `request_id`, a caller-supplied timezone-aware `evaluation_time`, bounded `observations`, bounded `expected_sources`, and bounded typed `history_envelopes` input. It rejects unknown fields, reconstructs immutable Phase 3 history objects, invokes `AdvisorCompositionRequest` and `compose_advisor()` directly, and serializes the existing `AdvisorResponse` without semantic rewriting.
 
-Authentication is an injected private dependency and fails closed when unavailable. Rejected authentication returns safe 401; malformed transport input returns safe 400; domain validation returns safe 422; and unexpected internal failures return safe 500. Error responses contain only fixed codes/messages and bounded field descriptors, never raw exceptions, tracebacks, credentials, paths, SQL, commands, or internal topology. The route does not perform actions. The live `GET /api/advisor` path is a separate server-owned orchestration boundary that obtains telemetry only through the Phase 4D export and adapter, uses a bounded five-minute window, and delegates to Phase 4A. The fixture-only Phase 4C capability remains explicit and separate. Phase 4E and stronger application identity behavior remain future and separately authorized.
+Authentication is an injected private dependency and fails closed when unavailable. Rejected authentication returns safe 401; malformed transport input returns safe 400; domain validation returns safe 422; and unexpected internal failures return safe 500. Error responses contain only fixed codes/messages and bounded field descriptors, never raw exceptions, tracebacks, credentials, paths, SQL, commands, or internal topology. The route does not perform actions. The live `GET /api/advisor` path is a separate server-owned orchestration boundary that obtains telemetry only through the Phase 4D export and adapter, uses a completed telemetry sample boundary and bounded five-minute window, and delegates to Phase 4A. The fixture-only Phase 4C capability remains explicit and separate. Phase 4E adds only the bounded additive resource-history summary; stronger application identity behavior remains a separate future decision.
 
 ### Phase 4B validation
 
@@ -212,7 +231,12 @@ MC6.13_PHASE4C_COMMIT=e8f0b12d7473e3c021c536e738c8b3a414d116ad
 MC6.13_PHASE4C1=LANDED_LIVE_READ_ONLY
 MC6.13_PHASE4C1_COMMIT=6d6bd63b59f6117c5f6c1ac087506846b1a11e8a
 MC6.13_PHASE4B1=DECISION_RECORDED_EDGE_ONLY
-MC6.13_PHASE4E=NOT_STARTED
+MC6.13_PHASE4C2=LANDED
+MC6.13_PHASE4C2_COMMIT=5e0730cdd46580bfcf6368e8e3216b32772084dd
+MC6.13_PHASE4C3=VALIDATED_COMPLETE_EVIDENCE
+MC6.13_PHASE4E=LANDED
+MC6.13_PHASE4E_COMMIT=ead26b68155baee6c38e1f47ad124ae676ea56f7
+MC6.13_PHASE4E_PRODUCTION_VALIDATION=PASS
 MC6.13_RUNTIME_INTEGRATION=LIVE_ADVISOR_READ_ONLY_ONLY
 MC6.13_API=PRIVATE_AUTHENTICATED_GET_AND_POST_READ_ONLY
 MC6.13_UI=LIVE_PROVIDER_WITH_EXPLICIT_FIXTURE_MODE
