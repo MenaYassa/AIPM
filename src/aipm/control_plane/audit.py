@@ -152,3 +152,39 @@ class ActionAuditRepository(metaclass=_FrozenServiceType):
             raise ControlPlaneError(PlanningErrorCode.INVALID_PLAN, "Audit evidence must remain not observed")
         self._records.append(record)
         return record
+
+
+class Stage2AuditRepository:
+    """Test/local append-only audit collection; not durable production state."""
+
+    __slots__ = ("_max_records", "_records", "_initialized")
+
+    def __init__(self, *, max_records: int = 256):
+        if not isinstance(max_records, int) or max_records < 1 or max_records > 256:
+            raise ValueError("Invalid Stage 2 audit record bound")
+        object.__setattr__(self, "_max_records", max_records)
+        object.__setattr__(self, "_records", [])
+        object.__setattr__(self, "_initialized", True)
+
+    def __setattr__(self, name, value):
+        if getattr(self, "_initialized", False):
+            raise AttributeError("Stage 2 audit repository is immutable")
+        object.__setattr__(self, name, value)
+
+    def append(self, event):
+        from aipm.control_plane.models import LifecycleError, Stage2AuditEvent
+
+        if not isinstance(event, Stage2AuditEvent):
+            raise LifecycleError("Invalid Stage 2 audit event")
+        if len(self._records) >= self._max_records:
+            raise LifecycleError("Stage 2 audit record bound reached")
+        if any(existing.event_id == event.event_id for existing in self._records):
+            raise LifecycleError("Duplicate Stage 2 audit event")
+        self._records.append(event)
+        return event
+
+    def records(self):
+        return tuple(self._records)
+
+    def safe_records(self):
+        return tuple(event.safe_dict() for event in self._records)
