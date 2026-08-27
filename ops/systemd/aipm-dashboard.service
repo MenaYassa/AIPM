@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=mina
 WorkingDirectory=/home/ubuntu/aipm
 Environment=PYTHONUNBUFFERED=1
 Environment=AIPM_CONFIG=/home/mina/.config/aipm/config.yaml
@@ -19,7 +20,7 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadOnlyPaths=/home/ubuntu/aipm /home/mina/.config/aipm /home/mina/.local/state/aipm/telemetry
 ReadWritePaths=/home/mina/.local/state/aipm/logs
-InaccessiblePaths=/home/ubuntu/.ssh
+InaccessiblePaths=-/home/ubuntu/.ssh
 RestrictSUIDSGID=true
 UMask=0077
 

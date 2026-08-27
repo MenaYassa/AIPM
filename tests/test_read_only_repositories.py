@@ -429,12 +429,14 @@ def test_dashboard_service_template_enforces_read_only_boundary() -> None:
     unit = Path(__file__).parents[1] / "ops/systemd/aipm-dashboard.service"
     text = unit.read_text(encoding="utf-8")
     assert "ExecStart=/home/ubuntu/aipm/.venv/bin/aipm dashboard --host 127.0.0.1 --port 8787" in text
+    assert "User=mina" in text
     assert "ProtectSystem=strict" in text
     assert "ProtectHome=read-only" in text
     assert "Environment=AIPM_CONFIG=/home/mina/.config/aipm/config.yaml" in text
     assert "Environment=AIPM_TELEMETRY_DB=/home/mina/.local/state/aipm/telemetry/mission_control.db" in text
     assert "ReadOnlyPaths=/home/ubuntu/aipm /home/mina/.config/aipm /home/mina/.local/state/aipm/telemetry" in text
-    assert "InaccessiblePaths=/home/ubuntu/.ssh" in text
+    assert "InaccessiblePaths=-/home/ubuntu/.ssh" in text
+    assert "InaccessiblePaths=/home/ubuntu/.config/cloudflared" not in text
     assert "/home/ubuntu/.config/cloudflared" not in text
     assert "AIPM_TELEMETRY_DB=/home/ubuntu/.local/state/aipm/telemetry/mission_control.db" not in text
     read_write_paths = [line for line in text.splitlines() if line.startswith("ReadWritePaths=")]
