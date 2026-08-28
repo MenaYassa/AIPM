@@ -6,6 +6,7 @@ from aipm.engines.health.engine import HealthEngine
 from aipm.core.app import Application
 from aipm.repositories.events.sqlite import SQLiteEventRepository
 from aipm.repositories.incidents.sqlite import SQLiteIncidentRepository
+from aipm.repositories.notifications.sqlite import SQLiteNotificationRepository
 from aipm.repositories.telemetry.sqlite import SQLiteHistoryRepository
 from aipm.services.events.derivation import EventDerivationService
 from aipm.services.events.frame import HistoricalFrameService
@@ -23,6 +24,9 @@ def build_processor(application: Application):
     history = SQLiteHistoryRepository(database_path)
     events = SQLiteEventRepository(database_path)
     incidents = SQLiteIncidentRepository(database_path)
+    # The read-only dashboard consumes the notification projection from this
+    # shared database, so provision its schema here alongside events/incidents.
+    SQLiteNotificationRepository(database_path).initialize()
     processor = EventProcessor(
         frame_service=HistoricalFrameService(history),
         event_repository=events,

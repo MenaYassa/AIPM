@@ -45,10 +45,10 @@ class SystemdUnitSnapshot:
 
 
 SYSTEMD_UNIT_REGISTRY: tuple[SystemdUnitRegistryEntry, ...] = (
-    SystemdUnitRegistryEntry(SystemdUnitId.DASHBOARD, "AIPM Dashboard", "aipm-dashboard.service", "user"),
-    SystemdUnitRegistryEntry(SystemdUnitId.TELEMETRY, "AIPM Telemetry", "aipm-telemetry.service", "user"),
-    SystemdUnitRegistryEntry(SystemdUnitId.EVENTS, "AIPM Events", "aipm-events.service", "user"),
-    SystemdUnitRegistryEntry(SystemdUnitId.FREEBUFF_LLM_PROXY, "Freebuff LLM Proxy", "freebuff-llm-proxy.service", "user"),
+    SystemdUnitRegistryEntry(SystemdUnitId.DASHBOARD, "AIPM Dashboard", "aipm-dashboard.service", "system"),
+    SystemdUnitRegistryEntry(SystemdUnitId.TELEMETRY, "AIPM Telemetry", "aipm-telemetry.service", "system"),
+    SystemdUnitRegistryEntry(SystemdUnitId.EVENTS, "AIPM Events", "aipm-events.service", "system"),
+    SystemdUnitRegistryEntry(SystemdUnitId.FREEBUFF_LLM_PROXY, "Freebuff LLM Proxy", "freebuff-llm-proxy.service", "system"),
     SystemdUnitRegistryEntry(SystemdUnitId.FASTSD_WEBUI, "FastSD Web UI", "fastsd-webui.service", "system"),
     SystemdUnitRegistryEntry(SystemdUnitId.FASTSD_WEBSERVER, "FastSD Web Server", "fastsd-webserver.service", "system"),
     SystemdUnitRegistryEntry(SystemdUnitId.FASTSD_PROXY, "FastSD Proxy", "fastsd-proxy.service", "system"),

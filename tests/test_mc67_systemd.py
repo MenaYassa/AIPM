@@ -35,7 +35,7 @@ def test_registry_is_small_backend_owned_and_explicit() -> None:
     assert all(entry.unit_name.endswith(".service") for entry in SYSTEMD_UNIT_REGISTRY)
 
 
-def test_local_provider_uses_fixed_user_command_and_safe_properties() -> None:
+def test_local_provider_uses_system_scope_and_safe_properties() -> None:
     calls = []
 
     def runner(command, **kwargs):
@@ -47,7 +47,7 @@ def test_local_provider_uses_fixed_user_command_and_safe_properties() -> None:
     result = provider.observe(entry)
 
     assert result.status is SystemdUnitStatus.ACTIVE
-    assert calls[0][0] == ("systemctl", "--user", "show", "aipm-dashboard.service", "--no-pager", "--property=LoadState,ActiveState,SubState,UnitFileState")
+    assert calls[0][0] == ("systemctl", "show", "aipm-dashboard.service", "--no-pager", "--property=LoadState,ActiveState,SubState,UnitFileState")
     assert calls[0][1]["shell"] is False
     assert calls[0][1]["timeout"] == 2.0
 
@@ -68,17 +68,30 @@ def test_local_provider_uses_system_scope_only_for_registry_entry() -> None:
 
 def test_registry_manager_mapping_is_exact_for_all_entries() -> None:
     expected = {
-        "aipm-dashboard": ("user", "aipm-dashboard.service"),
-        "aipm-telemetry": ("user", "aipm-telemetry.service"),
-        "aipm-events": ("user", "aipm-events.service"),
-        "freebuff-llm-proxy": ("user", "freebuff-llm-proxy.service"),
+        "aipm-dashboard": ("system", "aipm-dashboard.service"),
+        "aipm-telemetry": ("system", "aipm-telemetry.service"),
+        "aipm-events": ("system", "aipm-events.service"),
+        "freebuff-llm-proxy": ("system", "freebuff-llm-proxy.service"),
         "fastsd-webui": ("system", "fastsd-webui.service"),
         "fastsd-webserver": ("system", "fastsd-webserver.service"),
         "fastsd-proxy": ("system", "fastsd-proxy.service"),
     }
     actual = {entry.id.value: (entry.manager_scope, entry.unit_name) for entry in SYSTEMD_UNIT_REGISTRY}
     assert actual == expected
-    assert "cloudflared" not in actual
+
+
+def test_local_provider_uses_plain_systemctl_for_all_registry_entries() -> None:
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(stdout="LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\n", returncode=0)
+
+    provider = LocalSystemdProvider(runner=runner)
+    for entry in SYSTEMD_UNIT_REGISTRY:
+        provider.observe(entry)
+    assert all(call[:2] == ("systemctl", "show") for call in calls)
+    assert all("--user" not in call for call in calls)
 
 
 def test_unknown_unit_id_is_rejected_before_provider_query() -> None:
