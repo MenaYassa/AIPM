@@ -196,7 +196,7 @@ class _SQLiteTelemetryReadSnapshot(AbstractContextManager["_SQLiteTelemetryReadS
             monotonic = time.monotonic
         connection: sqlite3.Connection | None = None
         try:
-            connection = sqlite3.connect(path, timeout=5, isolation_level=None)
+            connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5, isolation_level=None)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA query_only = ON")
             if int(connection.execute("PRAGMA query_only").fetchone()[0]) != 1:

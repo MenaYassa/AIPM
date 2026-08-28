@@ -296,7 +296,7 @@ def test_sqlite_pragmas_are_enabled(tmp_path):
     repository = SQLiteHistoryRepository(path)
     with repository._connection() as connection:
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-        assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "delete"
 
 
 def test_corrupted_database_fails_clearly(tmp_path):

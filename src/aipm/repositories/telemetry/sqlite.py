@@ -678,9 +678,9 @@ class SQLiteHistoryRepository:
         try:
             connection.execute("PRAGMA foreign_keys = ON")
             try:
-                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("PRAGMA journal_mode = DELETE")
             except sqlite3.DatabaseError:
-                # SQLite builds/filesystems that cannot enable WAL still remain usable.
+                # SQLite builds/filesystems that cannot enable rollback journal still remain usable.
                 pass
             yield connection
             connection.commit()

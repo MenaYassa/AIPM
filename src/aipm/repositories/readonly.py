@@ -18,11 +18,12 @@ def _writable(path: Path) -> bool:
 def require_read_only_filesystem(database_path: Path) -> None:
     """Require an existing database and a non-writable database directory.
 
-    The dashboard must consume current WAL frames, so it cannot use SQLite's
-    immutable mode. Instead, the service-level filesystem sandbox must deny
-    writes to the database, existing WAL/SHM sidecars, and the containing
-    directory. This validator fails closed before a read-only repository opens
-    a connection when that boundary is absent.
+    The dashboard relies on the service-level filesystem sandbox to deny writes
+    to the database and its containing directory. Writers use a rollback
+    journal so no sidecar files are needed to open the database read-only; a
+    WAL-mode database would additionally require readable pre-existing WAL/SHM
+    sidecars. This validator fails closed before a read-only repository opens a
+    connection when that boundary is absent.
     """
 
     database_path = database_path.expanduser()
