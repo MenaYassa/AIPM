@@ -1,5 +1,8 @@
 # MC-4.5 Production Hardening Runbook
 
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
 ## Readiness status
 
 MC-4.5 hardens the notification subsystem but does not authorize notification production enablement by itself. The dashboard remains loopback-bound, while the current public ingress is an existing bridge path serving `vpanel.03092017.xyz`:

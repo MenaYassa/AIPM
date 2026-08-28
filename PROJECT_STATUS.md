@@ -1,10 +1,13 @@
 # AIPM Project Status
 
-**Assessment date:** 2026-08-16
-**Repository:** [MenaYassa/AIPM][1]
-**Assessed branch:** `main` at `97e3d06` (`Refactor health engines, models, and providers`)
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](docs/LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
 
-## Executive summary
+
+**Historical assessment date:** 2026-08-16
+**Historical repository reference:** [MenaYassa/AIPM][1]
+**Historical assessed branch:** `main` at `97e3d06` (`Refactor health engines, models, and providers`)
+
+## Historical baseline summary
 
 AIPM is a Python command-line application intended to act as an **AI Platform Manager** for locally hosted projects. The repository already contains a recognizable capability/service/provider architecture, domain models for Docker, Compose, Git, host telemetry, backups, and health reports, together with a Typer CLI. The latest commits have moved the project toward a health-analyzer framework and transactional update workflow.
 
@@ -145,7 +148,7 @@ This milestone does not claim real-VPS readiness. The referenced VPS infrastruct
 
 **Updated:** 2026-08-24
 
-The historical baseline above is retained for auditability. The repository has completed the read-only Mission Control cockpit through MC-6.8 and MC-6.13 through Phase 4B. The current pushed checkpoint is:
+The historical baseline and checkpoint below are retained for auditability. They describe the repository state at the earlier Phase 4B review; the current pushed checkpoint is maintained in [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md). The historical checkpoint was:
 
 ```text
 HEAD=af1a10b1f150335df27fda5d915f44e4f14146f4
@@ -153,7 +156,7 @@ ORIGIN_MAIN=af1a10b1f150335df27fda5d915f44e4f14146f4
 WORKTREE=CLEAN
 ```
 
-MC-6.13 Phases 2, 3, 4A, and 4B are complete, reviewed, committed, and pushed. Phase 4B adds only a private authenticated read-only `POST /api/advisor/evaluate` transport boundary with bounded request decoding, fail-closed authentication, safe 400/401/422/500 errors, direct delegation through `AdvisorCompositionRequest` and `compose_advisor()`, and direct `AdvisorResponse` serialization. Phases 4C–4E have not started and remain unauthorized. The Phase 4B API does not collect observations, read a clock, invoke providers or LLMs, perform actions, or alter the dashboard UI or runtime infrastructure.
+**Historical Phase 4B position:** MC-6.13 Phases 2, 3, 4A, and 4B were complete at that earlier checkpoint. The later Phase 4C through 4E work is recorded in [`docs/MC-6.13_STATUS.md`](docs/MC-6.13_STATUS.md) and [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md). The advisor remains read-only, non-authoritative, and non-executing.
 
 | Completed area | Current result |
 |---|---|
@@ -193,8 +196,16 @@ The dashboard remains loopback-bound and the public hostname is `vpanel.03092017
 
 The complete current ledger and next-step sequence is maintained in [`docs/MC-6_STATUS.md`](docs/MC-6_STATUS.md). The dedicated advisor status is in [`docs/MC-6.13_STATUS.md`](docs/MC-6.13_STATUS.md). The broader update-management roadmap remains in [`PRODUCTION_ROADMAP.md`](PRODUCTION_ROADMAP.md).
 
-## Current verification baseline
+## Historical verification baseline
 
-The final MC-6.13 Phase 4B validation passed 17 focused tests and 516 full tests
+The historical MC-6.13 Phase 4B validation passed 17 focused tests and 516 full tests. The current synchronized checkout subsequently reproduced 618 full tests and 73 tests for the latest SQLite correction, with the existing Starlette/httpx deprecation warning.
 
-> **Current project position:** Mission Control read-only cockpit work is complete through MC-6.8, and the MC-6.13 advisor implementation is complete through Phase 4B. MC-6.13 Phases 4C–4E, advisor UI integration, LLM functionality, autonomous actions, public exposure, and target runtime deployment remain outside the authorized current state; Phase 4B is private, authenticated, read-only, and non-authoritative.
+> **Historical project position:** This paragraph records the earlier Phase 4B checkpoint. It is superseded by [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md), which records MC-6.13 complete through bounded read-only Phase 4E, the live vpanel observations, and the continuing prohibition on MC-6.12 operational execution.
+
+## Current-state reconciliation — 2026-08-28
+
+The canonical current-status record is [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` remains intentionally untouched and contains the separate incident-reopen workstream plus `docs/MC-6.9_DESIGN.md`; those items are not part of published current main.
+
+The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
+
+MC-6.12 is foundation-only, not an operational action plane. No executor, action route/UI, durable operational state, leases/fencing, production target, service account, production authorization, autonomous remediation, LLM/provider execution, or notification delivery is enabled. Database merge/delete/repair/migration/rekey operations remain unauthorized.

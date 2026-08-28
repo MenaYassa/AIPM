@@ -1,9 +1,12 @@
 # MC-6.13 AI Advisor Status
 
-**Status date:** 2026-08-26
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
+**Status date:** 2026-08-28
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
-**Current commit:** `ead26b68155baee6c38e1f47ad124ae676ea56f7` — `feat: add bounded advisor observability summary`
-**Remote parity:** `HEAD == origin/main`; Phase 4E is landed and the supplied production validation passed. This documentation synchronization is intentionally pending its own review/commit.
+**Current commit:** `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba` — `fix: open dashboard read-only SQLite repos without WAL sidecars`
+**Remote parity:** `HEAD == origin/main == remote main`; Phase 4E and the subsequent SQLite read-only correction are present in published main. Fresh public web evidence is documented separately.
 
 ## Current status
 
@@ -243,3 +246,11 @@ MC6.13_UI=LIVE_PROVIDER_WITH_EXPLICIT_FIXTURE_MODE
 MC6.13_LLM=NOT_IMPLEMENTED
 MC6.13_AUTONOMOUS_ACTIONS=NOT_AUTHORIZED
 ```
+
+## Current-state reconciliation — 2026-08-28
+
+The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` remains intentionally untouched and contains the separate incident-reopen workstream plus `docs/MC-6.9_DESIGN.md`; those items are not part of published current main.
+
+The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
+
+MC-6.12 is foundation-only, not an operational action plane. No executor, action route/UI, durable operational state, leases/fencing, production target, service account, production authorization, autonomous remediation, LLM/provider execution, or notification delivery is enabled. Database merge/delete/repair/migration/rekey operations remain unauthorized.

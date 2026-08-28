@@ -1,5 +1,8 @@
 # MC-6.4 Design — Server Capability Closure and Roadmap Reconciliation
 
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
 ## 1. Status and decision
 
 This document is a **design and inspection report only**. It does not authorize or perform MC-6.4 implementation, deployment, systemd changes, live-database access, Docker operations, Cloudflare changes, credential access, provider access, notification activation, public ingress, or MC-6.5 work.

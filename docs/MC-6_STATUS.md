@@ -1,12 +1,15 @@
 # AIPM Mission Control Status and Roadmap
 
-**Status date:** 2026-08-26
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
+**Status date:** 2026-08-28
 
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
 
-**Checkpoint:** `ead26b68155baee6c38e1f47ad124ae676ea56f7` — `feat: add bounded advisor observability summary`
+**Checkpoint:** `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba` — `fix: open dashboard read-only SQLite repos without WAL sidecars`
 
-**Remote parity:** `HEAD == origin/main`; Phase 4E is landed and the supplied production validation passed. This documentation synchronization is pending its own review/commit.
+**Remote parity:** `HEAD == origin/main == remote main`; current tracked main is synchronized. Historical Phase 4E production validation remains recorded; fresh web evidence is preserved separately.
 
 ## Executive summary
 
@@ -82,31 +85,35 @@ The following invariants remain mandatory for every future milestone:
 | Network | The dashboard remains loopback-bound at `127.0.0.1:8787`. Cloudflare Access protects the documented public hostname `vpanel.03092017.xyz`; the current Cloudflared container reaches the host-side nginx listener at `172.20.0.1:8788`, which forwards only to the loopback dashboard. AIPM relies on private edge protection and does not verify the edge identity assertion. |
 | Runtime | No background collector, duplicate telemetry/event store, new worker, or second database is introduced. Existing telemetry, events, incidents, notifications, and history remain authoritative. |
 
-## Remaining Mission Control milestones
+## Mission Control milestone status and remaining boundaries
 
 The authoritative implementation sequence is defined in [`MC-6_IMPLEMENTATION_PLAN.md`](MC-6_IMPLEMENTATION_PLAN.md).
 
 ### MC-6.9 — Incident and history evidence expansion
 
-**Next milestone; design/inspection must come first.** The scope is bounded evidence and navigation using existing MC-3, incident, history, and read-only repository contracts. Candidate work includes cursor pagination, evidence/timeline projections, bounded history comparisons, and safe cross-links among resources, events, incidents, logs, and history. No new event/history database, schema, worker, or notification path is permitted.
+**Status: PASS_EXISTING.** MC-6.9 conformance is accepted using the existing bounded evidence/history implementation. The design note remains preserved separately in the stash and is not part of current main. No new event/history database, schema, worker, or notification path is permitted.
 
-The first MC-6.9 deliverable should be `docs/MC-6.9_DESIGN.md`, followed by a review checkpoint. No implementation should begin automatically.
+The untracked `docs/MC-6.9_DESIGN.md` remains preserved in `stash@{0}` as a separate design artifact. It must not be applied or committed without separate authorization.
 
 ### MC-6.10 — Settings posture and notification safety
+
+**Status: COMPLETE under the safe posture contract.**
 
 Expose only safe scalar posture: booleans, counts, bounded numerics, enum values, version/commit, and deployment posture. Raw YAML, secret references, environment-variable names, destination values, provider configuration, and credentials remain excluded. Tests must cover enabled, disabled, empty, invalid, and partially configured temporary configurations while keeping notifications disabled and providers uninstantiated.
 
 ### MC-6.11 — Shared Typer/Rich TUI
 
+**Status: LANDED and published.**
+
 Add a local SSH/TUI surface only after shared capability contracts stabilize. The TUI must consume the same façades and domain contracts directly rather than scraping HTTP. It must render all Observation states, truncation, terminal-width behavior, and safe errors without live infrastructure in tests.
 
-### MC-6.12 — Future action control plane
+### MC-6.12 — Foundation only; operational action plane blocked
 
 This is not part of the current read-only cockpit. Any future action architecture requires separate identity, authorization, human approval, intent/plan models, risk classification, idempotency, leases, audit records, verification, timeout/cancellation, rollback, and dedicated permissions. Actions must not be added to existing read façades.
 
 ### MC-6.13 — AI Advisor
 
-**Phase 2, Phase 3, Phase 4A, Phase 4B, Phase 4C fixture presentation, Phase 4C.1 live orchestration, and Phase 4D complete and pushed.** Phase 4B is a private authenticated transport boundary behind the selected Cloudflare Access edge protection. Phase 4D is a private-VPS telemetry-owned bounded export and transport-neutral observation adapter ending at `AdvisorCompositionRequest`; Phase 4C remains an explicit fixture capability; and Phase 4C.1 provides the live read-only `GET /api/advisor` path through the telemetry owner, adapter, and composition boundary. The live path uses a server-owned evaluation context, bounded five-minute window, no browser polling, no client-side telemetry access, and no actions or approvals. Phase 4B.1 records the edge-only decision; stronger application identity behavior, Phase 4E, actions, approvals, remediation, and LLM/provider functionality remain future and separately authorized.
+**Status: COMPLETE through bounded read-only Phase 4E.** Phases 2, 3, 4A, 4B, fixture/live 4C, 4C.1, 4C.2, 4C.3, 4D, and 4E are complete and published. The live path uses one server-owned bounded evaluation through telemetry export, adapter, and deterministic composition, with no polling, actions, approvals, remediation, or LLM/provider execution. Complete evidence is not a health claim; MC-6.12 remains separately blocked.
 
 ## Deployment and operational gates
 
@@ -202,10 +209,10 @@ Before each milestone, approval must identify the exact source and test files al
 
 ```text
 MC6.8=COMPLETE
-MC6.9=NEXT_DESIGN_ONLY
-MC6.10=PLANNED
-MC6.11=PLANNED
-MC6.12=FUTURE
+MC6.9=PASS_EXISTING
+MC6.10=COMPLETE_SAFE_POSTURE
+MC6.11=LANDED
+MC6.12=FOUNDATION_ONLY_OPERATIONAL_PLANE_BLOCKED
 MC6.13=COMPLETE_THROUGH_PHASE4E
 MC6.13_PHASE2=COMPLETE
 MC6.13_PHASE3=COMPLETE
@@ -239,3 +246,11 @@ NOTIFICATIONS=DISABLED
 *This document is the current status ledger. Historical milestone design and completion documents remain preserved as audit records.*
 
 [1]: https://github.com/MenaYassa/AIPM "AIPM repository"
+
+## Current-state reconciliation — 2026-08-28
+
+The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` remains intentionally untouched and contains the separate incident-reopen workstream plus `docs/MC-6.9_DESIGN.md`; those items are not part of published current main.
+
+The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
+
+MC-6.12 is foundation-only, not an operational action plane. No executor, action route/UI, durable operational state, leases/fencing, production target, service account, production authorization, autonomous remediation, LLM/provider execution, or notification delivery is enabled. Database merge/delete/repair/migration/rekey operations remain unauthorized.

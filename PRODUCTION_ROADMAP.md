@@ -1,7 +1,10 @@
 # AIPM Production Roadmap
 
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](docs/LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
 **Assessment date:** 2026-08-24
-**Repository state:** `main` and `origin/main` at `af1a10b1f150335df27fda5d915f44e4f14146f4` (`feat: add MC-6.13 advisor evaluation API boundary`)
+**Repository state at last historical assessment:** `af1a10b1f150335df27fda5d915f44e4f14146f4` (historical record; superseded by current status below)
 **Source of requirements:** attached `AIPM.md`, especially sections 2, 5, 7–11, 15, and 18.
 
 ## Current-state assessment
@@ -77,7 +80,7 @@ The project should not be declared production-ready merely because the CLI works
 [2]: https://docs.python.org/3/library/subprocess.html "Python subprocess documentation"
 
 
-## Mission Control alignment update
+## Historical Mission Control alignment snapshot (superseded 2026-08-28)
 
 **Updated:** 2026-08-24
 
@@ -102,3 +105,11 @@ The broader roadmap work remains independently tracked:
 | Real VPS inspection | Separate read-only, explicitly approved operation; no state-changing commands are implied. |
 
 Mission Control does not perform update execution, remediation, or public exposure itself. The current dashboard path is an existing bridge ingress—Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → loopback dashboard at `127.0.0.1:8787`—serving `vpanel.03092017.xyz` behind the confirmed Cloudflare Access edge boundary, while AIPM remains loopback-bound, GET-only, and read-only. AIPM relies on private edge protection and does not verify Cloudflare JWTs or proxy identity headers. Separately supplied production verification reports successful health checks through the existing bridge and public endpoint, while telemetry commit `0ab4b0e859fff96add058cb3eb55e0ff408b1a83` reduced the previous retention-spin CPU to approximately 0% with healthy sampling. These are live operational facts, not repository changes made by the roadmap work. Orphan-process cleanup and configuration-twin deletion remain external VPS state. This ingress topology remains separate from any future AIPM management control plane.
+
+## Current-state reconciliation — 2026-08-28
+
+The canonical current-status record is [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` remains intentionally untouched and contains the separate incident-reopen workstream plus `docs/MC-6.9_DESIGN.md`; those items are not part of published current main.
+
+The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
+
+MC-6.12 is foundation-only, not an operational action plane. No executor, action route/UI, durable operational state, leases/fencing, production target, service account, production authorization, autonomous remediation, LLM/provider execution, or notification delivery is enabled. Database merge/delete/repair/migration/rekey operations remain unauthorized.

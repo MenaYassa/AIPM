@@ -1,5 +1,8 @@
 # MC-6.3 — Server & Host Intelligence Design
 
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
 ## Status and scope
 
 This is a **design and inspection report only**. MC-6.3 implementation has not started. No source files, tests, production files, systemd configuration, database, WAL/SHM files, Docker state, Cloudflare state, credentials, providers, telemetry runtime, MC-3 runtime, notifications, or services were modified or accessed.

@@ -1,10 +1,13 @@
 # AIPM Mission Control MC-6 Implementation Plan
 
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
 ## Scope and delivery rule
 
-This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.8 and MC-6.13 Phases 2, 3, 4A, 4B, the fixture-only 4C presentation, and 4D have been implemented, reviewed, validated, committed, and pushed. The current checkpoint is `e8f0b12d7473e3c021c536e738c8b3a414d116ad`.
+This document is the authoritative Mission Control roadmap. MC-6.1 through MC-6.11 and MC-6.13 Phases 2, 3, 4A, 4B, fixture/live 4C presentation, 4C.1, 4C.2, 4C.3, 4D, and 4E have been implemented and published in the bounded read-only scope. MC-6.12 contains only non-executing foundations. The current checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; see [`CURRENT_STATUS.md`](CURRENT_STATUS.md) for the reconciled ledger and [`LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md) for fresh public evidence.
 
-MC-6.9 through MC-6.12, live Phase 4C orchestration, and Phase 4E remain future milestones. MC-6.13 Phase 4B.1 records the selected Cloudflare Access edge-only authentication boundary: AIPM relies on private edge protection and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. MC-6.13 Phase 4B is complete as a private authenticated read-only API boundary, Phase 4C is complete only as a fixture-driven non-live presentation on the existing `#/ai-agent` route, and Phase 4D is complete as a private-VPS telemetry-owned bounded export plus transport-neutral observation adapter ending at `AdvisorCompositionRequest`. Stronger identity-aware application behavior and live Phase 4C orchestration require separate authorization.
+MC-6.9 is PASS_EXISTING, MC-6.10 is complete under its safe null/not_observed posture contract, MC-6.11 is landed, and MC-6.12 remains foundation-only with its operational action plane blocked. MC-6.13 Phase 4B.1 records the selected Cloudflare Access perimeter-only boundary: AIPM relies on private edge protection when enabled and does not implement JWT verification, identity middleware, session storage, or proxy-header trust. Phase 4B is a private authenticated read-only API boundary; Phase 4C is fixture/live presentation; Phase 4C.1 is live read-only orchestration; Phase 4C.2 aligns to a completed telemetry sample boundary; Phase 4C.3 validates complete evidence; Phase 4D is telemetry-owned export/adapter; and Phase 4E is bounded presentation. Stronger identity-aware behavior, actions, remediation, and LLM/provider functionality remain separately authorized and blocked.
 
 ## Milestone map
 
@@ -18,10 +21,10 @@ MC-6.9 through MC-6.12, live Phase 4C orchestration, and Phase 4E remain future 
 | MC-6.6 | EXTEND | Project detail, Git posture, health, and runtime associations. | Complete, including 6.6.1–6.6.3 refinements | Read-only only. |
 | MC-6.7 | NEW | Allow-listed Systemd observation façade/API and page. | Complete, including 6.7.1 registry reconciliation | Read-only only; no unit mutation. |
 | MC-6.8 | NEW | Bounded, redacted Logs façade/API and page. | Complete and pushed at `d1f6929` | Read-only only; no shell/arbitrary paths. |
-| MC-6.9 | EXTEND | Incident/history evidence, comparison queries, cursor pagination, and cross-links. | Next: design/inspection only | Read-only only. |
-| MC-6.10 | EXTEND | Settings posture and expanded notification safety/audit views. | Planned | Read-only only; notifications remain disabled. |
-| MC-6.11 | NEW | Shared Typer/Rich TUI consuming the same façades and contracts. | Planned | Read-only only. |
-| MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Future, separate gate | Separate authorization required. |
+| MC-6.9 | EXTEND | Incident/history evidence, comparison queries, cursor pagination, and cross-links. | PASS_EXISTING; conformance accepted | Read-only only. Design note remains preserved separately. |
+| MC-6.10 | EXTEND | Settings posture and expanded notification safety/audit views. | Complete under safe null/not_observed posture contract | Read-only only; notifications remain disabled. |
+| MC-6.11 | NEW | Shared Typer/Rich TUI consuming the same façades and contracts. | Landed and published | Read-only only; public web cannot verify terminal rendering. |
+| MC-6.12 | FUTURE | Authentication, authorization, approval, action execution, and rollback control plane. | Foundation only; operational action plane blocked | Separate authorization required; production actions denied. |
 | MC-6.13 Phase 2/3 | EXTEND/NEW | Immutable evidence normalization and ten deterministic, evidence-linked advisor rules. | Complete and pushed at `a7ee2f1` | Pure domain logic only. |
 | MC-6.13 Phase 4A | EXTEND/NEW | Bounded immutable request contract and direct normalizer-to-rule-engine composition. | Complete and pushed at `37d8a0e` | No API, UI, LLM, runtime, scheduler, or action behavior. |
 | MC-6.13 Phase 4B | EXTEND/NEW | Private authenticated read-only `POST /api/advisor/evaluate` transport boundary over Phase 4A. | Complete and pushed at `af1a10b` | Bounded transport only; no UI, live collection, LLM, runtime, scheduler, or action behavior; the route remains behind the selected Cloudflare Access edge protection and is not public outside that private boundary. Stronger application identity behavior, live 4C, 4D, and 4E remain separately gated. |
@@ -366,3 +369,11 @@ The first read-only MC-6 release is complete only when:
 - **COMPLETE:** shared scheduler, Server, Docker, Project/Application, Systemd observation, bounded Logs, and supporting read-only adapters through MC-6.8.
 - **NEW/PLANNED:** dedicated TUI and later additive projections.
 - **FUTURE:** writes/actions, stronger application identity behavior or public-ingress changes beyond the selected Cloudflare Access edge boundary, SSE/WebSockets, live advisor orchestration, AI Agent execution, and notification activation.
+
+## Current-state reconciliation — 2026-08-28
+
+The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` remains intentionally untouched and contains the separate incident-reopen workstream plus `docs/MC-6.9_DESIGN.md`; those items are not part of published current main.
+
+The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
+
+MC-6.12 is foundation-only, not an operational action plane. No executor, action route/UI, durable operational state, leases/fencing, production target, service account, production authorization, autonomous remediation, LLM/provider execution, or notification delivery is enabled. Database merge/delete/repair/migration/rekey operations remain unauthorized.

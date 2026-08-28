@@ -1,5 +1,8 @@
 # Mission Control MC-4: Alerts and Notifications
 
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
 MC-4 adds incident-aware notifications without changing the meaning of telemetry, events, incidents, health findings, or severity. The system uses a durable SQLite outbox and a separate `aipm notifications run` worker.
 
 ## Runtime flow

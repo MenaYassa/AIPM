@@ -1,5 +1,8 @@
 # MC-2.1 Telemetry Performance & Sampling Runbook
 
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+
+
 ## Scope
 
 MC-2.1 separates telemetry into a fast state path and independently scheduled slow refresh tasks. The fast path retains the existing 15-second cadence and never waits for Docker resource statistics or project discovery. Docker resource collection is performed through one provider-bound aggregate `docker stats --no-stream` operation, initially every 60 seconds with a 15-second timeout. Project discovery is independently refreshed every 60 seconds.
