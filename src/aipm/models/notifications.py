@@ -14,6 +14,7 @@ class NotificationTrigger(Enum):
     INCIDENT_ESCALATED = "incident_escalated"
     INCIDENT_UPDATED = "incident_updated"
     INCIDENT_RECOVERED = "incident_recovered"
+    INCIDENT_REOPENED = "incident_reopened"
     INCIDENT_ACKNOWLEDGED = "incident_acknowledged"
 
 

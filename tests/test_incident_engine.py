@@ -59,3 +59,24 @@ def test_acknowledgement_is_not_remediation(tmp_path):
     acknowledged = engine.acknowledge(incident.id, NOW)
     assert acknowledged.status.value == "acknowledged"
     assert acknowledged.resolved_at is None
+
+
+def test_reopening_resolved_incident_reuses_the_same_thread(tmp_path):
+    event_repository, incident_repository = setup(tmp_path)
+    engine = IncidentEngine(incident_repository)
+    opening = persist(event_repository, make_event(1, EventType.CONTAINER_RESTARTING, "open", "restarting"))
+    assert engine.apply((opening,)) == 1
+    first = incident_repository.get_open_by_correlation("container:cid:stability")
+    recovery = Event(opening.id, "recovery", NOW, EventType.CONTAINER_RECOVERED, Severity.INFO, EventSource.DERIVED, opening.resource, "Container recovered", "back to running", "restarting", "running", 1, 1, opening.correlation_key)
+    assert engine.apply((recovery,)) == 1
+    assert incident_repository.get_incident(first.id).status.value == "resolved"
+
+    reopening = Event(opening.id, "reopen", NOW, EventType.CONTAINER_RESTARTING, Severity.CRITICAL, EventSource.DERIVED, opening.resource, "Container restarting", "deterministic evidence", "running", "restarting", 1, 1, opening.correlation_key)
+    assert engine.apply((reopening,)) == 1
+    reopened = incident_repository.get_open_by_correlation("container:cid:stability")
+    assert reopened is not None
+    assert reopened.id == first.id
+    assert reopened.status.value == "open"
+    assert reopened.resolved_at is None
+    assert reopened.severity.value == "critical"
+    assert incident_repository.get_incident(first.id).id == first.id

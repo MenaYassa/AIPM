@@ -119,18 +119,35 @@ class SQLiteIncidentRepository:
                 transition = "incident_recovered"
             elif opens_incident:
                 if row is None:
-                    cursor = connection.execute(
-                        """INSERT INTO incidents
-                        (incident_key, title, severity, status, started_at, updated_at, resolved_at,
-                         resource_type, resource_id, resource_name, project_path, correlation_key, summary)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (f"incident:{event.correlation_key}", event.title, event.severity.value, IncidentStatus.OPEN.value,
-                         _timestamp(now), _timestamp(now), None, event.resource.resource_type.value,
-                         event.resource.identifier, event.resource.name, event.resource.project_path,
-                         event.correlation_key, event.description),
-                    )
-                    incident_id = int(cursor.lastrowid)
-                    transition = "incident_opened"
+                    reopened = connection.execute(
+                        "SELECT * FROM incidents WHERE correlation_key = ? ORDER BY id DESC LIMIT 1",
+                        (event.correlation_key,),
+                    ).fetchone()
+                    if reopened is not None:
+                        incident_id = int(reopened["id"])
+                        previous_status = reopened["status"]
+                        previous_severity = reopened["severity"]
+                        new_severity = _max_severity(reopened["severity"], event.severity.value)
+                        connection.execute(
+                            """UPDATE incidents SET status = ?, severity = ?, updated_at = ?,
+                            resolved_at = NULL, title = ?, summary = ? WHERE id = ?""",
+                            (IncidentStatus.OPEN.value, new_severity, _timestamp(now),
+                             event.title, event.description, incident_id),
+                        )
+                        transition = "incident_reopened"
+                    else:
+                        cursor = connection.execute(
+                            """INSERT INTO incidents
+                            (incident_key, title, severity, status, started_at, updated_at, resolved_at,
+                             resource_type, resource_id, resource_name, project_path, correlation_key, summary)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (f"incident:{event.correlation_key}", event.title, event.severity.value, IncidentStatus.OPEN.value,
+                             _timestamp(now), _timestamp(now), None, event.resource.resource_type.value,
+                             event.resource.identifier, event.resource.name, event.resource.project_path,
+                             event.correlation_key, event.description),
+                        )
+                        incident_id = int(cursor.lastrowid)
+                        transition = "incident_opened"
                 else:
                     incident_id = int(row["id"])
                     new_severity = _max_severity(row["severity"], event.severity.value)
