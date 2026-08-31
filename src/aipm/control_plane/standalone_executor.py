@@ -16,6 +16,21 @@ Trust model:
 - The executor does NOT read the control-plane database.
 
 The executor's own mutation receipt store is its only durable state.
+
+Guarantee hierarchy (precise terms):
+- Exactly-once durable claim: for a given (action_id, fencing_token),
+  at most one receipt can ever exist (UNIQUE constraint + BEGIN IMMEDIATE
+  claim transaction). Proven under concurrency.
+- Single provider invocation under concurrent duplicate requests: the
+  claim gates the provider, so concurrent duplicate envelopes yield at
+  most one provider call; every loser raises MutationReceiptError.
+- NOT exactly-once external side effect: if the process dies between
+  claim and the provider's own durability boundary, the external effect
+  may or may not have occurred. RECEIPT_CREATED then means
+  attempted/outcome-unknown; it is never auto-retried, and pre-provider
+  executor failures are recorded as MUTATION_FAILED
+  (provider_code="executor_error:<stage>") so a lingering RECEIPT_CREATED
+  can only be a true mid-flight crash window.
 """
 from __future__ import annotations
 
@@ -28,6 +43,7 @@ from typing import Any, Callable
 from aipm.control_plane.audit.sanitize import AuditEventError, bounded_reference
 from aipm.control_plane.mutation_receipt import MutationReceiptStore, MutationStatus
 from aipm.control_plane.systemd_provider import (
+    SystemdRestartError,
     SystemdRestartPolicy,
     SystemdRestartProvider,
     SystemdRestartResult,
@@ -196,17 +212,27 @@ class StandaloneSystemdExecutor:
             contract_digest=envelope.contract_digest,
         )
 
-        # 3. Resolve the unit from the allow-list
-        policy = self._provider.resolve_unit(
-            self._policy.unit_id,
-            environment=envelope.environment,
-        )
+        # Steps 3-5 (resolve/observe/restart) are wrapped so that a failure
+        # BEFORE the provider invocation is durably recorded as
+        # MUTATION_FAILED (provider_code="executor_error:<stage>") instead
+        # of leaving a perpetual RECEIPT_CREATED. RECEIPT_CREATED after this
+        # point therefore means only one thing: the provider was invoked and
+        # the process died mid-flight (crash window), i.e. outcome UNKNOWN.
+        try:
+            # 3. Resolve the unit from the allow-list
+            policy = self._provider.resolve_unit(
+                self._policy.unit_id,
+                environment=envelope.environment,
+            )
 
-        # 4. Pre-mutation observation
-        pre_snapshot = self._provider.observe_unit(policy, now=moment)
+            # 4. Pre-mutation observation
+            pre_snapshot = self._provider.observe_unit(policy, now=moment)
 
-        # 5. Invoke the provider
-        provider_result = self._provider.restart(policy, now=moment)
+            # 5. Invoke the provider
+            provider_result = self._provider.restart(policy, now=moment)
+        except SystemdRestartError as exc:
+            self._fail_receipt(envelope, stage="pre_provider")
+            raise
 
         # 6. Classify the outcome
         if provider_result.timed_out:
@@ -252,6 +278,23 @@ class StandaloneSystemdExecutor:
             provider_code=provider_code,
             evidence_reference=evidence_ref,
         )
+
+    def _fail_receipt(self, envelope: ExecutionEnvelope, *, stage: str) -> None:
+        """Record a definitive pre-provider executor failure on the receipt.
+
+        Never raises: if the receipt cannot be updated (e.g. contention),
+        the original error must propagate; the receipt stays RECEIPT_CREATED
+        and the mutation is treated as attempted/unknown by the CP.
+        """
+        try:
+            self._receipts.complete(
+                action_id=envelope.action_id,
+                fencing_token=envelope.fencing_token,
+                status=MutationStatus.MUTATION_FAILED,
+                provider_code=f"executor_error:{stage}",
+            )
+        except Exception:
+            pass
 
     def _validate_envelope(self, envelope: ExecutionEnvelope, *, now: datetime) -> None:
         """Structural validation of the envelope; no business authorization."""

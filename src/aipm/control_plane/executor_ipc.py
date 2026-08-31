@@ -181,6 +181,11 @@ class ExecutorIPCServer:
             # Peer credential authentication
             caller_uid = get_peer_uid(conn)
             if self._allowed_caller_uids is not None and caller_uid not in self._allowed_caller_uids:
+                # Drain the (already-sent) request frame before replying.
+                # A client that writes its full request before reading would
+                # otherwise race our early close and get EPIPE instead of the
+                # refusal frame.
+                self._drain_request(conn)
                 response = ExecutionResponse(outcome="refused", provider_code="unauthorized_caller", action_id="", evidence_reference="")
                 conn.sendall(encode_frame(response.to_json()))
                 return response
@@ -208,6 +213,32 @@ class ExecutorIPCServer:
             return error_response
         finally:
             conn.close()
+
+    @staticmethod
+    def _drain_request(conn: socket.socket, *, timeout: float = 0.5) -> None:
+        """Best-effort bounded drain of a pending request frame.
+
+        Reads at most one frame header + MAX_REQUEST_SIZE payload, with a
+        short timeout. Any error is swallowed: this is a courtesy drain so
+        the refusal frame is not lost to an early close (EPIPE race); the
+        refusal path never parses or trusts the drained bytes.
+        """
+        try:
+            conn.settimeout(timeout)
+            header = conn.recv(4)
+            if len(header) < 4:
+                return
+            (length,) = struct.unpack(">I", header)
+            if length > MAX_REQUEST_SIZE:
+                return
+            remaining = length
+            while remaining > 0:
+                chunk = conn.recv(min(remaining, 1024))
+                if not chunk:
+                    return
+                remaining -= len(chunk)
+        except OSError:
+            pass
 
     def stop(self) -> None:
         if self._sock:

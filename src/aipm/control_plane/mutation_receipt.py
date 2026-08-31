@@ -19,11 +19,12 @@ reconcile through independent observation.
 """
 from __future__ import annotations
 
+import secrets
 import sqlite3
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from aipm.control_plane.audit.sanitize import AuditEventError, bounded_reference
@@ -114,91 +115,139 @@ class MutationReceiptStore:
 
     The store uses its own SQLite database (separate from the control-plane
     DB) to maintain independence. The executor service owns this database.
+
+    Concurrency model: every operation opens its own short-lived SQLite
+    connection with WAL + busy_timeout. claim() wraps its transaction in
+    BEGIN IMMEDIATE so the SELECT-then-INSERT decision is serialized by
+    SQLite's write lock; concurrent claims for the same (action_id,
+    fencing_token) serialize, one INSERT commits, and every loser observes
+    the winner's row before raising. Sharing one connection across threads
+    would corrupt Python-level statement/transaction state even though
+    sqlite3 itself is threadsafe, so no connection is ever shared here.
     """
 
-    __slots__ = ("_db", "_lock", "_initialized")
+    __slots__ = ("_db_path", "_initialized")
 
     def __init__(self, db_path: str | Path) -> None:
-        from pathlib import Path as _Path
-
-        db_file = _Path(db_path)
+        db_file = Path(db_path)
         db_file.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db_file), check_same_thread=False)
-        lock = threading.Lock()
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.executescript(_RECEIPT_SCHEMA)
-        conn.commit()
-        object.__setattr__(self, "_db", conn)
-        object.__setattr__(self, "_lock", lock)
+        object.__setattr__(self, "_db_path", db_file)
         object.__setattr__(self, "_initialized", True)
+        conn = self._connect()
+        try:
+            conn.executescript(_RECEIPT_SCHEMA)
+        finally:
+            conn.close()
 
     def __setattr__(self, name, value):
         if getattr(self, "_initialized", False):
             raise AttributeError("MutationReceiptStore configuration is immutable")
         object.__setattr__(self, name, value)
 
+    def _connect(self) -> sqlite3.Connection:
+        """Open a fresh per-call connection (never shared between threads)."""
+        conn = sqlite3.connect(str(self._db_path), timeout=5.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
     def claim(self, *, action_id: str, fencing_token: int, capability_id: str, target_id: str, contract_digest: str, now: str | None = None) -> MutationReceipt:
         """Atomically claim the mutation boundary. Raises if already claimed."""
-        import secrets
-        from datetime import datetime as _dt, timezone as _tz
-
-        moment = now or _dt.now(_tz.utc).isoformat()
-        receipt_id = secrets.token_hex(16)
-        with self._lock:
-            receipt = MutationReceipt(
-                receipt_id=receipt_id,
-                action_id=action_id,
-                fencing_token=fencing_token,
-                capability_id=capability_id,
-                target_id=target_id,
-                contract_digest=contract_digest,
-                mutation_status=MutationStatus.RECEIPT_CREATED,
-                provider_code="",
-                created_at=moment,
-            )
+        moment = now or datetime.now(timezone.utc).isoformat()
+        receipt = MutationReceipt(
+            receipt_id=secrets.token_hex(16),
+            action_id=action_id,
+            fencing_token=fencing_token,
+            capability_id=capability_id,
+            target_id=target_id,
+            contract_digest=contract_digest,
+            mutation_status=MutationStatus.RECEIPT_CREATED,
+            provider_code="",
+            created_at=moment,
+        )
+        conn = self._connect()
+        try:
+            # BEGIN IMMEDIATE takes the write lock before the existence
+            # check, serializing concurrent claims for the same identity.
+            conn.execute("BEGIN IMMEDIATE")
             try:
-                with self._db:
-                    self._db.execute(
-                        "INSERT INTO executor_mutation_receipts (receipt_id, action_id, fencing_token, capability_id, target_id, contract_digest, mutation_status, provider_code, created_at, receipt_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (receipt.receipt_id, receipt.action_id, receipt.fencing_token, receipt.capability_id, receipt.target_id, receipt.contract_digest, receipt.mutation_status.value, receipt.provider_code, receipt.created_at, MUTATION_RECEIPT_VERSION),
-                    )
-            except sqlite3.IntegrityError:
-                existing = self.get(action_id=action_id, fencing_token=fencing_token)
+                existing = conn.execute(
+                    "SELECT mutation_status FROM executor_mutation_receipts WHERE action_id = ? AND fencing_token = ?",
+                    (action_id, fencing_token),
+                ).fetchone()
                 if existing is not None:
+                    conn.execute("ROLLBACK")
                     raise MutationReceiptError(
-                        f"Mutation already claimed: action={action_id[:16]}, fence={fencing_token}, status={existing.mutation_status.value}"
+                        f"Mutation already claimed: action={action_id[:16]}, fence={fencing_token}, status={existing['mutation_status']}"
                     )
-                raise
+                conn.execute(
+                    "INSERT INTO executor_mutation_receipts (receipt_id, action_id, fencing_token, capability_id, target_id, contract_digest, mutation_status, provider_code, created_at, receipt_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (receipt.receipt_id, receipt.action_id, receipt.fencing_token, receipt.capability_id, receipt.target_id, receipt.contract_digest, receipt.mutation_status.value, receipt.provider_code, receipt.created_at, MUTATION_RECEIPT_VERSION),
+                )
+                conn.execute("COMMIT")
+            except sqlite3.IntegrityError:
+                conn.execute("ROLLBACK")
+                # Belt and braces: the write lock should already have
+                # serialized this; treat any UNIQUE failure as a lost race.
+                raise MutationReceiptError(
+                    f"Mutation already claimed: action={action_id[:16]}, fence={fencing_token}, status=unknown"
+                ) from None
             except sqlite3.OperationalError as exc:
+                conn.execute("ROLLBACK")
                 if "database is locked" in str(exc) or "database is busy" in str(exc):
-                    raise MutationReceiptError(f"SQLite contention during claim: {exc}")
+                    raise MutationReceiptError(f"SQLite contention during claim: {exc}") from None
                 raise
+            except MutationReceiptError:
+                raise
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        except MutationReceiptError:
+            raise
+        except sqlite3.Error as exc:
+            raise MutationReceiptError(f"SQLite claim failure: {exc}") from exc
+        finally:
+            conn.close()
         return receipt
 
     def complete(self, *, action_id: str, fencing_token: int, status: MutationStatus, provider_code: str, now: str | None = None) -> MutationReceipt:
         """Update the receipt with the provider outcome."""
-
-        from datetime import datetime as _dt, timezone as _tz
-
-        moment = now or _dt.now(_tz.utc).isoformat()
-        with self._db:
-            cursor = self._db.execute(
-                "UPDATE executor_mutation_receipts SET mutation_status = ?, provider_code = ?, completed_at = ?"
-                " WHERE action_id = ? AND fencing_token = ? AND mutation_status = ?",
-                (status.value, provider_code, moment, action_id, fencing_token, MutationStatus.RECEIPT_CREATED.value),
-            )
-            if cursor.rowcount != 1:
-                raise MutationReceiptError("Receipt not found in RECEIPT_CREATED state")
+        moment = now or datetime.now(timezone.utc).isoformat()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = conn.execute(
+                    "UPDATE executor_mutation_receipts SET mutation_status = ?, provider_code = ?, completed_at = ?"
+                    " WHERE action_id = ? AND fencing_token = ? AND mutation_status = ?",
+                    (status.value, provider_code, moment, action_id, fencing_token, MutationStatus.RECEIPT_CREATED.value),
+                )
+                if cursor.rowcount != 1:
+                    conn.execute("ROLLBACK")
+                    raise MutationReceiptError("Receipt not found in RECEIPT_CREATED state")
+                conn.execute("COMMIT")
+            except MutationReceiptError:
+                raise
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        except sqlite3.Error as exc:
+            raise MutationReceiptError(f"SQLite complete failure: {exc}") from exc
+        finally:
+            conn.close()
         return self.get(action_id=action_id, fencing_token=fencing_token)
 
     def get(self, *, action_id: str, fencing_token: int) -> MutationReceipt | None:
-        row = self._db.execute(
-            "SELECT * FROM executor_mutation_receipts WHERE action_id = ? AND fencing_token = ?",
-            (action_id, fencing_token),
-        ).fetchone()
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM executor_mutation_receipts WHERE action_id = ? AND fencing_token = ?",
+                (action_id, fencing_token),
+            ).fetchone()
+        finally:
+            conn.close()
         if row is None:
             return None
         return MutationReceipt(
@@ -215,5 +264,9 @@ class MutationReceiptStore:
         )
 
     def count(self) -> int:
-        row = self._db.execute("SELECT COUNT(*) AS total FROM executor_mutation_receipts").fetchone()
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT COUNT(*) AS total FROM executor_mutation_receipts").fetchone()
+        finally:
+            conn.close()
         return int(row["total"]) if row else 0
