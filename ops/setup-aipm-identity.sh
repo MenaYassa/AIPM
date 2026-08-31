@@ -25,7 +25,9 @@
 #   /var/lib/aipm/state         aipm               aipm             0750
 #   /var/lib/aipm/state/telemetry aipm             aipm             0750
 #   /var/lib/aipm/logs          aipm               aipm             0750
-#   /var/lib/aipm/executor      aipm-executor      aipm-executor    0750
+#   /var/lib/aipm-executor      aipm-executor      aipm-runtime     0750
+#   /var/lib/aipm-executor/state aipm-executor     aipm-runtime     0750
+#   /var/lib/aipm-executor/logs aipm-executor      aipm-runtime     0750
 #   app source (src/)           unchanged owner    aipm-runtime     dirs 0750 files 0640
 #   venv (.venv/)               unchanged owner    aipm-runtime     dirs 0750 files 0640
 #   venv bin/*                  unchanged owner    aipm-runtime     0750 (executables)
@@ -341,7 +343,7 @@ if [ "$MODE" = "dry-run" ]; then
     log_dry "chmod 0700 $AIPM_HOME"
     log_dry "chown -R $AIPM_USER:$AIPM_GROUP $AIPM_STATE_DIR $AIPM_LOG_DIR  (bounded: control-plane state/logs only)"
     log_dry "chmod 0750 $AIPM_STATE_DIR $AIPM_DB_DIR $AIPM_LOG_DIR"
-    log_dry "chown -R $EXECUTOR_USER:$EXECUTOR_GROUP $EXECUTOR_HOME  (bounded: executor home only)"
+    log_dry "chown -R $EXECUTOR_USER:$RUNTIME_GROUP $EXECUTOR_HOME  (bounded: executor home only)"
     log_dry "chmod 0750 $AIPM_EXECUTOR_STATE_DIR $AIPM_EXECUTOR_LOG_DIR"
     log_dry "chgrp -R $RUNTIME_GROUP $APP_CODE/src $APP_CODE/.venv  (read-only runtime group; owner unchanged)"
     log_dry "find $APP_CODE/src -type d -exec chmod 0750 {} +  (traversal)"
@@ -358,8 +360,10 @@ else
     # Bounded recursion: control-plane state and logs (created above, owned by us).
     chown -R "$AIPM_USER:$AIPM_GROUP" "$AIPM_STATE_DIR" "$AIPM_LOG_DIR"
     chmod 0750 "$AIPM_STATE_DIR" "$AIPM_DB_DIR" "$AIPM_LOG_DIR"
-    # Bounded recursion: dedicated executor home only.
-    chown -R "$EXECUTOR_USER:$EXECUTOR_GROUP" "$EXECUTOR_HOME"
+    # Bounded recursion: dedicated executor home only. Group aipm-runtime
+    # matches the Checkpoint-2B filesystem layout; write stays exclusive to
+    # aipm-executor (0750 dirs; service files are created UMask 0077).
+    chown -R "$EXECUTOR_USER:$RUNTIME_GROUP" "$EXECUTOR_HOME"
     chmod 0750 "$AIPM_EXECUTOR_STATE_DIR" "$AIPM_EXECUTOR_LOG_DIR"
 
     # Application runtime: read/execute via aipm-runtime. Owner is NEVER changed,

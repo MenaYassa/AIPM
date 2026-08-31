@@ -22,7 +22,10 @@ RestartSec=5
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/aipm/executor/state
+# Executor persistent state is confined to its dedicated home
+# /var/lib/aipm-executor (receipts.db + logs). The executor has NO write
+# access to control-plane state under /var/lib/aipm.
+ReadWritePaths=/var/lib/aipm-executor/state /var/lib/aipm-executor/logs
 RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true

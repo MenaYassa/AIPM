@@ -27,6 +27,40 @@ Refused (unauthorized) callers have their pending request frame drained
 (bounded, short timeout) before the refusal frame is sent, so clients
 that write-then-read never hit EPIPE instead of the refusal.
 
+## Filesystem contract (canonical — MC-6.12 release)
+
+The executor has exactly one persistent filesystem root: `/var/lib/aipm-executor`
+(a dedicated home, not a child of the control-plane root).
+
+```
+/var/lib/aipm/                      # control-plane root (owner aipm:aipm, 0700)
+    state/
+        telemetry/mission_control.db
+    logs/
+
+/var/lib/aipm-executor/             # executor root (aipm-executor:aipm-runtime, 0750)
+    state/
+        receipts.db                  # canonical mutation-receipt DB
+    logs/
+```
+
+- The canonical mutation-receipt database is
+  `/var/lib/aipm-executor/state/receipts.db` (CLI default for
+  `aipm executor run --receipt-db`).
+- A competing executor root under the control-plane tree (a child of
+  `/var/lib/aipm`, e.g. an `executor/` subdirectory there) is **forbidden**;
+  it must never be created on the VPS and must never reappear in the
+  release tree (enforced by
+  `tests/test_mc612_stage25c_executor_filesystem_contract.py`).
+- The executor has NO write access to control-plane state: the unit grants
+  `ReadWritePaths=/var/lib/aipm-executor/state /var/lib/aipm-executor/logs`
+  only, and `ProtectSystem=strict` denies everything else. `/var/lib/aipm`
+  is `0700 aipm:aipm`, so the executor (never a member of `aipm`) cannot
+  even read it.
+- The IPC socket runtime path is `/run/aipm` (`RuntimeDirectory=aipm`,
+  mode 0750, shared with the control plane for socket access only) —
+  distinct from the persistent state above.
+
 ## Mutation receipt: claim model and guarantees
 
 The executor's mutation receipt store (`executor_mutation_receipts`,

@@ -23,13 +23,20 @@ EXPECTED_SUDOERS = "aipm ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-te
 # --- Identity separation ---
 
 def test_aipm_user_exists_and_is_dedicated():
-    """The dedicated AIPM user must exist with the correct properties."""
+    """The dedicated AIPM user must exist with the correct properties.
+
+    The certified setup script (ops/setup-aipm-identity.sh) creates the
+    identity with `useradd --system`, so a UID below 1000 is the EXPECTED
+    production state; the boundary that matters is: dedicated account,
+    non-interactive shell, own primary group (see stage25a for full
+    identity-semantics certification).
+    """
     import pwd
     try:
         entry = pwd.getpwnam(EXPECTED_USER)
     except KeyError:
         pytest.skip("AIPM user not yet created — run ops/setup-aipm-identity.sh")
-    assert entry.pw_uid >= 1000  # not a system user below 1000 (or use --system which creates <1000)
+    assert entry.pw_uid > 0  # a real dedicated account, never root
     assert "nologin" in entry.pw_shell or "false" in entry.pw_shell
 
 

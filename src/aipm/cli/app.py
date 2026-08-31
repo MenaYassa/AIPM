@@ -123,7 +123,7 @@ app.add_typer(executor_app, name="executor")
 @executor_app.command()
 def run(
     socket_path: str = typer.Option("/run/aipm/executor.sock", "--socket-path", help="Unix socket path for the executor IPC server."),
-    receipt_db: str = typer.Option("/var/lib/aipm/executor/receipts.db", "--receipt-db", help="Path to the executor mutation receipt database."),
+    receipt_db: str = typer.Option("/var/lib/aipm-executor/state/receipts.db", "--receipt-db", help="Path to the executor mutation receipt database."),
     unit_name: str = typer.Option("aipm-telemetry.service", "--unit", help="The canonical systemd unit name."),
     unit_id: str = typer.Option("aipm-telemetry", "--unit-id", help="The unit identifier for the allow-list."),
     target_id: str = typer.Option("aipm-telemetry", "--target-id", help="The target identifier."),
