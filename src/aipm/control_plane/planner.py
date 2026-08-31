@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime, timezone
 
+from aipm.control_plane.identity import EXPECTED_EFFECT, plan_id as canonical_plan_id
 from aipm.control_plane.models import (
     ActionPlan,
     ActionRequest,
@@ -56,8 +55,8 @@ def _build_evidence_neutral_plan(
     evidence = EvidenceSummary(EvidenceState.NOT_OBSERVED, ())
     expires_at = now + PLAN_TTL
     risk = risk_for(request.operation)
-    expected_effect = "No runtime effect; produce a bounded future-operation plan only"
-    plan_id = _plan_id(
+    expected_effect = EXPECTED_EFFECT
+    plan_id = canonical_plan_id(
         request=request,
         evidence=evidence,
         evidence_source=EvidenceSource.NONE,
@@ -65,6 +64,7 @@ def _build_evidence_neutral_plan(
         expected_effect=expected_effect,
         created_at=now,
         expires_at=expires_at,
+        state=PlanState.PLANNED,
     )
     draft = ActionPlan(
         plan_id=plan_id,
@@ -89,24 +89,6 @@ def _build_evidence_neutral_plan(
         state=draft.state,
         digest=draft.computed_digest(),
     )
-
-
-def _plan_id(*, request, evidence, evidence_source, risk, expected_effect, created_at, expires_at) -> str:
-    payload = {
-        "request_identity": hashlib.sha256(request.canonical().encode("utf-8")).hexdigest(),
-        "operation": request.operation.value,
-        "target_id": request.target_id,
-        "evidence_source": evidence_source.value,
-        "evidence_state": evidence.state.value,
-        "evidence": evidence.canonical(),
-        "risk": risk.value,
-        "expected_effect": expected_effect,
-        "created_at": created_at.isoformat(),
-        "expires_at": expires_at.isoformat(),
-        "state": PlanState.PLANNED.value,
-    }
-    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
 class PlanOnlyPlanner(metaclass=_FrozenPlannerType):

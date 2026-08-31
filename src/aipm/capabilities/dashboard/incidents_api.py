@@ -166,17 +166,6 @@ class DashboardIncidentsApi:
             self._log("Incident detail API failed", exc)
             return self.incident_mapper.unavailable()
 
-    def acknowledge(self, incident_id: int) -> dict[str, Any]:
-        if self.incidents_query is None:
-            return self.incident_mapper.unavailable()
-        try:
-            result = self.incidents_query.acknowledge(incident_id)
-            if result is None:
-                return self.incident_mapper.unavailable("Incident not found")
-            return {"available": True, "status": "ok", "error": None, "incident": self.incident_mapper.to_dict(result)}
-        except Exception as exc:
-            self._log("Incident acknowledgement failed", exc)
-            return self.incident_mapper.unavailable("Incident acknowledgement unavailable")
 
     def _log(self, message: str, exc: Exception) -> None:
         if self.logger is not None:

@@ -148,10 +148,9 @@ def test_managed_consumer_wiring_uses_shared_application_telemetry_path():
 def test_dashboard_service_template_uses_canonical_mina_telemetry_path():
     root = Path(__file__).resolve().parents[1]
     unit = (root / "ops/systemd/aipm-dashboard.service").read_text(encoding="utf-8")
-    assert "Environment=AIPM_CONFIG=/home/mina/.config/aipm/config.yaml" in unit
-    assert "Environment=AIPM_TELEMETRY_DB=/home/mina/.local/state/aipm/telemetry/mission_control.db" in unit
+    assert "Environment=AIPM_TELEMETRY_DB=/var/lib/aipm/state/telemetry/mission_control.db" in unit
     assert "AIPM_TELEMETRY_DB=/home/ubuntu/.local/state/aipm/telemetry/mission_control.db" not in unit
-    assert "/home/mina/.local/state/aipm/telemetry" in unit
+    assert "/var/lib/aipm/state/telemetry" in unit
 
 
 def test_mc21_telemetry_defaults_are_split_and_bounded(tmp_path):

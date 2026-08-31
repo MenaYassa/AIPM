@@ -1,8 +1,13 @@
-"""Staging-only single-owner authentication and authorization contracts.
+"""Canonical single-owner authentication boundary.
 
 This module has no HTTP, provider, persistence, filesystem, or runtime-control
 integration. The verifier accepts an Argon2id PHC string and fails closed when
 the local Argon2 implementation is unavailable or malformed.
+
+Successful authentication produces the canonical ``OwnerPrincipal``; the owner
+secret is consumed here and never leaves this boundary in any result,
+exception, session, or record. An authentication epoch is maintained so
+credential rotation can globally revoke previously issued principals.
 """
 from __future__ import annotations
 
@@ -14,9 +19,14 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Callable
 
-from aipm.control_plane.models import OperationKind
-from aipm.control_plane.project_plan import Environment
-from aipm.control_plane.session import OwnerSession
+from aipm.control_plane.identity import (
+    OWNER_ISSUER,
+    OWNER_ROLE,
+    OWNER_SUBJECT,
+    AuthenticationMethod,
+    OwnerPrincipal,
+    PrincipalVerification,
+)
 
 _ARGON2ID_RE = re.compile(
     r"^\$argon2id\$v=19\$m=(?:[1-9][0-9]{0,8}),t=(?:[1-9][0-9]{0,3}),p=(?:[1-9][0-9]{0,2})\$[^$]+\$[^$]+$"
@@ -39,16 +49,7 @@ class AuthenticationResult:
     accepted: bool
     reason: FailureReason
     retry_after_seconds: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class AuthorizationDecision:
-    allowed: bool
-    code: str
-    operation: OperationKind
-    target_id: str
-    environment: Environment
-    fields: tuple[str, ...]
+    principal: OwnerPrincipal | None = None
 
 
 class Argon2idVerifier:
@@ -88,9 +89,27 @@ class Argon2idVerifier:
 
 
 class OwnerAuthenticator:
-    """Single-owner in-memory authentication limiter for staging."""
+    """Single-owner authentication producing the canonical principal.
 
-    __slots__ = ("_verifier", "_clock", "_failure_count", "_cooldown_until", "_locked_until", "_max_failures_before_lock", "_lockout_seconds", "_initialized")
+    Authentication failures are bounded by progressive cooldown and a finite
+    lockout. Successful authentication never retains the secret; the returned
+    principal carries only identity material.
+    """
+
+    __slots__ = (
+        "_verifier",
+        "_clock",
+        "_failure_count",
+        "_cooldown_until",
+        "_locked_until",
+        "_max_failures_before_lock",
+        "_lockout_seconds",
+        "_principal_lifetime",
+        "_auth_epoch",
+        "_subject",
+        "_issuer",
+        "_initialized",
+    )
 
     def __init__(
         self,
@@ -99,6 +118,10 @@ class OwnerAuthenticator:
         clock: Callable[[], datetime] | None = None,
         max_failures_before_lock: int = 5,
         lockout_seconds: int = 60,
+        principal_lifetime: timedelta = timedelta(minutes=30),
+        subject: str = OWNER_SUBJECT,
+        issuer: str = OWNER_ISSUER,
+        auth_epoch: int = 1,
     ) -> None:
         if not isinstance(verifier, Argon2idVerifier):
             raise TypeError("verifier must be Argon2idVerifier")
@@ -106,6 +129,10 @@ class OwnerAuthenticator:
             raise ValueError("invalid failure limit")
         if not isinstance(lockout_seconds, int) or lockout_seconds < 1:
             raise ValueError("invalid lockout duration")
+        if principal_lifetime <= timedelta(0):
+            raise ValueError("invalid principal lifetime")
+        if not isinstance(auth_epoch, int) or auth_epoch < 1:
+            raise ValueError("invalid authentication epoch")
         object.__setattr__(self, "_verifier", verifier)
         object.__setattr__(self, "_clock", clock or (lambda: datetime.now(timezone.utc)))
         object.__setattr__(self, "_failure_count", 0)
@@ -113,12 +140,26 @@ class OwnerAuthenticator:
         object.__setattr__(self, "_locked_until", None)
         object.__setattr__(self, "_max_failures_before_lock", max_failures_before_lock)
         object.__setattr__(self, "_lockout_seconds", lockout_seconds)
+        object.__setattr__(self, "_principal_lifetime", principal_lifetime)
+        object.__setattr__(self, "_auth_epoch", auth_epoch)
+        object.__setattr__(self, "_subject", subject)
+        object.__setattr__(self, "_issuer", issuer)
         object.__setattr__(self, "_initialized", True)
 
     def __setattr__(self, name, value):
         if getattr(self, "_initialized", False):
             raise AttributeError("OwnerAuthenticator configuration is immutable")
         object.__setattr__(self, name, value)
+
+    @property
+    def auth_epoch(self) -> int:
+        return self._auth_epoch
+
+    def rotate_auth_epoch(self) -> int:
+        """Advance the authentication epoch (credential rotation boundary)."""
+
+        object.__setattr__(self, "_auth_epoch", self._auth_epoch + 1)
+        return self._auth_epoch
 
     def authenticate(self, secret: str | bytes, *, now: datetime | None = None) -> AuthenticationResult:
         current = self._utc(now or self._clock())
@@ -132,7 +173,11 @@ class OwnerAuthenticator:
             object.__setattr__(self, "_failure_count", 0)
             object.__setattr__(self, "_cooldown_until", None)
             object.__setattr__(self, "_locked_until", None)
-            return AuthenticationResult(True, FailureReason.ACCEPTED)
+            return AuthenticationResult(
+                True,
+                FailureReason.ACCEPTED,
+                principal=self._principal(current),
+            )
         failures = self._failure_count + 1
         object.__setattr__(self, "_failure_count", failures)
         if failures >= self._max_failures_before_lock:
@@ -145,6 +190,18 @@ class OwnerAuthenticator:
         object.__setattr__(self, "_cooldown_until", cooldown_until)
         return AuthenticationResult(False, FailureReason.REJECTED, cooldown_seconds)
 
+    def _principal(self, current: datetime) -> OwnerPrincipal:
+        return OwnerPrincipal(
+            subject=self._subject,
+            issuer=self._issuer,
+            authentication_method=AuthenticationMethod.ARGON2ID_OWNER_PASSPHRASE,
+            verification=PrincipalVerification.VERIFIED,
+            auth_epoch=self._auth_epoch,
+            authenticated_at=current,
+            expires_at=current + self._principal_lifetime,
+            roles=(OWNER_ROLE,),
+        )
+
     def _utc(self, value: datetime) -> datetime:
         if not isinstance(value, datetime):
             raise TypeError("now must be datetime")
@@ -153,43 +210,3 @@ class OwnerAuthenticator:
     @staticmethod
     def _remaining(end: datetime, start: datetime) -> int:
         return max(1, int((end - start).total_seconds()))
-
-
-class SingleOwnerActionGuard:
-    """Pure staging-only authorization for the one permitted operation."""
-
-    __slots__ = ("_target_ids", "_initialized")
-
-    def __init__(self, *, target_ids: set[str] | frozenset[str]) -> None:
-        targets = frozenset(target_ids)
-        if not targets or any(not isinstance(target, str) or not target for target in targets):
-            raise ValueError("explicit target allow-list is required")
-        object.__setattr__(self, "_target_ids", targets)
-        object.__setattr__(self, "_initialized", True)
-
-    def __setattr__(self, name, value):
-        if getattr(self, "_initialized", False):
-            raise AttributeError("action guard configuration is immutable")
-        object.__setattr__(self, name, value)
-
-    def authorize(
-        self,
-        session: OwnerSession | None,
-        *,
-        operation: OperationKind,
-        target_id: str,
-        environment: Environment,
-        fields: tuple[str, ...] | list[str] | set[str],
-    ) -> AuthorizationDecision:
-        normalized_fields = tuple(sorted(fields)) if isinstance(fields, (tuple, list, set, frozenset)) else ()
-        if not isinstance(session, OwnerSession) or not session.authenticated:
-            return AuthorizationDecision(False, "DENY_NO_OWNER_SESSION", operation, target_id, environment, normalized_fields)
-        if operation is not OperationKind.UPDATE_PROJECT_PLAN:
-            return AuthorizationDecision(False, "DENY_OPERATION", operation, target_id, environment, normalized_fields)
-        if environment is not Environment.STAGING:
-            return AuthorizationDecision(False, "DENY_PRODUCTION", operation, target_id, environment, normalized_fields)
-        if target_id not in self._target_ids:
-            return AuthorizationDecision(False, "DENY_TARGET", operation, target_id, environment, normalized_fields)
-        if not normalized_fields or any(field not in {"title", "objective"} for field in normalized_fields):
-            return AuthorizationDecision(False, "DENY_FIELD_SET", operation, target_id, environment, normalized_fields)
-        return AuthorizationDecision(True, "ALLOWED", operation, target_id, environment, normalized_fields)

@@ -19,15 +19,19 @@ MAX_METADATA_VALUE = 128
 MAX_EVIDENCE_ITEMS = 16
 MAX_EVIDENCE_VALUE = 256
 PLAN_TTL = timedelta(minutes=15)
-APPROVAL_TTL = timedelta(minutes=10)
+DECISION_TTL = timedelta(minutes=5)
+CONFIRMATION_TTL = timedelta(minutes=10)
+ENVIRONMENT_VALUES = ("staging", "production")
 _SAFE_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+SAFE_ID_PATTERN = _SAFE_ID
 _SAFE_VALUE = re.compile(r"^[^\x00-\x1f\x7f]{1,128}$")
 _SENSITIVE_MARKERS = ("/", "\\\\", "token=", "password=", "secret", "credential", "authorization", "traceback", "exception=", "provider", "destination")
 
 
 class OperationKind(str, Enum):
     UPDATE_PROJECT_PLAN = "update_project_plan"
+    ROLLBACK_PROJECT_PLAN = "rollback_project_plan"
 
 
 class RiskLevel(str, Enum):
@@ -52,18 +56,10 @@ class PlanState(str, Enum):
     INVALIDATED = "invalidated"
 
 
-class ApprovalState(str, Enum):
-    APPROVAL_REQUESTED = "approval_requested"
-    APPROVED = "approved"
+class ConfirmationState(str, Enum):
+    CONFIRMATION_REQUESTED = "confirmation_requested"
+    CONFIRMED = "confirmed"
     CONSUMED = "consumed"
-    EXPIRED = "expired"
-    INVALIDATED = "invalidated"
-
-
-class AuditState(str, Enum):
-    PLANNED = "planned"
-    APPROVAL_REQUESTED = "approval_requested"
-    APPROVED = "approved"
     EXPIRED = "expired"
     INVALIDATED = "invalidated"
 
@@ -76,7 +72,12 @@ class PlanningErrorCode(str, Enum):
     STALE_EVIDENCE = "stale_evidence"
     INVALID_PLAN = "invalid_plan"
     EXPIRED_PLAN = "expired_plan"
-    APPROVAL_MISMATCH = "approval_mismatch"
+    CONFIRMATION_MISMATCH = "confirmation_mismatch"
+    SESSION_INVALID = "session_invalid"
+    AUTHENTICATION_REJECTED = "authentication_rejected"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+    STATE_CONFLICT = "state_conflict"
+    STORAGE_CORRUPT = "storage_corrupt"
 
 
 class ControlPlaneError(ValueError):
@@ -115,16 +116,25 @@ def _utc(value: datetime) -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class ActionRequest:
+    """Canonical bounded change intent.
+
+    The metadata pairs are the canonical mutation fields for the operation.
+    Environment defaults to staging; production is never authorizable.
+    """
+
     operation: OperationKind
     target_id: str
     idempotency_key: str
     metadata: tuple[tuple[str, str], ...] = ()
+    environment: str = "staging"
 
     def __post_init__(self) -> None:
         operation = self.operation if isinstance(self.operation, OperationKind) else OperationKind(self.operation)
         object.__setattr__(self, "operation", operation)
         object.__setattr__(self, "target_id", _bounded_string(self.target_id, name="target identity", maximum=MAX_TARGET_ID, pattern=_SAFE_ID))
         object.__setattr__(self, "idempotency_key", _bounded_string(self.idempotency_key, name="idempotency key", maximum=MAX_IDEMPOTENCY_KEY, pattern=_SAFE_ID))
+        if self.environment not in ENVIRONMENT_VALUES:
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid request environment")
         if len(self.metadata) > MAX_ACTION_METADATA:
             raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Too many request metadata fields")
         normalized: list[tuple[str, str]] = []
@@ -138,12 +148,19 @@ class ActionRequest:
             raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Duplicate request metadata key")
         object.__setattr__(self, "metadata", tuple(sorted(normalized)))
 
+    @property
+    def fields(self) -> frozenset[str]:
+        """Canonical mutation field names carried by this request."""
+
+        return frozenset(key for key, _value in self.metadata)
+
     def canonical(self) -> str:
         payload = {
             "operation": self.operation.value,
             "target_id": self.target_id,
             "idempotency_key": self.idempotency_key,
             "metadata": [[key, value] for key, value in self.metadata],
+            "environment": self.environment,
         }
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
@@ -235,92 +252,68 @@ class ActionPlan:
 
 
 @dataclass(frozen=True, slots=True)
-class ApprovalBinding:
-    approval_id: str
-    request: ActionRequest
+class ConfirmationBinding:
+    """Single-use owner confirmation bound to a canonical authorization decision.
+
+    Every identity value is carried from the decision that authorized the
+    action; nothing is re-derived here. The binding can never be reused for a
+    different action, plan revision, digest, or policy version.
+    """
+
+    confirmation_id: str
+    decision_id: str
+    action_id: str
     plan_id: str
     plan_digest: str
-    actor_id: str
+    target_revision: int
+    target_digest: str
+    policy_version: str
+    requester_subject: str
+    confirmation_kind: ConfirmationKind
+    request: ActionRequest
     created_at: datetime
     expires_at: datetime
-    scope: str
-    state: ApprovalState = ApprovalState.APPROVAL_REQUESTED
+    confirmed_by_subject: str | None = None
+    scope: str = "owner_confirmation"
+    state: ConfirmationState = ConfirmationState.CONFIRMATION_REQUESTED
 
     def __post_init__(self) -> None:
         if not isinstance(self.request, ActionRequest):
-            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid approval request")
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid confirmation request")
+        kind = self.confirmation_kind if isinstance(self.confirmation_kind, ConfirmationKind) else ConfirmationKind(self.confirmation_kind)
+        object.__setattr__(self, "confirmation_kind", kind)
         for name, value, maximum in (
-            ("approval ID", self.approval_id, 128),
+            ("confirmation ID", self.confirmation_id, 128),
+            ("decision ID", self.decision_id, 128),
+            ("action ID", self.action_id, 128),
             ("plan ID", self.plan_id, 128),
-            ("actor identity", self.actor_id, MAX_ACTOR_ID),
-            ("approval scope", self.scope, MAX_METADATA_VALUE),
+            ("policy version", self.policy_version, MAX_POLICY_VERSION),
+            ("requester subject", self.requester_subject, MAX_ACTOR_ID),
+            ("confirmation scope", self.scope, MAX_METADATA_VALUE),
         ):
-            _bounded_string(value, name=name, maximum=maximum, pattern=_SAFE_ID if name != "approval scope" else _SAFE_VALUE)
+            _bounded_string(value, name=name, maximum=maximum, pattern=_SAFE_ID if name != "confirmation scope" else _SAFE_VALUE)
         _bounded_string(self.plan_digest, name="plan digest", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
+        _bounded_string(self.target_digest, name="target digest", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
+        if not isinstance(self.target_revision, int) or self.target_revision < 1:
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid target revision")
+        if self.confirmed_by_subject is not None:
+            object.__setattr__(self, "confirmed_by_subject", _bounded_string(self.confirmed_by_subject, name="confirmer subject", maximum=MAX_ACTOR_ID, pattern=_SAFE_ID))
         created = _utc(self.created_at)
         expires = _utc(self.expires_at)
-        if expires <= created or expires - created > APPROVAL_TTL:
-            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid approval expiry")
+        if expires <= created or expires - created > CONFIRMATION_TTL:
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid confirmation expiry")
         object.__setattr__(self, "created_at", created)
         object.__setattr__(self, "expires_at", expires)
-        state = self.state if isinstance(self.state, ApprovalState) else ApprovalState(self.state)
+        state = self.state if isinstance(self.state, ConfirmationState) else ConfirmationState(self.state)
         object.__setattr__(self, "state", state)
 
     def is_expired(self, now: datetime) -> bool:
         return _utc(now) >= self.expires_at
 
 
-@dataclass(frozen=True, slots=True)
-class ActionAuditRecord:
-    action_id: str
-    plan_id: str
-    plan_digest: str
-    operation: OperationKind
-    target_id: str
-    actor_id: str
-    timestamp: datetime
-    state: AuditState
-    risk: RiskLevel
-    evidence_state: EvidenceState
-    outcome_code: str
-
-    def __post_init__(self) -> None:
-        for name, value, maximum in (
-            ("action ID", self.action_id, 128),
-            ("plan ID", self.plan_id, 128),
-            ("target identity", self.target_id, MAX_TARGET_ID),
-            ("actor identity", self.actor_id, MAX_ACTOR_ID),
-            ("outcome code", self.outcome_code, MAX_EVIDENCE_VALUE),
-        ):
-            _bounded_string(value, name=name, maximum=maximum, pattern=_SAFE_ID)
-        _bounded_string(self.plan_digest, name="plan digest", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
-        object.__setattr__(self, "timestamp", _utc(self.timestamp))
-        object.__setattr__(self, "operation", self.operation if isinstance(self.operation, OperationKind) else OperationKind(self.operation))
-        object.__setattr__(self, "state", self.state if isinstance(self.state, AuditState) else AuditState(self.state))
-        object.__setattr__(self, "risk", self.risk if isinstance(self.risk, RiskLevel) else RiskLevel(self.risk))
-        object.__setattr__(self, "evidence_state", self.evidence_state if isinstance(self.evidence_state, EvidenceState) else EvidenceState(self.evidence_state))
-
-    def safe_dict(self) -> dict[str, str]:
-        return {
-            "action_id": self.action_id,
-            "plan_id": self.plan_id,
-            "plan_digest": self.plan_digest,
-            "operation": self.operation.value,
-            "target_id": self.target_id,
-            "actor_id": self.actor_id,
-            "timestamp": self.timestamp.isoformat(),
-            "state": self.state.value,
-            "risk": self.risk.value,
-            "evidence_state": self.evidence_state.value,
-            "outcome_code": self.outcome_code,
-        }
-
-
 # MC-6.12 Stage 2 non-executing lifecycle foundation.
 MAX_ENVIRONMENT_ID = 128
 MAX_POLICY_VERSION = 64
-MAX_ACTION_REASON = 256
-MAX_AUDIT_ATTRIBUTES = 12
 
 
 class ActorRole(str, Enum):
@@ -332,11 +325,25 @@ class ActorRole(str, Enum):
     VERIFIER = "verifier"
 
 
+class ConfirmationKind(str, Enum):
+    """Explicit confirmation semantics for the single-owner model.
+
+    OWNER_CONFIRMATION is the implemented path: the authenticated owner
+    explicitly confirms its own bounded request. DISTINCT_APPROVAL is the
+    reserved future mode in which a different authenticated subject must
+    confirm; the action identity model is identical in both modes.
+    """
+
+    OWNER_CONFIRMATION = "owner_confirmation"
+    DISTINCT_APPROVAL = "distinct_approval"
+
+
 class LifecycleState(str, Enum):
     REQUESTED = "requested"
     PLANNED = "planned"
-    APPROVAL_REQUESTED = "approval_requested"
-    APPROVED = "approved"
+    CONFIRMATION_REQUIRED = "confirmation_required"
+    CONFIRMED = "confirmed"
+    SNAPSHOT_CAPTURED = "snapshot_captured"
     INVALIDATED = "invalidated"
     EXPIRED = "expired"
     REJECTED = "rejected"
@@ -345,6 +352,7 @@ class LifecycleState(str, Enum):
     EXECUTED_PENDING_VERIFICATION = "executed_pending_verification"
     VERIFIED_SUCCESS = "verified_success"
     VERIFICATION_FAILED = "verification_failed"
+    EXECUTION_FAILED = "execution_failed"
     CANCEL_REQUESTED = "cancel_requested"
     TIMED_OUT = "timed_out"
     INTERRUPTED = "interrupted"
@@ -390,7 +398,13 @@ class ActionScope:
 
 @dataclass(frozen=True, slots=True)
 class ActionLifecycle:
-    """Immutable logical action state; it does not execute or persist anything."""
+    """Immutable logical action state; it does not execute or persist anything.
+
+    In OWNER_CONFIRMATION mode the confirmer is the authenticated requester
+    itself (explicit single-owner confirmation). In DISTINCT_APPROVAL mode the
+    confirmer must be a different subject. Neither mode confers execution
+    authority; execution states exist as reserved transition targets only.
+    """
 
     action_id: str
     plan_id: str
@@ -399,31 +413,46 @@ class ActionLifecycle:
     scope: ActionScope
     state: LifecycleState
     requester_subject: str
+    confirmation_kind: ConfirmationKind = ConfirmationKind.OWNER_CONFIRMATION
     approver_subject: str | None = None
     idempotency_key: str = ""
     created_at: datetime = datetime.min.replace(tzinfo=timezone.utc)
     expires_at: datetime = datetime.min.replace(tzinfo=timezone.utc)
     version: int = 0
+    decision_id: str = ""
+    plan_revision: int = 0
+    rollback_of_action_id: str | None = None
+    snapshot_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "action_id", _stage2_id(self.action_id, name="action ID"))
+        if self.decision_id:
+            object.__setattr__(self, "decision_id", _stage2_id(self.decision_id, name="decision ID"))
+        if self.rollback_of_action_id is not None:
+            object.__setattr__(self, "rollback_of_action_id", _stage2_id(self.rollback_of_action_id, name="rollback reference"))
+        if self.snapshot_id is not None:
+            object.__setattr__(self, "snapshot_id", _stage2_id(self.snapshot_id, name="snapshot reference"))
         object.__setattr__(self, "plan_id", _stage2_id(self.plan_id, name="plan ID"))
         if not isinstance(self.plan_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", self.plan_digest):
             raise LifecycleError("Invalid plan digest")
         operation = self.operation if isinstance(self.operation, OperationKind) else OperationKind(self.operation)
-        if operation is not OperationKind.UPDATE_PROJECT_PLAN:
+        if operation not in {OperationKind.UPDATE_PROJECT_PLAN, OperationKind.ROLLBACK_PROJECT_PLAN}:
             raise LifecycleError("Unsupported lifecycle operation")
         object.__setattr__(self, "operation", operation)
         state = self.state if isinstance(self.state, LifecycleState) else LifecycleState(self.state)
         object.__setattr__(self, "state", state)
+        kind = self.confirmation_kind if isinstance(self.confirmation_kind, ConfirmationKind) else ConfirmationKind(self.confirmation_kind)
+        object.__setattr__(self, "confirmation_kind", kind)
         object.__setattr__(self, "requester_subject", _stage2_id(self.requester_subject, name="requester subject"))
         if self.approver_subject is not None:
             approver = _stage2_id(self.approver_subject, name="approver subject")
-            if approver == self.requester_subject:
+            if kind is ConfirmationKind.DISTINCT_APPROVAL and approver == self.requester_subject:
                 raise LifecycleError("Requester and approver must be distinct")
+            if kind is ConfirmationKind.OWNER_CONFIRMATION and approver != self.requester_subject:
+                raise LifecycleError("Owner confirmation must be recorded for the requesting owner")
             object.__setattr__(self, "approver_subject", approver)
         if state in {
-            LifecycleState.APPROVED,
+            LifecycleState.CONFIRMED,
             LifecycleState.LEASED,
             LifecycleState.RUNNING,
             LifecycleState.EXECUTED_PENDING_VERIFICATION,
@@ -438,7 +467,7 @@ class ActionLifecycle:
             LifecycleState.ROLLBACK_UNAVAILABLE,
             LifecycleState.ROLLBACK_FAILED,
         } and self.approver_subject is None:
-            raise LifecycleError("Action state requires a distinct approver")
+            raise LifecycleError("Action state requires a recorded confirmation")
         object.__setattr__(self, "idempotency_key", _stage2_id(self.idempotency_key, name="idempotency key"))
         created = _utc(self.created_at)
         expires = _utc(self.expires_at)
@@ -448,72 +477,28 @@ class ActionLifecycle:
         object.__setattr__(self, "expires_at", expires)
         if not isinstance(self.version, int) or self.version < 0:
             raise LifecycleError("Invalid lifecycle version")
+        if not isinstance(self.plan_revision, int) or self.plan_revision < 0:
+            raise LifecycleError("Invalid plan revision")
 
     def canonical(self) -> str:
         return json.dumps({
             "action_id": self.action_id,
             "approver_subject": self.approver_subject,
+            "confirmation_kind": self.confirmation_kind.value,
             "created_at": self.created_at.isoformat(),
+            "decision_id": self.decision_id,
             "expires_at": self.expires_at.isoformat(),
             "idempotency_key": self.idempotency_key,
             "operation": self.operation.value,
             "plan_digest": self.plan_digest,
             "plan_id": self.plan_id,
             "requester_subject": self.requester_subject,
+            "rollback_of_action_id": self.rollback_of_action_id,
             "scope": self.scope.canonical(),
+            "snapshot_id": self.snapshot_id,
             "state": self.state.value,
             "version": self.version,
         }, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
     def is_expired(self, now: datetime) -> bool:
         return _utc(now) >= self.expires_at
-
-
-@dataclass(frozen=True, slots=True)
-class Stage2AuditEvent:
-    """Bounded audit fact about logical control-plane state, not external mutation."""
-
-    event_id: str
-    action_id: str
-    plan_id: str
-    plan_digest: str
-    state: LifecycleState
-    actor_subject: str
-    actor_role: ActorRole
-    timestamp: datetime
-    outcome_code: str
-    attributes: tuple[tuple[str, str], ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "event_id", _stage2_id(self.event_id, name="audit event ID"))
-        object.__setattr__(self, "action_id", _stage2_id(self.action_id, name="audit action ID"))
-        object.__setattr__(self, "plan_id", _stage2_id(self.plan_id, name="audit plan ID"))
-        if not isinstance(self.plan_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", self.plan_digest):
-            raise LifecycleError("Invalid audit plan digest")
-        object.__setattr__(self, "state", self.state if isinstance(self.state, LifecycleState) else LifecycleState(self.state))
-        object.__setattr__(self, "actor_subject", _stage2_id(self.actor_subject, name="audit actor subject"))
-        object.__setattr__(self, "actor_role", self.actor_role if isinstance(self.actor_role, ActorRole) else ActorRole(self.actor_role))
-        object.__setattr__(self, "timestamp", _utc(self.timestamp))
-        object.__setattr__(self, "outcome_code", _stage2_id(self.outcome_code, name="audit outcome code", maximum=MAX_ACTION_REASON))
-        if len(self.attributes) > MAX_AUDIT_ATTRIBUTES:
-            raise LifecycleError("Too many audit attributes")
-        normalized: list[tuple[str, str]] = []
-        for key, value in self.attributes:
-            normalized.append((_stage2_id(key, name="audit attribute key", maximum=64), _stage2_id(value, name="audit attribute value", maximum=256)))
-        if len({key for key, _value in normalized}) != len(normalized):
-            raise LifecycleError("Duplicate audit attribute key")
-        object.__setattr__(self, "attributes", tuple(sorted(normalized)))
-
-    def safe_dict(self) -> dict[str, Any]:
-        return {
-            "event_id": self.event_id,
-            "action_id": self.action_id,
-            "plan_id": self.plan_id,
-            "plan_digest": self.plan_digest,
-            "state": self.state.value,
-            "actor_subject": self.actor_subject,
-            "actor_role": self.actor_role.value,
-            "timestamp": self.timestamp.isoformat(),
-            "outcome_code": self.outcome_code,
-            "attributes": {key: value for key, value in self.attributes},
-        }

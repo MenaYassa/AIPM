@@ -106,9 +106,6 @@ class IncidentQueryService:
     def get(self, incident_id: int) -> Incident | None:
         return self.repository.get_incident(incident_id)
 
-    def acknowledge(self, incident_id: int) -> Incident | None:
-        return self.repository.acknowledge(incident_id, self.clock().astimezone(timezone.utc))
-
 
 def _datetime(value: object) -> datetime:
     if isinstance(value, datetime):

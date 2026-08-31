@@ -12,6 +12,7 @@ from aipm.services.update.engine import UpdateEngine  # <-- Add import
 from aipm.core.exceptions import UpdateError, ProviderError
 from aipm.dashboard.server import run as run_dashboard
 from aipm.capabilities.telemetry.commands import resource_sample as resource_sample_telemetry, run as run_telemetry, sample as sample_telemetry
+from aipm.control_plane.executor_ipc import ExecutorIPCServer
 from aipm.capabilities.events.commands import process as process_events, run as run_events
 from aipm.capabilities.notifications.commands import list_notifications, metrics as notification_metrics, reconcile as reconcile_notification, retain as retain_notifications, retry as retry_notification, run as run_notifications, test_channel
 from aipm.cli.mission_control import tui_app
@@ -114,6 +115,92 @@ app.add_typer(
     git_app,
     name="git"
 )
+
+executor_app = typer.Typer(name="executor", help="Executor service operations")
+app.add_typer(executor_app, name="executor")
+
+
+@executor_app.command()
+def run(
+    socket_path: str = typer.Option("/run/aipm/executor.sock", "--socket-path", help="Unix socket path for the executor IPC server."),
+    receipt_db: str = typer.Option("/var/lib/aipm/executor/receipts.db", "--receipt-db", help="Path to the executor mutation receipt database."),
+    unit_name: str = typer.Option("aipm-telemetry.service", "--unit", help="The canonical systemd unit name."),
+    unit_id: str = typer.Option("aipm-telemetry", "--unit-id", help="The unit identifier for the allow-list."),
+    target_id: str = typer.Option("aipm-telemetry", "--target-id", help="The target identifier."),
+):
+    """Run the standalone executor service.
+
+    Listens on a Unix domain socket for execution requests from the
+    control plane. The executor does NOT require access to the
+    control-plane database. It validates requests structurally and
+    performs the exact authorized mutation.
+    """
+    import selectors
+    import signal
+    import threading
+    from datetime import datetime, timedelta, timezone
+
+    from aipm.control_plane.executor_ipc import ExecutorIPCServer
+    from aipm.control_plane.mutation_receipt import MutationReceiptStore
+    from aipm.control_plane.systemd_provider import SystemdRestartPolicy, SystemdRestartProvider
+    from aipm.control_plane.standalone_executor import StandaloneSystemdExecutor, ExecutionEnvelope
+
+    policy = SystemdRestartPolicy(
+        environment="staging",
+        target_id=target_id,
+        unit_id=unit_id,
+        canonical_unit_name=unit_name,
+        policy_version="policy-v1",
+    )
+    provider = SystemdRestartProvider(policies=[policy])
+    receipts = MutationReceiptStore(receipt_db)
+
+    def handler(request):
+        """Bridge IPC request to the standalone executor."""
+        envelope = ExecutionEnvelope(
+            protocol_version="mc612-execution-envelope-v1",
+            action_id=request.action_id,
+            action_version=1,
+            capability_id=request.capability_id,
+            capability_version="1",
+            target_id=request.target_id,
+            environment="staging",
+            unit_name=unit_name,
+            contract_digest=request.contract_digest,
+            fencing_token=request.fencing_token,
+            lease_id=request.lease_id,
+            issued_at=datetime.now(timezone.utc).isoformat(),
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+        )
+        executor = StandaloneSystemdExecutor(
+            provider=provider, policy=policy, receipts=receipts)
+        result = executor.execute_restart(envelope)
+        from aipm.control_plane.executor_ipc import ExecutionResponse
+        return ExecutionResponse(
+            outcome=result.outcome,
+            provider_code=result.provider_code,
+            action_id=result.action_id,
+            evidence_reference=result.evidence_reference,
+        )
+
+    server = ExecutorIPCServer(socket_path=socket_path, handler=handler)
+    stop_event = threading.Event()
+
+    def _signal_handler(signum, frame):
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    server.start()
+    typer.echo(f"Executor service listening on {socket_path}", err=True)
+    try:
+        server.serve_forever(stop_event=stop_event)
+    finally:
+        server.stop()
+        typer.echo("Executor service stopped.", err=True)
+
+
 
 @app.command()
 def version():

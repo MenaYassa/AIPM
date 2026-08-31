@@ -64,9 +64,9 @@ def test_ordinary_client_has_no_privileged_rpc_surface() -> None:
 def test_local_class_mutation_cannot_create_trusted_authority() -> None:
     code = """
 from aipm.provenance.client import ObservationClient
-from aipm.control_plane.approval import ApprovalService
+from aipm.control_plane.approval import OwnerConfirmationService
 
-type.__setattr__(ApprovalService, 'request', lambda *a, **k: 'observed')
+type.__setattr__(OwnerConfirmationService, 'request_confirmation', lambda *a, **k: 'observed')
 assert not hasattr(ObservationClient, 'approve')
 assert not hasattr(ObservationClient, 'consume')
 assert not hasattr(ObservationClient, 'append_audit')

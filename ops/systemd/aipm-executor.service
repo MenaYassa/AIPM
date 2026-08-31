@@ -1,0 +1,36 @@
+[Unit]
+Description=AIPM Control Plane executor service
+After=network.target
+Requires=network.target
+
+[Service]
+Type=simple
+User=aipm-executor
+Group=aipm-executor
+WorkingDirectory=/home/ubuntu/aipm
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=aipm
+RuntimeDirectoryMode=0750
+# The aipm-executor group is shared with aipm (for socket IPC)
+# Setup script adds aipm to aipm-executor group
+SupplementaryGroups=aipm-executor
+ExecStart=/home/ubuntu/aipm/.venv/bin/aipm executor run
+Restart=on-failure
+RestartSec=5
+# NoNewPrivileges intentionally absent: the executor needs the setuid
+# transition for sudo (NOPASSWD systemctl restart aipm-telemetry.service)
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/aipm/state
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
