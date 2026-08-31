@@ -26,11 +26,15 @@ No shell, no arbitrary command strings.
 
 ## Identities
 
-| Identity | Role | Sudo | NNP | Groups |
-|---|---|---|---|---|
-| `mina` | Human administrator | Broad (password) | n/a | sudo, docker |
-| `aipm` | Control plane | NONE | true | aipm |
-| `aipm-executor` | Executor service | Narrow NOPASSWD systemctl restart | absent | aipm-executor |
+| Identity | Role | Sudo | NNP | Groups | Filesystem write access |
+|---|---|---|---|---|---|
+| `mina` | Human administrator | Broad (password) | n/a | sudo, docker | everything (admin) |
+| `aipm` | Control plane | NONE | true | aipm, aipm-runtime | `/var/lib/aipm` only |
+| `aipm-executor` | Executor service | Narrow NOPASSWD systemctl restart | absent | aipm-executor, aipm-runtime | `/var/lib/aipm-executor` only |
+
+Group rules enforced by `ops/setup-aipm-identity.sh`:
+- `aipm-executor` NEVER joins the `aipm` group — it has no access to control-plane state or DBs.
+- `aipm-runtime` (read/execute on app code, dirs 0750 / files 0640, owner unchanged) contains exactly `aipm` and `aipm-executor` — no other members, verified at setup and re-verified on every run.
 
 ## Decision: Option B (separate executor service) selected
 

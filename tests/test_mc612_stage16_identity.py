@@ -61,15 +61,12 @@ def test_aipm_user_has_no_privileged_groups():
     except KeyError:
         pytest.skip("AIPM user not yet created")
     privileged = {"sudo", "docker", "admin", "root", "wheel"}
+    primary = grp.getgrgid(entry.pw_gid).gr_name
     # Check all groups the user belongs to (via /etc/group membership scan)
     for group in grp.getgrall():
         if EXPECTED_USER in group.gr_mem:
             assert group.gr_name not in privileged, f"AIPM in privileged group: {group.gr_name}"
-    assert primary not in privileged
-    # Check all groups the user belongs to
-    for group in grp.getgrall():
-        if EXPECTED_USER in group.gr_mem:
-            assert group.gr_name not in privileged, f"AIPM in privileged group: {group.gr_name}"
+    assert primary not in privileged, f"AIPM primary group is privileged: {primary}"
 
 
 def test_aipm_user_password_is_locked():

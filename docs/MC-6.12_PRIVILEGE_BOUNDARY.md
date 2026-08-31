@@ -16,7 +16,11 @@ NoNewPrivileges=true is retained on ALL control-plane services.
 
 ```
 Human administrator:  mina (uid=1003, groups: sudo, docker, aipm-provenance-client)
-AIPM execution:       aipm (system user, no login, no password, no privileged groups)
+AIPM control plane:   aipm (system user, no login, no password, no privileged groups, no sudo)
+AIPM executor:        aipm-executor (system user, no login, no password, no privileged groups;
+                      ONLY sudo rule: NOPASSWD systemctl restart aipm-telemetry.service)
+Shared read access:   group aipm-runtime (members exactly: aipm, aipm-executor) —
+                      read/execute on application code; write access to nothing
 ```
 
 Human administrative authority and AIPM machine authority are separate Unix principals.
@@ -60,10 +64,10 @@ Threats prevented:
 
 ```
 # /etc/sudoers.d/aipm-systemd-restart
-mina ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service
+aipm-executor ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service
 ```
 
-This matches ONLY when argv is exactly `["/usr/bin/systemctl", "restart", "aipm-telemetry.service"]`.
+This matches ONLY when argv is exactly `["/usr/bin/systemctl", "restart", "aipm-telemetry.service"]`, and is granted to the executor identity (`aipm-executor`), never to a human account.
 
 ### Bypass prevention
 
@@ -83,9 +87,28 @@ This matches ONLY when argv is exactly `["/usr/bin/systemctl", "restart", "aipm-
 
 ## Installation
 
+Installed transactionally by `ops/setup-aipm-identity.sh --apply` (SUDOERS stage):
+
 ```bash
-echo 'mina ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service' | sudo tee /etc/sudoers.d/aipm-systemd-restart
-sudo chmod 440 /etc/sudoers.d/aipm-systemd-restart
+# candidate file is written to a mktemp location, chmod 440, then
+candidate="$(mktemp)"
+printf '%s\n' 'aipm-executor ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service' > "$candidate"
+chmod 440 "$candidate"
+sudo visudo -cf "$candidate"        # must pass BEFORE anything is installed
+sudo install -m 440 "$candidate" /etc/sudoers.d/aipm-systemd-restart.new
+sudo mv /etc/sudoers.d/aipm-systemd-restart.new /etc/sudoers.d/aipm-systemd-restart  # atomic rename
+sudo visudo -c                      # post-install whole-file validation
+```
+
+Transaction properties:
+- The prior rule (if any) is backed up to `/etc/sudoers.d/.aipm-backup/` (mode 0700) before replacement.
+- On validator failure ONLY the candidate is removed; the existing rule is untouched.
+- The install is an atomic `mv` on the same filesystem — no partial states.
+- The legacy `mina`-based rule (`/etc/sudoers.d/aipm-systemd-restart-mina`), if present, is moved into the backup directory (preserved, not deleted).
+
+Manual installation (only if the script cannot be used) must reproduce all of the above properties, then verify:
+
+```bash
 sudo visudo -c
 ```
 
@@ -95,13 +118,13 @@ sudo visudo -c
 
 **This is NOT the AIPM execution privilege.** The distinction:
 
-| Domain | Authority | Password | Usable by AIPM daemon |
+| Domain | Authority | Password | Usable by executor service |
 |---|---|---|---|
-| Human administrative (`mina`) | `(ALL : ALL) ALL` via `%sudo` group | Required | ✗ (no TTY, no password) |
-| AIPM execution (`aipm`) | `(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service` | Not required | ✓ |
-| AIPM broad sudo (`aipm`) | N/A — aipm is NOT in the `%sudo` group | N/A | ✗ |
+| Human administrative (`mina`) | `(ALL : ALL) ALL` via `%sudo` group | Required | ✗ (separate identity) |
+| AIPM execution (`aipm-executor`) | `(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service` | Not required | ✓ |
+| AIPM broad sudo (`aipm-executor`) | N/A — aipm-executor is NOT in the `%sudo` group | N/A | ✗ |
 
-The AIPM daemon (running as `User=mina`) can invoke `sudo -n systemctl restart aipm-telemetry.service` (NOPASSWD) but CANNOT invoke `sudo -n whoami` or any other command (requires password, no TTY). This is verified by test.
+The AIPM executor (running as `User=aipm-executor`) can invoke `sudo -n systemctl restart aipm-telemetry.service` (NOPASSWD) but CANNOT invoke `sudo -n whoami` or any other command. This is verified by test.
 
 ## Drift detection
 
@@ -142,40 +165,48 @@ an acceptable limitation for a single-owner system.
 ### Human vs AIPM privilege distinction
 
 The broad sudo grant `(ALL : ALL) ALL` is **human administrative privilege**
-requiring a password for each use. The AIPM daemon (running as `User=mina`
-without a TTY or stored password) **cannot use this grant**. Only the
-NOPASSWD systemctl restart rule is usable by the AIPM daemon. This is the
-correct separation of concerns:
+requiring a password for each use. The executor service (running as
+`User=aipm-executor`, no TTY, no stored password) **cannot use this grant**.
+Only the NOPASSWD systemctl restart rule is usable by the executor identity.
+This is the correct separation of concerns:
 
 ```
 Human operator (mina)
   ├─ broad sudo (ALL:ALL) ALL     → password required → VPS administration
-  └─ NOPASSWD systemctl restart   → AIPM execution capability
+  └─ (no NOPASSWD AIPM rule)      → legacy mina rule migrated to backup
 
-AIPM daemon (User=mina, no TTY)
+AIPM control plane (User=aipm)    → NO sudo rules at all
+
+AIPM executor (User=aipm-executor)
   └─ NOPASSWD systemctl restart   → the ONLY sudo operation available
 ```
 
-If the AIPM daemon is compromised, the attacker can only restart
-`aipm-telemetry.service` — not execute arbitrary root commands.
+If the executor is compromised, the attacker can only restart
+`aipm-telemetry.service` — not execute arbitrary root commands. The control
+plane (`aipm`) holds no sudo privilege; it reaches the executor only through
+the IPC socket, and the executor validates independently.
 
 ## Removal
 
 ```bash
 sudo rm /etc/sudoers.d/aipm-systemd-restart
+sudo visudo -c
 ```
+
+(Prefer restoring the prior rule from `/etc/sudoers.d/.aipm-backup/` when
+rolling back a cutover rather than deleting outright.)
 
 ## Security assumptions
 
-1. AIPM runs as the dedicated `aipm` system user (NOT `mina`)
-2. `aipm` is NOT in the `sudo`, `docker`, `admin`, or any privileged group
-3. `aipm` has `/usr/sbin/nologin` shell — no interactive access
-4. `aipm` has a locked password — no password login
-5. `/usr/bin/systemctl` is root-owned and not writable by `aipm`
-6. The unit file `/etc/systemd/system/aipm-telemetry.service` is root-owned and not writable by `aipm`
+1. AIPM control plane runs as the dedicated `aipm` system user (NOT `mina`)
+2. The executor runs as the dedicated `aipm-executor` system user (NOT `mina`, NOT `aipm`)
+3. Neither `aipm` nor `aipm-executor` is in the `sudo`, `docker`, `admin`, or any privileged group
+4. Both service identities have `/usr/sbin/nologin` shells and locked passwords
+5. `/usr/bin/systemctl` is root-owned and not writable by the service identities
+6. The unit file `/etc/systemd/system/aipm-telemetry.service` is root-owned and not writable by the service identities
 7. sudo's `env_reset` and `secure_path` defaults are active
 8. No `SETENV` tag on the sudoers rule
 9. The control plane remains the authorization authority; Linux privilege is the final defense
-10. `sudo` timestamp caching is NOT a security boundary — the dedicated identity has no interactive sessions to create timestamps
-11. Application code (`/home/ubuntu/aipm`) is read-only to the `aipm` identity
-12. Runtime state (`/var/lib/aipm`) is owned by `aipm`
+10. `sudo` timestamp caching is NOT a security boundary — the dedicated identities have no interactive sessions to create timestamps
+11. Application code (`/home/ubuntu/aipm`) is read-only to the service identities: group `aipm-runtime` (members: exactly `aipm`, `aipm-executor`), dirs 0750, files 0640, owner unchanged
+12. Runtime state (`/var/lib/aipm`) is owned by `aipm`; executor state (`/var/lib/aipm-executor`) is owned by `aipm-executor` — the executor has no access to control-plane state and never joins the `aipm` group

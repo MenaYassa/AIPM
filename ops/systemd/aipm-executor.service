@@ -11,9 +11,9 @@ WorkingDirectory=/home/ubuntu/aipm
 Environment=PYTHONUNBUFFERED=1
 RuntimeDirectory=aipm
 RuntimeDirectoryMode=0750
-# The aipm-executor group is shared with aipm (for socket IPC)
-# Setup script adds aipm to aipm-executor group
-SupplementaryGroups=aipm-executor
+# The executor reads immutable application code via the aipm-runtime group
+# (granted by ops/setup-aipm-identity.sh). It never joins the aipm group.
+SupplementaryGroups=aipm-runtime
 ExecStart=/home/ubuntu/aipm/.venv/bin/aipm executor run
 Restart=on-failure
 RestartSec=5
@@ -22,7 +22,7 @@ RestartSec=5
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/aipm/state
+ReadWritePaths=/var/lib/aipm/executor/state
 RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true

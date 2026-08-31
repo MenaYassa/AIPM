@@ -33,7 +33,7 @@ supplied artifact identity — it never regenerates the authoritative release ma
 ### CHECKPOINT 0: Repository/version verification
 ```
 git status --short  # must be clean
-git rev-parse HEAD  # must equal RELEASE_COMMIT (f5fe471a6b47dfd70446ffc9d6097233febd9c78)
+git rev-parse HEAD  # must equal RELEASE_COMMIT
 git ls-remote origin refs/heads/main  # must equal RELEASE_COMMIT
 python ops/validate-release.py --development  # must pass
 ```
@@ -45,13 +45,21 @@ artifact's files and manifest against that generated hash before proceeding.
 
 ### CHECKPOINT 1: Identity creation
 ```
-sudo bash ops/setup-aipm-identity.sh
+sudo bash ops/setup-aipm-identity.sh --dry-run   # review every mutating command first
+sudo bash ops/setup-aipm-identity.sh --apply
 id aipm
 id aipm-executor
-id -Gn aipm  # must include aipm-executor group
-id -Gn aipm-executor  # must NOT include sudo or docker
+id -Gn aipm            # must include aipm-executor and aipm-runtime
+id -Gn aipm-executor   # must include aipm-runtime; must NOT include aipm, sudo, or docker
+getent group aipm-runtime  # members must be exactly aipm and aipm-executor
 ```
-**Stop if**: users missing, privileged groups present, nologin shell missing.
+The script is staged (PRECHECK → BACKUP → IDENTITY → RUNTIME_DIRS →
+PERMISSIONS → SUDOERS → VERIFY). Each stage reports its exact name on failure and
+STOPS — there is no automatic rollback, no database migration, and no service
+restart inside this script. `--print-rollback` shows targeted rollback procedures.
+
+**Stop if**: users missing, privileged groups present, nologin shell missing,
+aipm-runtime membership is not exactly {aipm, aipm-executor}.
 
 ### CHECKPOINT 2: Filesystem preparation
 ```
@@ -59,21 +67,36 @@ ls -la /var/lib/aipm/state/telemetry/
 ls -la /var/lib/aipm/logs/
 # DB must be aipm:aipm 600
 # Logs must be aipm:aipm 750
+# App code: group aipm-runtime, dirs 0750, files 0640; owner unchanged
 ```
 **Stop if**: wrong ownership, wrong mode, DB corruption.
 
-### CHECKPOINT 3: DB migration
+### CHECKPOINT 3: DB migration (separate explicit script)
 ```
-sqlite3 /var/lib/aipm/state/telemetry/mission_control.db "PRAGMA integrity_check;"
-sqlite3 /var/lib/aipm/state/telemetry/mission_control.db "SELECT COUNT(*) FROM project_plans;"
+sudo bash ops/migrate-aipm-state.sh --dry-run
+sudo bash ops/migrate-aipm-state.sh --apply
+sudo sqlite3 /var/lib/aipm/state/telemetry/mission_control.db "PRAGMA integrity_check;"
 ```
-**Stop if**: integrity_check fails, missing tables, wrong schema version.
+The migration script (PRECHECK → QUIESCE_CHECK → SOURCE_VERIFY → BACKUP →
+COPY → DEST_VERIFY → SUMMARY) refuses to run while a writer holds the source DB
+open (`fuser` gate → explicit operator checkpoint to stop aipm-telemetry), takes a
+timestamped pre-migration backup that is never pruned or overwritten, copies only
+from the verified backup (no stale `-wal`/`-shm` at the destination), and verifies
+integrity, schema identity, per-table row counts, and exact owner/mode at the
+destination. The source DB is never modified or removed. Rollback material is
+listed by `--print-rollback`.
+
+**Stop if**: integrity_check fails, missing tables, row-count mismatch, wrong
+owner/mode, or a writer was active at QUIESCE_CHECK.
 
 ### CHECKPOINT 4: Sudoers installation
 ```
 sudo visudo -c
 sudo -n -l -U aipm-executor
 # Expected: (root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service
+# Installed by CHECKPOINT 1 transactionally: candidate -> visudo -cf -> backup
+# of the prior rule -> atomic mv; on validator failure only the candidate is
+# removed and the previous rule remains untouched.
 ```
 **Stop if**: visudo errors, broader rules detected, mina AIPM rule still present.
 
@@ -138,11 +161,12 @@ curl http://127.0.0.1:8787/healthz
 
 ## ROLLBACK
 
-Per-checkpoint rollback (targeted, not destructive):
+Per-checkpoint rollback (targeted, not destructive; `--print-rollback` on each
+cutover script prints the exact current procedures):
 - Identity: `userdel` only after verifying no owned files
-- Filesystem: targeted `rm` on specific paths
-- DB: restore from `.pre-migration.bak`
-- Sudoers: remove `/etc/sudoers.d/aipm-*` only
+- Filesystem: targeted `rm`/`chown` on specific paths
+- DB: restore from the newest `/var/lib/aipm/state/telemetry/backups/mission_control.db.pre-migration.*.bak` (backups are never pruned by the script)
+- Sudoers: restore the exact prior rule from `/etc/sudoers.d/.aipm-backup/`, then `visudo -c`
 - Units: restore backed-up units
 - Services: `systemctl stop` + restore old units
 

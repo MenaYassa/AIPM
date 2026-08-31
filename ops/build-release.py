@@ -28,7 +28,7 @@ SYSTEMD_FILES = sorted([
     for p in Path("ops/systemd").iterdir()
     if p.is_file() and p.suffix in (".service", ".socket") and "__pycache__" not in str(p)
 ])
-OPS_FILES = ["ops/setup-aipm-identity.sh", "ops/validate-release.py", "ops/build-release.py"]
+OPS_FILES = ["ops/setup-aipm-identity.sh", "ops/migrate-aipm-state.sh", "ops/validate-release.py", "ops/build-release.py"]
 DOC_FILES = sorted([
     str(p)
     for p in Path("docs").glob("MC-6.12_*.md")

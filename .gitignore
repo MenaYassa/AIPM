@@ -33,3 +33,6 @@ node_modules/
 # Python packaging metadata
 *.egg-info/
 release-manifest.json
+
+# Local operator scratch
+commands.txt

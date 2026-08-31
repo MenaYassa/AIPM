@@ -68,6 +68,7 @@ REQUIRED_SYSTEMD = [
 
 REQUIRED_OPS = [
     "ops/setup-aipm-identity.sh",
+    "ops/migrate-aipm-state.sh",
 ]
 
 REQUIRED_DOCS = [
