@@ -6,21 +6,42 @@ This document defines the exact procedure for deploying the MC-6.12 control plan
 
 ## BEFORE CUTOVER
 
+The authoritative release artifact is **built BEFORE deployment** from the exact
+release commit, on the build host (not on the VPS). The VPS only **verifies** the
+supplied artifact identity — it never regenerates the authoritative release manifest.
+
 1. Create a release commit on the `main` branch (clean tree, all MC-6.12 files).
-2. Run `python ops/validate-release.py` → must pass.
-3. Run `python ops/build-release.py` → generates `release-manifest.json`.
-4. Record the commit SHA and `artifact_sha256` from the manifest.
-5. Verify the VPS is backed up (systemd units, DB, configuration).
-6. Confirm the operator has root terminal access.
+2. Run `python ops/validate-release.py --development` → must pass.
+3. From the exact release commit (`RELEASE_COMMIT`), generate the authoritative
+   release defaults with `python ops/build-release.py` → produces the file listing,
+   per-file SHA-256, and `artifact_sha256`.
+4. Build the release artifact: copy the manifest-listed deployable files plus the
+   generated `build_meta.json` (carrying `commit_sha = RELEASE_COMMIT` and
+   `version = mc612-v1`) into a clean directory. Do NOT reconstruct the artifact on
+   the VPS; do NOT build from a dirty tree.
+5. Record: `RELEASE_COMMIT`, `RELEASE_VERSION=mc612-v1`, `ARTIFACT_SHA256`.
+6. The VPS receives the artifact and its manifest, verifies every file SHA-256 and
+   the `artifact_sha256`, and resolves build identity from the supplied
+   `build_meta.json` (which identifies the same commit). VPS-side re-generation of
+   build metadata is a **deployment verification manifest** only, never the
+   authoritative release identity.
+7. Verify the VPS is backed up (systemd units, DB, configuration).
+8. Confirm the operator has root terminal access.
 
 ## CHECKPOINTS
 
 ### CHECKPOINT 0: Repository/version verification
 ```
 git status --short  # must be clean
-git rev-parse HEAD  # must match the release commit
-python ops/validate-release.py  # must pass
+git rev-parse HEAD  # must equal RELEASE_COMMIT (f5fe471a6b47dfd70446ffc9d6097233febd9c78)
+git ls-remote origin refs/heads/main  # must equal RELEASE_COMMIT
+python ops/validate-release.py --development  # must pass
 ```
+
+The artifact deployed in this cutover was built before deployment from
+`RELEASE_COMMIT`. Its authoritative `ARTIFACT_SHA256` is recorded in the build-time
+`release-manifest.json` generated from that exact commit. Verify the staged
+artifact's files and manifest against that generated hash before proceeding.
 
 ### CHECKPOINT 1: Identity creation
 ```
@@ -128,12 +149,18 @@ Per-checkpoint rollback (targeted, not destructive):
 ## POST-CUTOVER
 
 ```
-curl /health → build.commit_sha matches release
+curl /health → build.commit_sha == RELEASE_COMMIT, build.version == mc612-v1, build.environment == production
 systemctl show aipm-telemetry --property=User → User=aipm
 systemctl show aipm-executor --property=User → User=aipm-executor
 ls -la /run/aipm/executor.sock → mode 0660, owner aipm-executor
 sudo -n -l -U aipm-executor → only exact systemctl restart rule
 ```
+
+The `/health` `build` object is resolved from the deployed artifact's `build_meta.json`
+(no `.git` dependency). A mismatch between the deployed commit and `RELEASE_COMMIT`
+means the wrong artifact was deployed — STOP and investigate. Any VPS-side manifest
+used for verification is a **deployment verification manifest** and does not become
+the authoritative release identity.
 
 ## FIRST MUTATION
 
