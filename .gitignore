@@ -34,5 +34,9 @@ node_modules/
 *.egg-info/
 release-manifest.json
 
+# Generated build metadata (written by the release process; carries the
+# build commit + timestamp and must match HEAD at validation time)
+build_meta.json
+
 # Local operator scratch
 commands.txt

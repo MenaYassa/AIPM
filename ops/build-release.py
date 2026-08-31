@@ -63,12 +63,37 @@ def main() -> int:
                 "size": path.stat().st_size,
             }
 
-    # Add source tree SHA-256 (deterministic)
+    # Add deployable-content SHA-256 (deterministic)
     combined = hashlib.sha256()
     for f in sorted(manifest["files"].keys()):
         combined.update(f.encode())
         combined.update(manifest["files"][f]["sha256"].encode())
     manifest["artifact_sha256"] = combined.hexdigest()
+    manifest["hash_semantics"] = {
+        "artifact_sha256": {
+            "definition": (
+                "DEPLOYABLE_CONTENT_SHA256: SHA-256 over the concatenation of "
+                "(relative path UTF-8 bytes + per-file sha256 hex) for every "
+                "file listed in manifest['files'], iterated in sorted path order."
+            ),
+            "deterministic": True,
+            "includes_manifest_itself": False,
+            "includes_build_meta": False,
+            "includes_tar_metadata": False,
+            "recompute": "sort keys of manifest['files']; sha256(path_bytes + file_sha_hex) chained",
+        },
+        "outer_archive_sha256": {
+            "definition": (
+                "OUTER_ARCHIVE_SHA256: plain SHA-256 of the release .tar.gz file. "
+                "It covers archive bytes (tar member metadata + gzip header), NOT "
+                "deployable content as defined by artifact_sha256; it can differ "
+                "across tar/gzip implementations, versions, and member mtimes. "
+                "Record it at packaging time and verify the archive before extraction."
+            ),
+            "deterministic": False,
+            "recorded_at": "packaging time, next to the tarball",
+        },
+    }
 
     output = Path("release-manifest.json")
     output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

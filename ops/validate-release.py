@@ -99,6 +99,28 @@ def _git(*args: str) -> str:
     return result.stdout.strip()
 
 
+def _tracked_dirty_files(root: Path) -> list[str]:
+    """Return staged or unstaged modifications to TRACKED files.
+
+    Untracked (and ignored) files are deliberately excluded: build
+    outputs like build_meta.json and release-manifest.json are generated
+    into the tree by the release process itself and must not fail
+    validation of an otherwise clean checkout.
+    """
+    entries: list[str] = []
+    result = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return []
+    for line in result.stdout.splitlines():
+        status = line[:2]
+        if len(line) > 3 and status != "??":
+            entries.append(line[3:].strip())
+    return entries
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -108,10 +130,10 @@ def main() -> int:
     errors: list[str] = []
     root = Path.cwd()
 
-    # 1. Git tree status
-    status = _git("status", "--porcelain")
-    if not development and status:
-        dirty_files = status.splitlines()
+    # 1. Git tree status (tracked files only; generated build outputs are
+    # gitignored and must not block validation of a clean checkout)
+    dirty_files = _tracked_dirty_files(root)
+    if not development and dirty_files:
         errors.append(f"Git tree is dirty ({len(dirty_files)} files): {dirty_files[:5]}...")
 
     commit = _git("rev-parse", "HEAD")
@@ -141,11 +163,20 @@ def main() -> int:
         if not (root / f).is_file():
             errors.append(f"Missing required documentation: {f}")
 
-    # 6. Forbidden artifacts
+    # 6. Forbidden artifacts (files) and forbidden directories (runtime state)
     for f in FORBIDDEN_ARTIFACTS:
         if (root / f).exists():
             if not development:
                 errors.append(f"Forbidden artifact in release tree: {f}")
+
+    if not development:
+        for d in FORBIDDEN_DIRS:
+            # Runtime state dirs (state/, reports/, logs/) are legitimate
+            # on a dev host and gitignored; they can only contaminate a
+            # release artifact if git tracks files under them.
+            tracked = _git("ls-files", "--", d)
+            if tracked:
+                errors.append(f"Forbidden directory has tracked files in release tree: {d}")
 
     # 7. Build metadata (production only)
     if not development:

@@ -28,6 +28,40 @@ supplied artifact identity — it never regenerates the authoritative release ma
 7. Verify the VPS is backed up (systemd units, DB, configuration).
 8. Confirm the operator has root terminal access.
 
+## Artifact hash terminology
+
+Two DISTINCT hashes exist. Never conflate them in reports or checkpoints:
+
+| Name | Definition | Deterministic | Covers |
+|---|---|---|---|
+| `DEPLOYABLE_CONTENT_SHA256` | The manifest's `artifact_sha256`: SHA-256 over concat(relative path UTF-8 + per-file sha256 hex) for all `files{}`, sorted by path | **Yes** (identical file set → identical hash) | Deployable content only; excludes the manifest itself, `build_meta.json`, and all tar metadata |
+| `OUTER_ARCHIVE_SHA256` | Plain SHA-256 of the release `.tar.gz` file | No — varies across tar/gzip implementations, versions, and member mtimes | Archive bytes (tar member metadata + gzip header), not deployable content |
+
+The manifest embeds a `hash_semantics` block stating both definitions.
+`DEPLOYABLE_CONTENT_SHA256` is the authoritative release identity for
+verification; `OUTER_ARCHIVE_SHA256` is recorded at packaging time and used
+to detect corruption of the archive in transit (verify before extraction).
+
+## Production validation requirements
+
+`python ops/validate-release.py` (production mode, no `--development`)
+requires, run from the release tree:
+- A git checkout with NO staged or unstaged modifications to tracked files
+  (generated, gitignored build outputs such as `build_meta.json` and
+  `release-manifest.json` do NOT count as dirty).
+- `git rev-parse HEAD` to resolve (extracted artifact directories have no
+  `.git` and are validated via `build_meta.json` build identity plus
+  manifest recompute instead — this is by design).
+- `build_meta.json` present with `commit_sha` equal to HEAD.
+- No forbidden artifacts present: `realistic_vision_v6_b1.safetensors`,
+  `AGENTS.md`, `commands.txt` (all must also never be git-tracked).
+- No git-tracked files under `state/`, `reports/`, or `logs/` (runtime
+  state directories must never enter the release tree).
+- Systemd units must not specify `User=mina`.
+
+The repository must never track `commands.txt` (local operator scratch;
+gitignored) or any of the other forbidden artifacts.
+
 ## CHECKPOINTS
 
 ### CHECKPOINT 0: Repository/version verification
