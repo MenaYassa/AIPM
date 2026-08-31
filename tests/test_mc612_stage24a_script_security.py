@@ -51,21 +51,18 @@ STUB_GETENT = """#!/bin/bash
 if [ -n "${GETENT_MISSING:-}" ]; then exit 2; fi
 case "$1" in
   passwd)
-    for u in aipm aipm-executor; do
-      if [ "$2" = "$u" ]; then echo "$u:x:16001:16001::/var/lib/$u:/usr/sbin/nologin"; exit 0; fi
-    done
+    case "$2" in
+      aipm) echo "aipm:x:16001:17001::/var/lib/aipm:/usr/sbin/nologin"; exit 0 ;;
+      aipm-executor) echo "aipm-executor:x:16002:17002::/var/lib/aipm-executor:/usr/sbin/nologin"; exit 0 ;;
+    esac
     exit 2 ;;
   group)
-    for g in aipm aipm-executor aipm-runtime; do
-      if [ "$2" = "$g" ]; then
-        members=""
-        case "$g" in
-          aipm-runtime) members="aipm,aipm-executor" ;;
-          aipm-executor) members="aipm" ;;
-        esac
-        echo "$g:x:17001:$members"; exit 0
-      fi
-    done
+    # resolve by name or numeric GID (user_primary_group does gid-based lookup)
+    case "$2" in
+      aipm|17001) echo "aipm:x:17001:"; exit 0 ;;
+      aipm-executor|17002) echo "aipm-executor:x:17002:aipm"; exit 0 ;;
+      aipm-runtime|17003) echo "aipm-runtime:x:17003:aipm,aipm-executor"; exit 0 ;;
+    esac
     exit 2 ;;
 esac
 exit 2

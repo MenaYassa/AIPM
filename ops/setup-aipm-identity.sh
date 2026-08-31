@@ -9,7 +9,11 @@
 # Stages (each idempotent; on failure: STOP + REPORT stage, no auto-rollback):
 #   1. PRECHECK       tool availability, root check (apply mode)
 #   2. BACKUP         preserve current sudoers rule + group/user facts (report only)
-#   3. IDENTITY       users aipm, aipm-executor; groups aipm, aipm-executor, aipm-runtime
+#   3. IDENTITY       groups aipm, aipm-executor, aipm-runtime (created only if
+#                     absent, otherwise REUSED); users aipm, aipm-executor with
+#                     EXPLICIT primary group (--gid, never --user-group); an
+#                     existing user is never recreated — it is verified
+#                     (primary group + nologin shell), failing closed on drift
 #   4. RUNTIME_DIRS   /var/lib/aipm tree + /var/lib/aipm-executor (state, logs)
 #   5. PERMISSIONS    deterministic read-only runtime access (see table below)
 #   6. SUDOERS        transactional candidate -> validate -> backup -> atomic install
@@ -209,23 +213,10 @@ fi
 # ---------------------------------------------------------------------------
 begin_stage "IDENTITY"
 
-create_user_if_missing() {
-    local name="$1" home="$2"
-    if getent passwd "$name" >/dev/null 2>&1; then
-        echo "  User $name exists (UID $(id -u "$name"))"
-    elif [ "$MODE" = "dry-run" ]; then
-        log_dry "useradd --system --home-dir $home --shell /usr/sbin/nologin --no-create-home --user-group $name"
-    else
-        useradd --system --home-dir "$home" --shell /usr/sbin/nologin \
-            --no-create-home --user-group "$name"
-        echo "  Created user $name (UID $(id -u "$name"))"
-    fi
-}
-
 create_group_if_missing() {
     local name="$1"
     if getent group "$name" >/dev/null 2>&1; then
-        echo "  Group $name exists (GID $(getent group "$name" | cut -d: -f3))"
+        echo "  Group $name exists (GID $(getent group "$name" | cut -d: -f3)); reusing it"
     elif [ "$MODE" = "dry-run" ]; then
         log_dry "groupadd --system $name"
     else
@@ -234,11 +225,57 @@ create_group_if_missing() {
     fi
 }
 
+user_shell() {
+    getent passwd "$1" | cut -d: -f7
+}
+
+user_primary_group() {
+    # Resolve the user's primary group NAME from the passwd GID field.
+    local gid
+    gid="$(getent passwd "$1" | cut -d: -f4)"
+    getent group "$gid" | cut -d: -f1
+}
+
+ensure_user_with_primary_group() {
+    # Idempotent user creation with an EXPLICIT primary group.
+    # Never uses --user-group (that fails when the same-named group already
+    # exists — the exact Checkpoint-1 failure mode). Never recreates an
+    # existing user: verifies primary group + shell instead, failing closed.
+    local name="$1" home="$2" primary="$3"
+    if getent passwd "$name" >/dev/null 2>&1; then
+        local pgid shell_now
+        pgid="$(user_primary_group "$name")"
+        shell_now="$(user_shell "$name")"
+        if [ "$pgid" != "$primary" ]; then
+            die_at_stage "user $name exists with primary group '$pgid', expected '$primary' (no recreation; repair deliberately)"
+        fi
+        if [ "$shell_now" != "/usr/sbin/nologin" ]; then
+            die_at_stage "user $name exists with shell '$shell_now', expected '/usr/sbin/nologin' (no recreation; repair deliberately)"
+        fi
+        echo "  User $name exists (UID $(id -u "$name")); primary group '$pgid', shell OK"
+    elif [ "$MODE" = "dry-run" ]; then
+        log_dry "useradd --system --home-dir $home --shell /usr/sbin/nologin --no-create-home --gid $primary $name"
+    else
+        if ! useradd --system --home-dir "$home" --shell /usr/sbin/nologin \
+                --no-create-home --gid "$primary" "$name"; then
+            die_at_stage "useradd failed for $name (primary group $primary)"
+        fi
+        # Fail closed: re-read what the OS actually recorded.
+        local pgid shell_now
+        pgid="$(user_primary_group "$name")"
+        shell_now="$(user_shell "$name")"
+        if [ "$pgid" != "$primary" ] || [ "$shell_now" != "/usr/sbin/nologin" ]; then
+            die_at_stage "post-create verification failed for $name (primary group '$pgid', shell '$shell_now')"
+        fi
+        echo "  Created user $name (UID $(id -u "$name")), primary group '$primary'"
+    fi
+}
+
 create_group_if_missing "$AIPM_GROUP"
 create_group_if_missing "$EXECUTOR_GROUP"
 create_group_if_missing "$RUNTIME_GROUP"
-create_user_if_missing "$AIPM_USER" "$AIPM_HOME"
-create_user_if_missing "$EXECUTOR_USER" "$EXECUTOR_HOME"
+ensure_user_with_primary_group "$AIPM_USER" "$AIPM_HOME" "$AIPM_GROUP"
+ensure_user_with_primary_group "$EXECUTOR_USER" "$EXECUTOR_HOME" "$EXECUTOR_GROUP"
 
 # Membership model (see header). usermod -a preserves existing groups.
 if [ "$MODE" = "apply" ]; then
@@ -255,6 +292,12 @@ if [ "$MODE" = "apply" ]; then
     for name in "$AIPM_USER" "$EXECUTOR_USER"; do
         if id -Gn "$name" 2>/dev/null | grep -qE '(^| )(sudo|docker|admin|root|wheel)( |$)'; then
             die_at_stage "$name is in a privileged group"
+        fi
+        if [ "$(user_shell "$name")" != "/usr/sbin/nologin" ]; then
+            die_at_stage "$name shell is not /usr/sbin/nologin"
+        fi
+        if [ "$(user_primary_group "$name")" != "$name" ]; then
+            die_at_stage "$name primary group is not $name"
         fi
     done
     # Guard: aipm-runtime must contain ONLY the two service identities.
@@ -410,11 +453,11 @@ begin_stage "VERIFY"
 
 echo "Identity summary:"
 if getent passwd "$AIPM_USER" >/dev/null 2>&1; then
-    echo "  $AIPM_USER: UID $(id -u "$AIPM_USER"), shell $(getent passwd "$AIPM_USER" | cut -d: -f7)"
+    echo "  $AIPM_USER: UID $(id -u "$AIPM_USER"), shell $(user_shell "$AIPM_USER"), primary group $(user_primary_group "$AIPM_USER")"
     echo "    groups: $(id -Gn "$AIPM_USER" 2>/dev/null)"
 fi
 if getent passwd "$EXECUTOR_USER" >/dev/null 2>&1; then
-    echo "  $EXECUTOR_USER: UID $(id -u "$EXECUTOR_USER"), shell $(getent passwd "$EXECUTOR_USER" | cut -d: -f7)"
+    echo "  $EXECUTOR_USER: UID $(id -u "$EXECUTOR_USER"), shell $(user_shell "$EXECUTOR_USER"), primary group $(user_primary_group "$EXECUTOR_USER")"
     echo "    groups: $(id -Gn "$EXECUTOR_USER" 2>/dev/null)"
 fi
 echo "Runtime access: $AIPM_USER + $EXECUTOR_USER read-only via $RUNTIME_GROUP"

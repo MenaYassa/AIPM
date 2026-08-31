@@ -91,6 +91,10 @@ The script is staged (PRECHECK → BACKUP → IDENTITY → RUNTIME_DIRS →
 PERMISSIONS → SUDOERS → VERIFY). Each stage reports its exact name on failure and
 STOPS — there is no automatic rollback, no database migration, and no service
 restart inside this script. `--print-rollback` shows targeted rollback procedures.
+Identity semantics: existing groups are reused (never recreated); users are
+created with an explicit `--gid` primary group (never `--user-group`); an
+existing user is never recreated — it is verified (primary group + nologin
+shell) and any drift fails closed.
 
 **Stop if**: users missing, privileged groups present, nologin shell missing,
 aipm-runtime membership is not exactly {aipm, aipm-executor}.
