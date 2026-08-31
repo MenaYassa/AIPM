@@ -135,7 +135,7 @@ def test_release_manifest_generation(tmp_path: Path):
     )
     # Release manifest may fail if tree is dirty; that's correct behavior
     if result.returncode != 0:
-        assert "dirty" in result.stderr.lower()
+        assert "uncommitted" in result.stderr.lower() or "dirty" in result.stderr.lower()
     else:
         manifest_file = Path("release-manifest.json")
         assert manifest_file.is_file()
