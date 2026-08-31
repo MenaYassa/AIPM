@@ -42,9 +42,10 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-    status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True)
-    if status.stdout.strip():
-        print("ERROR: Git tree is dirty. Release must be from a clean tree.", file=sys.stderr)
+    staged = subprocess.run(["git", "diff", "--cached", "--stat"], capture_output=True, text=True, check=True)
+    unstaged = subprocess.run(["git", "diff", "--stat"], capture_output=True, text=True, check=True)
+    if staged.stdout.strip() or unstaged.stdout.strip():
+        print("ERROR: Git tree has uncommitted changes. Release must be from a clean commit.", file=sys.stderr)
         return 1
 
     all_files = RUNTIME_FILES + SYSTEMD_FILES + OPS_FILES + DOC_FILES
