@@ -1,0 +1,224 @@
+{
+  "artifact_sha256": "cf96162f4036ace605198902b6aaface876ee5de336054fbc2d9ef36b9fab67d",
+  "commit_sha": "d24791e23fa47208caec11211503c8dafddb0d9e",
+  "files": {
+    "docs/MC-6.12_EXECUTOR_ARCHITECTURE.md": {
+      "sha256": "24fb42c66e196c83beb0e9ba2c327c2b0e8b67f32327b6beab92446675082865",
+      "size": 2115
+    },
+    "docs/MC-6.12_OPERATOR_TRANSPORT.md": {
+      "sha256": "83ee8022cb03b5b7bbc14af1557251b0cfa6ea1d23f1c49c39e797b856fba717",
+      "size": 5285
+    },
+    "docs/MC-6.12_PRIVILEGE_BOUNDARY.md": {
+      "sha256": "80bd34a21e97d32f18c21e743d867b918ea83c6dbfa554888e712ce78c089a42",
+      "size": 8484
+    },
+    "docs/MC-6.12_PRODUCTION_ARCHITECTURE.md": {
+      "sha256": "a2452ff2aa4ddba6aa1c999cc7e0719a7c5e439474ba804a79c3645a94c42514",
+      "size": 14947
+    },
+    "docs/MC-6.12_RELEASE_AND_CUTOVER.md": {
+      "sha256": "50eea4cb334536aa116a6faae12e87b15c63f2b3ced29d4617d78366a27089fe",
+      "size": 4721
+    },
+    "docs/MC-6.12_SYSTEMD_RESTART.md": {
+      "sha256": "3aacd9c3677afdc12edc786ea0d5dc596c65c826dc01a08d1fc69486c8118ad5",
+      "size": 2672
+    },
+    "ops/build-release.py": {
+      "sha256": "6646b034568da3ae8ef77e373fc1769609de9504483cb4b27f814a9bf43bf303",
+      "size": 2801
+    },
+    "ops/setup-aipm-identity.sh": {
+      "sha256": "50dc2207c212f46e6febdd07057ba57293c70c1db8ac62621bb90c57832825da",
+      "size": 8311
+    },
+    "ops/systemd/aipm-dashboard.service": {
+      "sha256": "8683d6f60bda46947b7a9894f68e1717a42c678c5183c58fe675e5b7d7f7e30a",
+      "size": 847
+    },
+    "ops/systemd/aipm-events.service": {
+      "sha256": "9bb52a407be5e3499498661984c404cc4e6de8575f9f26ac103f2fc2c9f5f504",
+      "size": 819
+    },
+    "ops/systemd/aipm-executor.service": {
+      "sha256": "94437a472fe7c9d6ced40138598be2c91d977571dc88ea4e1f61c9b58ad27aee",
+      "size": 974
+    },
+    "ops/systemd/aipm-provenance.service": {
+      "sha256": "41f27f99c950f2e1557e0d8f9544c9ced92e04104278866be0a0d5cb24a2bd82",
+      "size": 769
+    },
+    "ops/systemd/aipm-provenance.socket": {
+      "sha256": "dd24b423074a2fc6db23c8191d447511abe3fd7cc7bec5e5200640c73a2b8765",
+      "size": 358
+    },
+    "ops/systemd/aipm-telemetry.service": {
+      "sha256": "021f9fc756a3b5106bb0c6af557622ba5239e54f54476e74d492a77cfc49caa9",
+      "size": 915
+    },
+    "ops/validate-release.py": {
+      "sha256": "7f28882fc90964015b14d52229b6b3604eef7a88e12cff7468a8ff6d4b980118",
+      "size": 6164
+    },
+    "src/aipm/control_plane/__init__.py": {
+      "sha256": "e4422ac56d09a66a2a0c3465e12098d2ac2ad116061d27bf14c7236633852666",
+      "size": 3127
+    },
+    "src/aipm/control_plane/action_state.py": {
+      "sha256": "50f5c670a84b165638ace23dbd9902f88f1146274afe40f98e86d247c74c970c",
+      "size": 23690
+    },
+    "src/aipm/control_plane/approval.py": {
+      "sha256": "6c0e8157c73ea37cec04a90cc0821d6727fc7ac28c8956e6422ff01b27dad7e5",
+      "size": 13285
+    },
+    "src/aipm/control_plane/audit/__init__.py": {
+      "sha256": "160e0ab70193ac2052903f2d47c9adc4b586409f1d05c1dccf1e8a07a6be384e",
+      "size": 1598
+    },
+    "src/aipm/control_plane/audit/builders.py": {
+      "sha256": "578b1533e90acc9c7c78ebc5186569f3d66182edb0110f975966faa979658208",
+      "size": 16228
+    },
+    "src/aipm/control_plane/audit/canonical.py": {
+      "sha256": "fa1c8a6a6c26d2e43fb2a878dc2715677028eb4867b4b088715efd60717eb724",
+      "size": 1919
+    },
+    "src/aipm/control_plane/audit/chain.py": {
+      "sha256": "da8175662ebd537538eb41ff2ef8bbadf2d8a00c6e1ff48d070ee8cef8a89811",
+      "size": 1465
+    },
+    "src/aipm/control_plane/audit/models.py": {
+      "sha256": "b1e8685af45aec847571b3bbf95edcbc9fa063a5da0307c79e62af27bd3a73b9",
+      "size": 10206
+    },
+    "src/aipm/control_plane/audit/repository.py": {
+      "sha256": "edf0b19e07a372bdb12f807a1034fe12b53be909c7bab568fecc1c29ca15de6e",
+      "size": 13372
+    },
+    "src/aipm/control_plane/audit/sanitize.py": {
+      "sha256": "0e145d51063e1fe501a88306e1a98e9b4dca8d9b7c68adf5540efaa71c9323e1",
+      "size": 3260
+    },
+    "src/aipm/control_plane/bridge/__init__.py": {
+      "sha256": "7744049861528ed713287a21744ad822f03c3fe2e71338d9aa9710a67ce61fc8",
+      "size": 6970
+    },
+    "src/aipm/control_plane/build_identity.py": {
+      "sha256": "4d8bbbedd1d85a39b13734418f2987028e1624ff1ae35c7787a1bd01022bab77",
+      "size": 5355
+    },
+    "src/aipm/control_plane/capabilities_registry.py": {
+      "sha256": "5e64d4a3fbe045e69ca5f55631a9f2d7c30556715f3578e8faa53892b83010e0",
+      "size": 18381
+    },
+    "src/aipm/control_plane/contracts.py": {
+      "sha256": "6abc7c06f2b1248221722d0b07786aa668f181221dc44dfe8f3dca7fc63f8c49",
+      "size": 4868
+    },
+    "src/aipm/control_plane/executor.py": {
+      "sha256": "43f5e0d19c8a8cfbe77b7459ce2d696d6ec2c285b241c4e9e279f452c4cd8c67",
+      "size": 38522
+    },
+    "src/aipm/control_plane/executor_ipc.py": {
+      "sha256": "4e8b9b49a020649fe048998033cf5e88cec407b513d9d677a7792ff845d1b360",
+      "size": 10843
+    },
+    "src/aipm/control_plane/gate.py": {
+      "sha256": "fcaa0eac82d56731536e043a7d2d94ed8472b47008897d41e67e0272739ad687",
+      "size": 13065
+    },
+    "src/aipm/control_plane/identity.py": {
+      "sha256": "69d54fc3f0d8947186a43739aae6a9c33edc34d9bfddef43382fd0ee364b325b",
+      "size": 14804
+    },
+    "src/aipm/control_plane/kill_switch.py": {
+      "sha256": "98438c63c88617891a8e74441d76abdf330c004893f72a0d07a654dfeb9e1458",
+      "size": 10150
+    },
+    "src/aipm/control_plane/lifecycle.py": {
+      "sha256": "dc77d04858680466b17df01f7091dc7a75a17a9bd6cefc0e92c6f8a963fc6463",
+      "size": 7800
+    },
+    "src/aipm/control_plane/models.py": {
+      "sha256": "20dc7ca9c56c9dc70cd7a249ecc64d28c407987e3acade695e0d56321be09a44",
+      "size": 22063
+    },
+    "src/aipm/control_plane/mutation_receipt.py": {
+      "sha256": "ca34d05824e19d11330b7c8af40dbd53bb7ba19599478e2b2d8c5d5304084421",
+      "size": 9215
+    },
+    "src/aipm/control_plane/owner_auth.py": {
+      "sha256": "94d221d7368a235abdb9bf88dd773c93216b6e6678837b14dc945760248a6037",
+      "size": 8404
+    },
+    "src/aipm/control_plane/planner.py": {
+      "sha256": "33e8ff28df6ca157729f084520e4ec668b3cae66a4031c2aeaac51b953d14e74",
+      "size": 4245
+    },
+    "src/aipm/control_plane/policy.py": {
+      "sha256": "731d0d20da1477bc75a7a4156cdd28527ba50a094ffd1fce15e23b9b7fb03dcf",
+      "size": 16098
+    },
+    "src/aipm/control_plane/privilege.py": {
+      "sha256": "59185860ad3f6ea15e999f2b89e6256809b5dae2fbf63ded4422bf91a445eab1",
+      "size": 11719
+    },
+    "src/aipm/control_plane/project_plan.py": {
+      "sha256": "ccb93fa6fff173e5a2f2ed7199d0f83ee36d6ddd139bcbf88b2a0efe2aef1464",
+      "size": 5790
+    },
+    "src/aipm/control_plane/recovery.py": {
+      "sha256": "54ad2930a47f2692b23e77de12c665584ee17cac46b38929de673c2f33cee004",
+      "size": 7129
+    },
+    "src/aipm/control_plane/rollback.py": {
+      "sha256": "bdd158a97be93637dabac21a1cacb790ac91aac5c28da9280fdb1d8626d3024a",
+      "size": 11776
+    },
+    "src/aipm/control_plane/service.py": {
+      "sha256": "704411444a6e6d5bf29d02ae214137b6a8756fa90d822198b77792a6f44d42f8",
+      "size": 50849
+    },
+    "src/aipm/control_plane/session.py": {
+      "sha256": "c4fc1aff74165a938f03383da36ff3799784e3adea82e53906c4f4d609b6d0af",
+      "size": 7404
+    },
+    "src/aipm/control_plane/standalone_executor.py": {
+      "sha256": "82f0f577ee2eb638615fe62980c622f3ad996bccfe6063d4deddfcaed3c2af9d",
+      "size": 10544
+    },
+    "src/aipm/control_plane/storage/__init__.py": {
+      "sha256": "a450e39eff4b1991b2df7561a656c6bec7af0b6e251e35877fa9c6f12c376ac6",
+      "size": 1274
+    },
+    "src/aipm/control_plane/storage/schema.py": {
+      "sha256": "94335efd7557b153d4f7684d8b7870e0b59ca879d1be08938f7dca1b3137c694",
+      "size": 8336
+    },
+    "src/aipm/control_plane/storage/sqlite_store.py": {
+      "sha256": "4669e99c0b9cbac355ddebf6de82cc6a30f4fd359fc00d57df0f0de86d5176c6",
+      "size": 97624
+    },
+    "src/aipm/control_plane/systemd_executor.py": {
+      "sha256": "779f840a6c8fc3721c702e1c26e7e728c700adb8735f338fae2660dd17628463",
+      "size": 9156
+    },
+    "src/aipm/control_plane/systemd_provider.py": {
+      "sha256": "d8b43e67cab20fdeadd2de21a0839ff0dcf0fec3e638fc8c3148512687eaf1f2",
+      "size": 9231
+    },
+    "src/aipm/control_plane/transport.py": {
+      "sha256": "75dbb8df5c8db67a12f7d95cabaea8e75c4c747ab2d57b62910edefc4f02481f",
+      "size": 21374
+    },
+    "src/aipm/control_plane/verification.py": {
+      "sha256": "990cacd2bd58adc8bff6cd3aaaef05acb1d762b27387cb68ebbc5fd241371615",
+      "size": 12249
+    }
+  },
+  "generated_from": "clean git tree",
+  "release_version": "mc612-v1"
+}
