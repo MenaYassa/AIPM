@@ -116,12 +116,57 @@ def test_release_validator_development_mode():
     assert "PASSED" in result.stdout
 
 
-def test_release_validator_production_mode_detects_dirty_tree():
+def test_release_validator_production_mode_detects_dirty_tree(tmp_path: Path):
+    """Production mode must reject a dirty TRACKED tree.
+
+    Uses a synthetic dirty repo: the real repo is usually dirty during
+    development, but after corrective commits it is clean, so the failure
+    mode there is build-metadata mismatch rather than dirtiness. The
+    validator's dirty-tree detection is the contract under test.
+    """
+    import subprocess as sp
+
+    repo = tmp_path / "dirty-repo"
+    repo.mkdir()
+    for f in ("ops/validate-release.py", "ops/setup-aipm-identity.sh", "ops/migrate-aipm-state.sh"):
+        dst = repo / f
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        (repo / f).write_bytes((Path(".") / f).read_bytes())
+    for unit in Path("ops/systemd").glob("*.service"):
+        dst = repo / "ops/systemd" / unit.name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(unit.read_bytes())
+    cp = repo / "src/aipm/control_plane"
+    cp.mkdir(parents=True)
+    for src in Path("src/aipm/control_plane").rglob("*.py"):
+        if "__pycache__" in str(src):
+            continue
+        dst = cp / src.relative_to("src/aipm/control_plane")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+    docs = repo / "docs"
+    docs.mkdir()
+    for doc in Path("docs").glob("MC-6.12_*.md"):
+        (docs / doc.name).write_bytes(doc.read_bytes())
+
+    sp.run(["git", "init", "-q"], cwd=repo, check=True)
+    sp.run(["git", "config", "user.email", "t@t.invalid"], cwd=repo, check=True)
+    sp.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    sp.run(["git", "add", "-A"], cwd=repo, check=True)
+    sp.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+    commit = sp.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    (repo / "build_meta.json").write_text(json.dumps({
+        "commit_sha": commit, "version": "mc612-v1",
+        "build_timestamp": "2026-08-31T00:00:00+00:00",
+        "environment": "production", "metadata_version": "aipm-build-meta-v1",
+    }))
+    # Tracked-file modification -> dirty tree
+    (repo / "docs" / "MC-6.12_SYSTEMD_RESTART.md").write_text("dirty\n")
+
     result = subprocess.run(
         [sys.executable, "ops/validate-release.py"],
-        capture_output=True, text=True, cwd=".",
+        capture_output=True, text=True, cwd=repo,
     )
-    # Production mode: tree is dirty (expected in development) → must fail
     assert result.returncode == 1
     assert "dirty" in result.stdout.lower()
 
