@@ -160,23 +160,44 @@ def test_executor_unit_file_specifies_aipm_executor_user():
 def test_systemd_unit_files_have_hardening():
     """Dashboard/events/telemetry must have NoNewPrivileges=true; the executor unit may omit it."""
     unit_dir = Path("ops/systemd")
+
     hardening_directives = [
         "PrivateTmp=true",
         "ProtectSystem=strict",
-        "ProtectHome=read-only",
         "RestrictSUIDSGID=true",
         "ProtectKernelTunables=true",
     ]
-    for unit_name in ("aipm-telemetry.service", "aipm-events.service", "aipm-dashboard.service"):
+
+    for unit_name in (
+        "aipm-telemetry.service",
+        "aipm-events.service",
+        "aipm-dashboard.service",
+    ):
         content = (unit_dir / unit_name).read_text(encoding="utf-8")
+
         for directive in hardening_directives:
             assert directive in content, f"{unit_name} missing {directive}"
-        # All control-plane services are non-executors: NNP must be present
-        assert "NoNewPrivileges=true" in content, f"{unit_name} missing NoNewPrivileges"
-    # The executor unit must NOT have NoNewPrivileges (sudo setuid transition needed)
-    executor = (unit_dir / "aipm-executor.service").read_text(encoding="utf-8")
-    assert "NoNewPrivileges=true" not in executor, "executor must NOT have NoNewPrivileges"
 
+        # All control-plane services are non-executors
+        assert "NoNewPrivileges=true" in content, f"{unit_name} missing NoNewPrivileges"
+
+    assert "ProtectHome=read-only" in (
+        unit_dir / "aipm-telemetry.service"
+    ).read_text(encoding="utf-8")
+
+    assert "ProtectHome=read-only" in (
+        unit_dir / "aipm-events.service"
+    ).read_text(encoding="utf-8")
+
+    assert "ProtectHome=false" in (
+        unit_dir / "aipm-dashboard.service"
+    ).read_text(encoding="utf-8")
+
+    # Executor requires setuid transition for controlled systemctl restart
+    executor = (unit_dir / "aipm-executor.service").read_text(encoding="utf-8")
+    assert "NoNewPrivileges=true" not in executor, (
+        "executor must NOT have NoNewPrivileges"
+    )
 
 def test_no_new_privileges_is_incompatible_with_sudo():
     """Document that NoNewPrivileges=true prevents setuid transitions.

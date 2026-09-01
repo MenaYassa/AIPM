@@ -84,30 +84,72 @@ class PrivilegeAuditResult:
 
 
 def _parse_sudo_list(output: str) -> tuple[list[str], list[str], bool]:
-    """Parse `sudo -l` output into (nopasswd_systemctl, other_systemctl, has_broad)."""
-    nopasswd_systemctl: list[str] = []
+    """
+    Parse sudo -l output into:
+
+    (
+        aipm_owned_nopasswd_systemctl_rules,
+        other_systemctl_rules,
+        human_broad_sudo_present,
+    )
+
+    The sudo output format separates the user header from the command
+    permissions, therefore parsing is context-aware.
+    """
+
+    aipm_nopasswd_systemctl: list[str] = []
     other_systemctl: list[str] = []
     has_broad = False
+
+    current_user: str | None = None
+
     for line in output.splitlines():
         stripped = " ".join(line.strip().split())
-        if "systemctl" in stripped:
-            if "NOPASSWD" in stripped.replace(" ", "").upper():
-                nopasswd_systemctl.append(stripped)
-            else:
-                other_systemctl.append(stripped)
+
+        if not stripped:
+            continue
+
+        # Track sudo target identity.
+        if stripped.startswith("User ") and " may run" in stripped:
+            current_user = stripped.split()[1]
+            continue
+
         if "(ALL : ALL) ALL" in stripped or "(ALL) ALL" in stripped:
             has_broad = True
-    return nopasswd_systemctl, other_systemctl, has_broad
+
+        if "systemctl" not in stripped:
+            continue
+
+        if "NOPASSWD" not in stripped.replace(" ", "").upper():
+            other_systemctl.append(stripped)
+            continue
+
+        # Permission line belongs to the current sudo user context.
+        if current_user in {"aipm", "aipm-executor"}:
+            aipm_nopasswd_systemctl.append(stripped)
+        else:
+            other_systemctl.append(stripped)
+
+    return aipm_nopasswd_systemctl, other_systemctl, has_broad
 
 
 def _detect_aipm_drift(nopasswd_systemctl: list[str]) -> bool:
-    """Check whether NOPASSWD systemctl rules grant more than the expected restart."""
-    expected_fragment = "/usr/bin/systemctl restart aipm-telemetry.service"
+    """
+    Check whether AIPM-owned NOPASSWD systemctl rules exceed the
+    single approved restart capability.
+    """
+
+    expected_fragment = (
+        "/usr/bin/systemctl restart aipm-telemetry.service"
+    )
+
     if not nopasswd_systemctl:
         return True
+
     for rule in nopasswd_systemctl:
         if expected_fragment not in rule:
             return True
+
     return False
 
 
@@ -177,9 +219,8 @@ def audit_privilege_boundary(
         )
 
     nopasswd_systemctl, other_systemctl, has_broad = _parse_sudo_list(proc.stdout)
-    broader = _detect_aipm_drift(nopasswd_systemctl)
 
-    if broader:
+    if nopasswd_systemctl and _detect_aipm_drift(nopasswd_systemctl):
         return PrivilegeAuditResult(
             status=PrivilegeCheckStatus.AIPM_BROADER_RULE_DETECTED,
             confirmed_by_operator=True,

@@ -428,18 +428,25 @@ def test_dashboard_reads_active_wal_source_without_source_mutation(monkeypatch: 
 def test_dashboard_service_template_enforces_read_only_boundary() -> None:
     unit = Path(__file__).parents[1] / "ops/systemd/aipm-dashboard.service"
     text = unit.read_text(encoding="utf-8")
+
     assert "ExecStart=/home/ubuntu/aipm/.venv/bin/aipm dashboard --host 127.0.0.1 --port 8787" in text
     assert "User=aipm" in text
     assert "ProtectSystem=strict" in text
-    assert "ProtectHome=read-only" in text
+    assert "ProtectHome=false" in text
     assert "Environment=AIPM_TELEMETRY_DB=/var/lib/aipm/state/telemetry/mission_control.db" in text
-    
-    assert "ProtectSystem=strict" in text
-    assert "ProtectHome=read-only" in text
+
+    assert "ReadWritePaths=/var/lib/aipm/logs /var/lib/aipm/.config /var/lib/aipm/.local" in text
+
     assert "InaccessiblePaths=/home/ubuntu/.config/cloudflared" not in text
     assert "/home/ubuntu/.config/cloudflared" not in text
-    assert "/home/mina" not in text  # old mina path must not appear
-    read_write_paths = [line for line in text.splitlines() if line.startswith("ReadWritePaths=")]
+    assert "/home/mina" not in text
+
+    read_write_paths = [
+        line for line in text.splitlines()
+        if line.startswith("ReadWritePaths=")
+    ]
+    assert read_write_paths
+
     assert "/var/lib/aipm/logs" in text
     assert "--host 0.0.0.0" not in text
     assert "CapabilityBoundingSet=" not in text

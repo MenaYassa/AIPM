@@ -15,6 +15,7 @@ from aipm.control_plane.privilege import (
 )
 
 
+
 # --- sudo -l output parsing ---
 
 MINA_OUTPUT = """Matching Defaults entries for mina on agent:
@@ -112,8 +113,16 @@ def test_assert_raises_when_not_confirmed():
         assert_privilege_boundary_ok(privilege_boundary_confirmed=False)
 
 
-def test_assert_does_not_raise_when_confirmed():
-    assert_privilege_boundary_ok(privilege_boundary_confirmed=True)
+def test_assert_detects_human_session_without_executor_rule():
+    result = audit_privilege_boundary(
+        privilege_boundary_confirmed=True,
+        effective_check=True,
+    )
+
+    assert result.confirmed_by_operator is True
+    assert result.effective_check_attempted is True
+    assert result.status is PrivilegeCheckStatus.AIPM_RULE_MISSING
+    assert result.drift is True
 
 
 # --- Real VPS audit (with installed sudoers rule) ---
@@ -157,3 +166,40 @@ def test_privilege_module_does_not_read_sudoers_files():
     assert "subprocess" in source  # uses sudo -n -l for effective check
     assert "-l" in source  # the list flag
     assert "/etc/sudoers" not in source  # no direct file read
+
+
+def test_oracle_cloud_systemctl_alias_is_not_aipm_drift():
+    output = """
+    User mina may run the following commands on agent:
+        (ALL : ALL) ALL
+
+    Cmnd_Alias WLP_SYSTEMD = /bin/systemctl, /usr/sbin/systemctl, /usr/bin/systemctl
+    """
+
+    rules, _, broad = _parse_sudo_list(output)
+
+    assert rules == []
+    assert broad is True
+    assert _detect_aipm_drift(rules) is True
+
+def test_executor_narrow_rule_is_accepted():
+    output = """
+    User aipm-executor may run:
+        (root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service
+    """
+
+    rules, _, _ = _parse_sudo_list(output)
+
+    assert rules == [
+        "(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"
+    ]
+    assert _detect_aipm_drift(rules) is False
+
+def test_executor_rule_is_exact():
+    rules, _, _ = _parse_sudo_list(EXECUTOR_OUTPUT)
+
+    assert rules == [
+        "(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"
+    ]
+
+    assert _detect_aipm_drift(rules) is False
