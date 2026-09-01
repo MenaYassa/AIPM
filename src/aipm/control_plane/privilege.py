@@ -8,12 +8,15 @@ Two distinct privilege domains are recognized:
 
 2. **AIPM execution privilege** — the NOPASSWD rule
    ``(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service``
-   allows the AIPM daemon (running as `mina`) to restart exactly one unit
-   without a password. This IS the AIPM execution authority.
+   is granted to the dedicated executor identity (`aipm-executor`, running as
+   ``User=aipm-executor`` in ``aipm-executor.service``) and allows it to restart
+   exactly one unit without a password. This IS the AIPM execution authority.
 
-The AIPM daemon cannot use the broad sudo grant: ``sudo -n`` for non-NOPASSWD
-commands requires a password, and the daemon has no TTY or stored password.
-This is verified by test.
+The executor identity cannot use the broad human sudo grant: it is not a member
+of the ``%sudo`` group, and ``sudo -n`` for non-NOPASSWD commands would require
+a password the service does not have. Control-plane services (`aipm`) hold no
+sudo privilege at all and reach the executor only via the IPC socket. This is
+verified by test.
 
 Drift is detected when:
 - The exact NOPASSWD systemctl rule is missing, OR
@@ -29,13 +32,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-PRIVILEGE_CHECK_VERSION = "mc612-privilege-check-v5"
+PRIVILEGE_CHECK_VERSION = "mc612-privilege-check-v6"
 #: The only service that may invoke sudo (setuid transition); NoNewPrivileges must not be set.
-EXECUTOR_UNIT = "aipm-telemetry.service"
-NNP_EXEMPT_SERVICES = {"aipm-telemetry.service"}
+EXECUTOR_UNIT = "aipm-executor.service"
+NNP_EXEMPT_SERVICES = {"aipm-executor.service"}
 _EXPECTED_COMMAND = "/usr/bin/systemctl restart aipm-telemetry.service"
-_EXPECTED_USER = "aipm"
-_EXPECTED_SUDOERS_RULE = "aipm ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"
+_EXPECTED_USER = "aipm-executor"
+_EXPECTED_SUDOERS_RULE = "aipm-executor ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"
 
 
 class PrivilegeDriftError(ValueError):
@@ -220,9 +223,10 @@ def audit_privilege_boundary(
 def verify_no_new_privileges_compatibility(*, unit_name: str) -> bool:
     """Verify that the unit's NoNewPrivileges setting is compatible with its role.
 
-    Only the executor unit (aipm-telemetry.service) may omit NoNewPrivileges
+    Only the executor unit (aipm-executor.service) may omit NoNewPrivileges
     because it needs the setuid transition for the narrow sudo NOPASSWD rule.
-    All other units MUST have NoNewPrivileges=true.
+    All other units (control-plane: telemetry/events/dashboard) MUST have
+    NoNewPrivileges=true.
 
     Raises PrivilegeDriftError if a non-executor unit lacks the protection.
     """
@@ -232,7 +236,7 @@ def verify_no_new_privileges_compatibility(*, unit_name: str) -> bool:
 
 
 def verify_execution_identity(*, expected_user: str = _EXPECTED_USER) -> dict[str, Any]:
-    """Verify the current process runs as the dedicated AIPM identity.
+    """Verify the current process runs as the dedicated executor identity.
 
     Checks: user, groups, no privileged groups, no interactive shell.
     Returns a bounded verification result. Raises on drift.
@@ -264,7 +268,7 @@ def verify_execution_identity(*, expected_user: str = _EXPECTED_USER) -> dict[st
         "shell_not_interactive": "nologin" in shell or "false" in shell,
     }
     if actual_user != expected_user:
-        raise PrivilegeDriftError(f"AIPM process runs as {actual_user!r}, expected {expected_user!r}")
+        raise PrivilegeDriftError(f"AIPM executor process runs as {actual_user!r}, expected {expected_user!r}")
     if found_privileged:
         raise PrivilegeDriftError(f"AIPM identity is in privileged groups: {found_privileged}")
     return result

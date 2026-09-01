@@ -51,7 +51,10 @@ class ConfigManager:
             host_id = data.get("host_id", "agent")
             if not isinstance(logging_data, dict) or not isinstance(discovery_data, dict) or not isinstance(telemetry_data, dict) or not isinstance(events_data, dict) or not isinstance(notifications_data, dict):
                 raise ValueError("logging, discovery, telemetry, events, and notifications must be mappings")
-
+            env_log_file = os.environ.get("AIPM_LOG_FILE")
+            if env_log_file:
+                logging_data = dict(logging_data)
+                logging_data["file"] = env_log_file
             env_database_path = os.environ.get("AIPM_TELEMETRY_DB")
             if env_database_path:
                 telemetry_data["database_path"] = env_database_path

@@ -17,22 +17,30 @@ from aipm.control_plane.privilege import (
 
 # --- sudo -l output parsing ---
 
-REAL_OUTPUT = """Matching Defaults entries for mina on agent:
+MINA_OUTPUT = """Matching Defaults entries for mina on agent:
     env_reset, mail_badpass,
     secure_path=/usr/local/sbin\\:/usr/local/bin\\:/usr/sbin\\:/usr/bin\\:/sbin\\:/bin\\:/snap/bin,
     use_pty
 
 User mina may run the following commands on agent:
     (ALL : ALL) ALL
+"""
+EXECUTOR_OUTPUT = """Matching Defaults entries for aipm-executor on agent:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\\:/usr/local/bin\\:/usr/sbin\\:/usr/bin\\:/sbin\\:/bin\\:/snap/bin,
+    use_pty
+
+User aipm-executor may run the following commands on agent:
     (root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service
 """
 
 
 def test_parse_real_sudo_output_extracts_both_domains():
-    nopasswd_systemctl, other_systemctl, has_broad = _parse_sudo_list(REAL_OUTPUT)
+    nopasswd_systemctl, other_systemctl, has_broad = _parse_sudo_list(EXECUTOR_OUTPUT)
     assert len(nopasswd_systemctl) == 1
     assert "aipm-telemetry" in nopasswd_systemctl[0]
-    assert has_broad is True
+    assert "aipm-executor" in EXECUTOR_OUTPUT
+    assert has_broad is False
 
 
 def test_parse_handles_empty_output():
@@ -110,32 +118,32 @@ def test_assert_does_not_raise_when_confirmed():
 
 # --- Real VPS audit (with installed sudoers rule) ---
 
-def test_real_vps_audit_detects_human_broad_sudo_and_aipm_rule():
-    """On the actual VPS with the sudoers rule installed, sudo -n -l succeeds
-    and detects: human broad sudo + exact AIPM narrow rule."""
+def test_real_vps_audit_detects_executor_narrow_rule():
+    """On the actual VPS, the audit runs as the session user (mina). The
+    executor's NOPASSWD rule does NOT appear in mina's sudo -l, so the
+    effective check reports the narrow rule as missing for this session —
+    the rule itself lives in aipm-executor's sudoers grant (verified by
+    stage24a/stage25a script certification and by host probes)."""
     result = audit_privilege_boundary(privilege_boundary_confirmed=True, effective_check=True)
-    # On the real VPS, sudo -n -l now works (NOPASSWD rule makes sudo -n succeed)
     assert result.confirmed_by_operator is True
     assert result.effective_check_attempted is True
     if result.effective_check_succeeded:
-        assert result.status is PrivilegeCheckStatus.HUMAN_BROAD_SUDO_PRESENT
-        assert result.human_broad_sudo_detected is True
-        assert result.aipm_narrow_rule_present is True
-        assert result.drift is False
+        # mina holds only broad passworded sudo; the AIPM narrow rule is
+        # scoped to aipm-executor and absent from this session's listing.
+        assert result.aipm_narrow_rule_present is False
+        assert result.status is PrivilegeCheckStatus.AIPM_RULE_MISSING
+        assert result.drift is True
 
 
 # --- Human ≠ AIPM privilege distinction ---
 
 def test_human_broad_sudo_is_not_aipm_execution_privilege():
     """Document the distinction: the human's broad sudo requires a password.
-    The AIPM daemon (no TTY, no password) cannot use it."""
-    output = REAL_OUTPUT
-    _, _, has_broad = _parse_sudo_list(output)
-    # The broad sudo is present...
-    assert has_broad is True
-    # ...but it requires a password, and the AIPM daemon has no TTY.
-    # Only the NOPASSWD systemctl rule is usable by the daemon.
-    nopasswd_rules, _, _ = _parse_sudo_list(output)
+    The executor identity (aipm-executor) is not in the %sudo group and holds
+    only the single NOPASSWD systemctl rule."""
+    _, _, has_broad = _parse_sudo_list(EXECUTOR_OUTPUT)
+    assert has_broad is False
+    nopasswd_rules, _, _ = _parse_sudo_list(EXECUTOR_OUTPUT)
     assert len(nopasswd_rules) == 1
     assert "aipm-telemetry" in nopasswd_rules[0]
 

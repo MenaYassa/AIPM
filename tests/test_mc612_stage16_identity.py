@@ -15,15 +15,15 @@ from aipm.control_plane.privilege import (
     verify_execution_identity,
 )
 
-# The expected dedicated identity
-EXPECTED_USER = "aipm"
-EXPECTED_SUDOERS = "aipm ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"
+# The expected dedicated executor identity
+EXPECTED_USER = "aipm-executor"
+EXPECTED_SUDOERS = "aipm-executor ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"
 
 
 # --- Identity separation ---
 
 def test_aipm_user_exists_and_is_dedicated():
-    """The dedicated AIPM user must exist with the correct properties.
+    """The dedicated executor identity must exist with the correct properties.
 
     The certified setup script (ops/setup-aipm-identity.sh) creates the
     identity with `useradd --system`, so a UID below 1000 is the EXPECTED
@@ -35,13 +35,13 @@ def test_aipm_user_exists_and_is_dedicated():
     try:
         entry = pwd.getpwnam(EXPECTED_USER)
     except KeyError:
-        pytest.skip("AIPM user not yet created — run ops/setup-aipm-identity.sh")
+        pytest.skip("AIPM executor user not yet created — run ops/setup-aipm-identity.sh")
     assert entry.pw_uid > 0  # a real dedicated account, never root
     assert "nologin" in entry.pw_shell or "false" in entry.pw_shell
 
 
 def test_aipm_user_is_not_in_sudo_group():
-    """AIPM identity must NOT be in the sudo group."""
+    """Executor identity must NOT be in the sudo group."""
     import grp
     try:
         sudo_group = grp.getgrnam("sudo")
@@ -51,7 +51,7 @@ def test_aipm_user_is_not_in_sudo_group():
 
 
 def test_aipm_user_is_not_in_docker_group():
-    """AIPM identity must NOT be in the docker group."""
+    """Executor identity must NOT be in the docker group."""
     import grp
     try:
         docker_group = grp.getgrnam("docker")
@@ -61,12 +61,12 @@ def test_aipm_user_is_not_in_docker_group():
 
 
 def test_aipm_user_has_no_privileged_groups():
-    """AIPM identity must not be in any privileged group."""
+    """Executor identity must not be in any privileged group."""
     import grp, pwd
     try:
         entry = pwd.getpwnam(EXPECTED_USER)
     except KeyError:
-        pytest.skip("AIPM user not yet created")
+        pytest.skip("AIPM executor user not yet created")
     privileged = {"sudo", "docker", "admin", "root", "wheel"}
     primary = grp.getgrgid(entry.pw_gid).gr_name
     # Check all groups the user belongs to (via /etc/group membership scan)
@@ -77,36 +77,36 @@ def test_aipm_user_has_no_privileged_groups():
 
 
 def test_aipm_user_password_is_locked():
-    """AIPM identity must have no usable password."""
+    """Executor identity must have no usable password."""
     import pwd, subprocess
     try:
         pwd.getpwnam(EXPECTED_USER)
     except KeyError:
-        pytest.skip("AIPM user not yet created")
+        pytest.skip("AIPM executor user not yet created")
     # Check /etc/shadow for locked password (via subprocess as we can't read it as mina)
     # This is a documentation test — the setup script enforces it
 
 
 def test_identity_verification_rejects_mina():
-    """If AIPM runs as mina, the identity check must reject it."""
+    """If the executor runs as mina, the identity check must reject it."""
     import os
     current_uid = os.getuid()
     import pwd
     current_user = pwd.getpwuid(current_uid).pw_name
     if current_user == EXPECTED_USER:
-        pytest.skip("Already running as aipm user")
+        pytest.skip("Already running as aipm-executor user")
     with pytest.raises(PrivilegeDriftError, match="expected"):
         verify_execution_identity(expected_user=EXPECTED_USER)
 
 
 def test_identity_verification_accepts_aipm():
-    """If AIPM runs as the dedicated user, the check accepts it."""
+    """If the executor runs as the dedicated user, the check accepts it."""
     import os
     current_uid = os.getuid()
     import pwd
     current_user = pwd.getpwuid(current_uid).pw_name
     if current_user != EXPECTED_USER:
-        pytest.skip("Not running as aipm user")
+        pytest.skip("Not running as aipm-executor user")
     result = verify_execution_identity(expected_user=EXPECTED_USER)
     assert result["identity_ok"] is True
     assert result["no_privileged_groups"] is True
@@ -115,8 +115,8 @@ def test_identity_verification_accepts_aipm():
 # --- Sudoers boundary ---
 
 def test_sudoers_rule_targets_aipm_not_mina():
-    """The sudoers rule must target the aipm user, not mina."""
-    assert "aipm" in EXPECTED_SUDOERS
+    """The sudoers rule must target the aipm-executor user, not mina or aipm."""
+    assert EXPECTED_SUDOERS.startswith("aipm-executor ")
     assert not EXPECTED_SUDOERS.startswith("mina")
     assert "NOPASSWD" in EXPECTED_SUDOERS
 
@@ -140,7 +140,7 @@ def test_sudoers_drift_detects_missing_rule():
 # --- Systemd unit files ---
 
 def test_systemd_unit_files_specify_aipm_user():
-    """The systemd unit files must specify User=aipm."""
+    """The control-plane unit files must specify User=aipm."""
     unit_dir = Path("ops/systemd")
     for unit_name in ("aipm-telemetry.service", "aipm-events.service", "aipm-dashboard.service"):
         unit_file = unit_dir / unit_name
@@ -150,8 +150,15 @@ def test_systemd_unit_files_specify_aipm_user():
         assert "Group=aipm" in content, f"{unit_name} does not specify Group=aipm"
 
 
+def test_executor_unit_file_specifies_aipm_executor_user():
+    """The executor unit file must specify User=aipm-executor."""
+    content = (Path("ops/systemd") / "aipm-executor.service").read_text(encoding="utf-8")
+    assert "User=aipm-executor" in content
+    assert "Group=aipm-executor" in content
+
+
 def test_systemd_unit_files_have_hardening():
-    """Dashboard/events must have NoNewPrivileges=true; telemetry (executor) may omit it."""
+    """Dashboard/events/telemetry must have NoNewPrivileges=true; the executor unit may omit it."""
     unit_dir = Path("ops/systemd")
     hardening_directives = [
         "PrivateTmp=true",
@@ -164,13 +171,11 @@ def test_systemd_unit_files_have_hardening():
         content = (unit_dir / unit_name).read_text(encoding="utf-8")
         for directive in hardening_directives:
             assert directive in content, f"{unit_name} missing {directive}"
-    # Dashboard/events must have NoNewPrivileges=true (not executors)
-    for unit_name in ("aipm-events.service", "aipm-dashboard.service"):
-        content = (unit_dir / unit_name).read_text(encoding="utf-8")
+        # All control-plane services are non-executors: NNP must be present
         assert "NoNewPrivileges=true" in content, f"{unit_name} missing NoNewPrivileges"
-    # Telemetry (executor) must NOT have NoNewPrivileges (sudo setuid transition needed)
-    telemetry = (unit_dir / "aipm-telemetry.service").read_text(encoding="utf-8")
-    assert "NoNewPrivileges=true" not in telemetry, "executor must NOT have NoNewPrivileges"
+    # The executor unit must NOT have NoNewPrivileges (sudo setuid transition needed)
+    executor = (unit_dir / "aipm-executor.service").read_text(encoding="utf-8")
+    assert "NoNewPrivileges=true" not in executor, "executor must NOT have NoNewPrivileges"
 
 
 def test_no_new_privileges_is_incompatible_with_sudo():
@@ -179,7 +184,7 @@ def test_no_new_privileges_is_incompatible_with_sudo():
     NoNewPrivileges sets prctl(PR_SET_NO_NEW_PRIVS, 1) which blocks
     execve() from transitioning to a setuid binary. sudo is setuid root.
     Therefore: NoNewPrivileges=true + sudo = sudo runs as the invoking user.
-    The telemetry service (the executor) must omit NoNewPrivileges.
+    The executor service (aipm-executor.service) must omit NoNewPrivileges.
     """
     import stat
     sudo = Path("/usr/bin/sudo")
@@ -192,7 +197,7 @@ def test_no_new_privileges_is_incompatible_with_sudo():
 def test_systemd_unit_files_do_not_specify_mina():
     """Unit files must NOT specify User=mina."""
     unit_dir = Path("ops/systemd")
-    for unit_name in ("aipm-telemetry.service", "aipm-events.service", "aipm-dashboard.service"):
+    for unit_name in ("aipm-telemetry.service", "aipm-events.service", "aipm-dashboard.service", "aipm-executor.service"):
         content = (unit_dir / unit_name).read_text(encoding="utf-8")
         assert "User=mina" not in content, f"{unit_name} specifies User=mina"
 
@@ -205,7 +210,7 @@ def test_setup_script_exists_and_creates_aipm_user():
     content = script.read_text(encoding="utf-8")
     assert "useradd" in content
     assert "nologin" in content
-    assert "aipm" in content
+    assert "aipm-executor" in content
     assert "NOPASSWD" in content
     assert "systemctl restart aipm-telemetry.service" in content
 

@@ -174,3 +174,31 @@ def test_invalid_mc21_telemetry_config_fails_clearly(tmp_path, telemetry):
     write_config(path, telemetry)
     with pytest.raises(AIPMError, match="Failed to load configuration"):
         ConfigManager(path)
+
+
+def test_logging_file_environment_override(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    write_config(path, "")
+    monkeypatch.setenv("AIPM_LOG_FILE", "/var/lib/aipm/logs/aipm.log")
+
+    config = ConfigManager(path).config
+
+    assert config.logging.file == "/var/lib/aipm/logs/aipm.log"
+
+
+def test_logging_file_yaml_remains_default_without_environment_override(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "logging:\n"
+        "  file: /tmp/configured-aipm.log\n"
+        "discovery:\n"
+        "  search_paths: ['/tmp']\n"
+        "telemetry:\n"
+        "  database_path: /tmp/mc.db\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("AIPM_LOG_FILE", raising=False)
+
+    config = ConfigManager(path).config
+
+    assert config.logging.file == "/tmp/configured-aipm.log"

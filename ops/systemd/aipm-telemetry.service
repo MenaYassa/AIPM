@@ -10,11 +10,13 @@ Group=aipm
 WorkingDirectory=/home/ubuntu/aipm
 Environment=PYTHONUNBUFFERED=1
 Environment=AIPM_TELEMETRY_DB=/var/lib/aipm/state/telemetry/mission_control.db
+Environment=AIPM_LOG_FILE=/var/lib/aipm/logs/aipm.log
 ExecStart=/home/ubuntu/aipm/.venv/bin/aipm telemetry run
 Restart=on-failure
 RestartSec=5
-# NNP intentionally absent: the executor needs the setuid transition for sudo
-# (dashboard/events retain the NNP protection as they do not invoke sudo)
+# NNP=true: this is a control-plane service and never invokes sudo.
+# Only aipm-executor.service (the executor) omits NoNewPrivileges.
+NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
