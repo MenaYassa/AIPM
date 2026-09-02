@@ -6,6 +6,9 @@ from threading import Event
 from typing import Any, Callable
 
 from aipm.core.exceptions import ProviderError
+from aipm.models.git import GitRepository
+from aipm.models.history import ProjectHistoryPoint
+from aipm.models.project import Project, ProjectCapabilities
 from aipm.models.telemetry import ProjectInventorySnapshot, ProjectSnapshot, TelemetryError, TelemetryFreshness
 from aipm.services.project.service import ProjectService
 
@@ -50,6 +53,20 @@ class ProjectTelemetryService:
             self.logger.info("Project discovery finished", extra={"duration_ms": max(0, int((time.monotonic() - started) * 1000)), "project_count": len(projects), "status": "healthy"})
         self._cached = ProjectInventorySnapshot(available=True, status="healthy", search_paths=search_paths, projects=tuple(ProjectSnapshot(project=project) for project in projects), freshness=TelemetryFreshness.from_sample(sampled_at, now=sampled_at, max_age_seconds=self.stale_after_seconds))
         return self._cached
+
+    def hydrate_projects(self, points: list[ProjectHistoryPoint], *, now: datetime | None = None) -> None:
+        """Seed the cache from persisted history so the dashboard shows projects without waiting for discovery."""
+        now = now or self.clock()
+        if not points:
+            return
+        search_paths = tuple(self.project_service.app.config.discovery.search_paths)
+        snapshots = []
+        for point in points:
+            git = GitRepository(exists=True, branch=point.branch, dirty=bool(point.dirty), ahead=point.ahead or 0, behind=point.behind or 0) if point.branch else None
+            project = Project(name=point.name, path=point.path, capabilities=ProjectCapabilities(has_git=point.has_git, has_compose=point.has_compose), git=git)
+            snapshots.append(ProjectSnapshot(project=project))
+        self._sampled_at = max(point.sampled_at for point in points)
+        self._cached = ProjectInventorySnapshot(available=True, status="healthy", search_paths=search_paths, projects=tuple(snapshots), freshness=TelemetryFreshness.from_sample(self._sampled_at, now=now, max_age_seconds=self.stale_after_seconds))
 
     def cached_snapshot(self, *, now: datetime | None = None) -> ProjectInventorySnapshot:
         now = now or self.clock()

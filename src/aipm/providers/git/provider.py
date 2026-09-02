@@ -147,7 +147,10 @@ class GitProvider:
         environment = os.environ.copy()
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         process = subprocess.Popen(
-            ("git", *args),
+            # Cross-ownership repositories (e.g. daemon runs as `aipm`, repos owned by
+            # `mina`) would otherwise fail with "dubious ownership"; telemetry git
+            # commands are bounded read-only snapshots, so trust only the exact path.
+            ("git", "-c", f"safe.directory={path}", *args),
             cwd=path,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -199,7 +202,11 @@ class GitProvider:
         output_limit = max(4096, max_items * 256)
         path = project.path
         self._run_bounded_git(path, ("rev-parse", "--is-inside-work-tree"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline)
-        current_sha = self._run_bounded_git(path, ("rev-parse", "HEAD"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline).strip() or None
+        try:
+            current_sha = self._run_bounded_git(path, ("rev-parse", "HEAD"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline).strip() or None
+        except GitError:
+            # Unborn branch or unreadable ref: report what git can still tell us.
+            current_sha = None
         try:
             branch_text = self._run_bounded_git(path, ("symbolic-ref", "--quiet", "--short", "HEAD"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline)
         except GitError:
@@ -221,8 +228,11 @@ class GitProvider:
                 modified.append(name)
             if "U" in code or code in {"AA", "DD"}:
                 conflicted.append(name)
-        stash = self._run_bounded_git(path, ("stash", "list", "--format=%gd %s"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline)
-        stashes = stash.splitlines()[:max_items]
+        try:
+            stash = self._run_bounded_git(path, ("stash", "list", "--format=%gd %s"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline)
+            stashes = stash.splitlines()[:max_items]
+        except GitError:
+            stashes = []
         ahead = behind = 0
         if branch:
             try:
@@ -231,7 +241,10 @@ class GitProvider:
                 counts = []
             if len(counts) == 2 and all(item.isdigit() for item in counts):
                 behind, ahead = (int(counts[0]), int(counts[1]))
-        metadata = self._run_bounded_git(path, ("log", "-1", "--format=%H%x00%s%x00%an"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline).strip("\n").split("\x00")
+        try:
+            metadata = self._run_bounded_git(path, ("log", "-1", "--format=%H%x00%s%x00%an"), timeout_seconds=timeout_seconds, output_limit=output_limit, cancel_event=cancel_event, deadline=deadline).strip("\n").split("\x00")
+        except GitError:
+            metadata = []
         return GitRepository(
             exists=True,
             branch=branch,

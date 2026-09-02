@@ -354,6 +354,15 @@ class SQLiteHistoryRepository:
                 latest[row["container_id"]] = ContainerHistoryPoint(sampled_at=sampled_at, container_id=row["container_id"], container_name=row["container_name"], image=None, state=None, health=None, stack=None, restart_count=None, cpu_percent=row["cpu_percent"], memory_used_mb=row["memory_used_mb"], memory_limit_mb=row["memory_limit_mb"], memory_percent=row["memory_percent"], stats_available=bool(row["available"]), resource_sampled_at=sampled_at, resource_status="fresh" if row["available"] else "unavailable", resource_age_seconds=0)
         return list(latest.values())
 
+    def get_latest_project_samples(self) -> list[ProjectHistoryPoint]:
+        with self._connection() as connection:
+            rows = connection.execute("SELECT * FROM project_samples ORDER BY sampled_at DESC, id DESC").fetchall()
+        latest: dict[str, ProjectHistoryPoint] = {}
+        for row in rows:
+            if row["name"] not in latest:
+                latest[row["name"]] = _project_from_row(row)
+        return list(latest.values())
+
     def get_resource_history(self, name: str | None, start: datetime | None, end: datetime | None, limit: int) -> list[ContainerHistoryPoint]:
         extra = "container_name = ?" if name else None
         values = [name] if name else []

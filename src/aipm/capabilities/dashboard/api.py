@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+import time
+from typing import Any, Callable
 
 from aipm.capabilities.dashboard.history_api import DashboardHistoryApi
 from aipm.capabilities.dashboard.routes import handbook_routes
@@ -18,10 +19,23 @@ from aipm.repositories.telemetry.sqlite import SQLiteHistoryRepository
 class DashboardApi:
     """AIPM capability façade for the read-only Mission Control overview."""
 
-    def __init__(self, telemetry: DashboardTelemetryService, mapper: DashboardResponseMapper, history_api: DashboardHistoryApi | None = None) -> None:
+    def __init__(
+        self,
+        telemetry: DashboardTelemetryService,
+        mapper: DashboardResponseMapper,
+        history_api: DashboardHistoryApi | None = None,
+        *,
+        project_history_refresher: Callable[[], None] | None = None,
+        project_history_refresh_interval_seconds: float = 60.0,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         self.telemetry = telemetry
         self.mapper = mapper
         self.history_api = history_api
+        self._project_history_refresher = project_history_refresher
+        self._project_history_refresh_interval_seconds = max(1.0, float(project_history_refresh_interval_seconds))
+        self._last_project_history_refresh: float | None = None
+        self._clock = clock or time.monotonic
 
     @classmethod
     def from_application(cls, application: Application, *, include_history: bool = False) -> "DashboardApi":
@@ -50,14 +64,52 @@ class DashboardApi:
             try:
                 repository = SQLiteHistoryRepository(application.config.telemetry.database_path, read_only=True)
                 telemetry.docker.hydrate_resources(repository.get_latest_resource_samples())
+                telemetry.projects.hydrate_projects(repository.get_latest_project_samples())
             except Exception as exc:
                 application.logger.exception("Latest telemetry resource cache unavailable", exc_info=exc)
             finally:
                 if repository is not None:
                     repository.close()
+            project_history_refresher: Callable[[], None] | None = _project_history_refresher(application, telemetry.projects)
+        else:
+            project_history_refresher = None
         history_api = DashboardHistoryApi.from_application(application) if include_history else None
-        return cls(telemetry=telemetry, mapper=DashboardResponseMapper(), history_api=history_api)
+        return cls(
+            telemetry=telemetry,
+            mapper=DashboardResponseMapper(),
+            history_api=history_api,
+            project_history_refresher=project_history_refresher,
+            project_history_refresh_interval_seconds=application.config.telemetry.project_interval_seconds,
+        )
 
     def overview(self) -> dict[str, Any]:
+        self._maybe_refresh_project_history()
         snapshot = self.telemetry.fast_snapshot() if hasattr(self.telemetry, "fast_snapshot") else self.telemetry.snapshot()
         return self.mapper.to_response(snapshot)
+
+    def _maybe_refresh_project_history(self) -> None:
+        """Re-hydrate the cached project snapshot from persisted history so freshness tracks new samples without a restart."""
+        if self._project_history_refresher is None:
+            return
+        now = self._clock()
+        if self._last_project_history_refresh is not None and now - self._last_project_history_refresh < self._project_history_refresh_interval_seconds:
+            return
+        self._last_project_history_refresh = now
+        try:
+            self._project_history_refresher()
+        except Exception as exc:
+            if self.telemetry.logger is not None:
+                self.telemetry.logger.exception("Project telemetry history refresh unavailable", exc_info=exc)
+
+
+def _project_history_refresher(application: Application, projects: ProjectTelemetryService) -> Callable[[], None]:
+    """Build a re-hydration callable that reads persisted project samples through the history repository."""
+
+    def refresh() -> None:
+        repository = SQLiteHistoryRepository(application.config.telemetry.database_path, read_only=True)
+        try:
+            projects.hydrate_projects(repository.get_latest_project_samples())
+        finally:
+            repository.close()
+
+    return refresh

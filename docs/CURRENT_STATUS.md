@@ -1,10 +1,10 @@
 # AIPM Current Status
 
-**Status date:** 2026-08-28
+**Status date:** 2026-09-01 (supersedes the 2026-08-28 reconciliation; see the final section)
 
-**Canonical repository checkpoint:** `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`
+**Canonical repository checkpoint:** `ee308ac600f2148166efa1146a455b6bc1fe2a06` (18 commits ahead of the previously published checkpoint `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`)
 
-**Repository parity:** `HEAD == origin/main == remote main`; ahead `0`; behind `0`; worktree clean; staging area empty.
+**Repository parity:** `HEAD` is `3` commits ahead of `origin/main`, `0` behind; the MC-6.12 telemetry/service-runtime remediation patch is present in the working tree but **not yet committed** (see the final section).
 
 ## Purpose of this document
 
@@ -39,7 +39,7 @@ MC-6.12 is **not operationally complete**. Current main contains Stage 2 pure co
 | MC-6.9 | PASS_EXISTING | Existing evidence/history implementation conforms; its design note remains preserved in the stash rather than published |
 | MC-6.10 | Complete under safe posture contract | Settings posture and notification safety are published; `commit=null`/`Unknown` and `not_observed` deployment fields are intentional where no authoritative source exists |
 | MC-6.11 | Landed | Read-only Typer/Rich TUI is committed and published; terminal behavior is not verifiable from the public web surface |
-| MC-6.12 | Foundation only; operational action plane blocked | Stage 2 and Stage 3 foundations are published; execution remains unimplemented and denied |
+| MC-6.12 | Foundation only; operational action plane blocked; service-runtime scopes remediated | Stage 2 and Stage 3 foundations are published; execution remains unimplemented and denied. The service-runtime/telemetry scopes (systemd runtime scopes, project telemetry refresh, dashboard freshness, Git enrichment hardening) are remediated and validated — see [`MC-6.12_TELEMETRY_REMEDIATION.md`](MC-6.12_TELEMETRY_REMEDIATION.md) |
 | MC-6.13 Phase 2/3/4A/4B/4C/4C.1/4C.2/4C.3/4D/4E | Complete through bounded read-only Phase 4E | Published advisor domain, transport, fixture/live orchestration, telemetry-owned export/adapter, boundary alignment, complete-evidence validation, and additive resource-history summary |
 
 ## Current Git and preservation state
@@ -82,6 +82,16 @@ The separate `PRODUCTION_ROADMAP.md` remains incomplete. It covers safe `aipm up
 ## Documentation governance
 
 This document is the current status authority. Historical documents may retain their original scope and narrative, but each now carries a current-state notice. New status claims must identify whether they are repository evidence, operator-supplied production evidence, or fresh web-observable evidence. No documentation update authorizes code, deployment, service, database, infrastructure, Cloudflare, notification, or action-plane changes.
+
+## Current-state reconciliation — 2026-09-01 (MC-6.12 telemetry/service-runtime remediation)
+
+Repository evidence in this section is verified against the working tree at `ee308ac600f2148166efa1146a455b6bc1fe2a06`.
+
+The MC-6.12 telemetry/service-runtime remediation is implemented, deployed on the VPS, and runtime-validated. It fixes the chain of defects that left the read-only cockpit without project telemetry and with frozen project freshness: the telemetry unit lacked `AIPM_CONFIG` and discovered no projects; Git enrichment ran as `aipm` against `mina`-owned repositories without a per-invocation `safe.directory` exception; one Git enrichment failure previously failed the entire project discovery; the dashboard never re-read persisted project telemetry, so freshness stayed frozen until a dashboard restart; network telemetry required `AF_NETLINK` under sandboxing; and the log-source configuration needed to honor `AIPM_LOG_FILE`.
+
+The remediation is bounded and additive: both long-running units now receive `AIPM_CONFIG`, `AIPM_TELEMETRY_DB`, and `AIPM_LOG_FILE`; the dashboard hydrates persisted project samples at startup and periodically re-reads them through a read-only telemetry-DB connection; Git enrichment uses per-invocation `safe.directory` and degrades per project on failure; no schema migration was introduced. Deployment, rollback, diagnostics, the documented host permission residual (unreadable `aipm` Git ref metadata — degraded gracefully, never auto-repaired), the validated test state (1144 passed, 1 skipped, 2 pre-existing failures unrelated to this patch set), and non-blocking follow-ups are documented in [`MC-6.12_TELEMETRY_REMEDIATION.md`](MC-6.12_TELEMETRY_REMEDIATION.md).
+
+Scope boundaries unchanged by this remediation: the MC-6.12 executor/action plane remains blocked and denied; Mission Control remains a read-only observer; no second project discovery mechanism exists; notification delivery remains disabled. The working tree additionally contains mode-only changes to `ops/migrate-aipm-state.sh`, `ops/setup-aipm-identity.sh`, and `ops/staging/mc5-gate2-staging.sh`, which are pre-existing unrelated working-tree state, not part of the remediation.
 
 ## References
 

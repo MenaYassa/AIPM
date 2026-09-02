@@ -9,7 +9,9 @@ User=aipm
 Group=aipm
 WorkingDirectory=/home/ubuntu/aipm
 Environment=PYTHONUNBUFFERED=1
+Environment=AIPM_CONFIG=/home/ubuntu/aipm/config/aipm.yaml
 Environment=AIPM_TELEMETRY_DB=/var/lib/aipm/state/telemetry/mission_control.db
+Environment=AIPM_LOG_FILE=/var/lib/aipm/logs/aipm.log
 ExecStart=/home/ubuntu/aipm/.venv/bin/aipm dashboard --host 127.0.0.1 --port 8787
 Restart=on-failure
 RestartSec=5
@@ -18,13 +20,14 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
 ReadWritePaths=/var/lib/aipm/logs /var/lib/aipm/.config /var/lib/aipm/.local
+BindReadOnlyPaths=/var/lib/aipm/state/telemetry
 RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target

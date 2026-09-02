@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,7 +24,7 @@ class DashboardLogsApi:
     def from_application(cls, application: Application) -> "DashboardLogsApi":
         config = getattr(application, "config", None)
         logging_config = getattr(config, "logging", None)
-        log_path = getattr(logging_config, "file", LoggingConfig().file)
+        log_path = os.environ.get("AIPM_LOG_FILE") or getattr(logging_config, "file", LoggingConfig().file)
         registry = source_registry(aipm_log_path=log_path)
         return cls(
             ReadOnlyLogService(

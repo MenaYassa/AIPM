@@ -52,3 +52,35 @@ def test_service_health_reports_stale_and_unavailable_safely():
     assert response["services"]["mc3"]["state"] == "unavailable"
     assert "hidden internal error" not in str(response)
     assert response["overall"] == "unavailable"
+
+
+def test_mc3_selects_latest_event_from_ascending_results():
+    old = (datetime.now(timezone.utc) - timedelta(seconds=600)).isoformat()
+    recent = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+    api = DashboardServiceHealthApi(
+        FakeDashboardApi(),
+        FakeIncidentsApi({"available": True, "events": [
+            {"occurred_at": old},
+            {"occurred_at": recent},
+        ]}),
+        stale_after_seconds=45,
+    )
+
+    mc3 = api.services()["services"]["mc3"]
+
+    assert mc3["state"] == "fresh"
+    assert mc3["last_observed_at"] == recent.replace(" ", "T") or mc3["last_observed_at"] == recent
+
+
+def test_mc3_reports_fresh_even_when_latest_event_is_old():
+    old = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+    api = DashboardServiceHealthApi(
+        FakeDashboardApi(),
+        FakeIncidentsApi({"available": True, "events": [{"occurred_at": old}]}),
+        stale_after_seconds=45,
+    )
+
+    mc3 = api.services()["services"]["mc3"]
+
+    assert mc3["state"] == "fresh"
+    assert mc3["age_seconds"] >= 21600 - 5

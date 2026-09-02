@@ -145,7 +145,7 @@ def test_journald_provider_uses_fixed_safe_arguments():
     assert lines[0].severity == LogSeverity.WARNING
     args, kwargs = calls[0]
     assert kwargs["shell"] is False
-    assert kwargs["timeout"] == 2.0
+    assert kwargs["timeout"] == 10.0
     assert "--no-pager" in args
     assert "-u" in args
     assert source.source_ref in args

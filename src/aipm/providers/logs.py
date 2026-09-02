@@ -17,7 +17,7 @@ class LogProvider(Protocol):
 
 
 class JournaldLogProvider:
-    def __init__(self, *, runner=subprocess.run, timeout_seconds: float = 2.0, max_output_bytes: int = 1_000_000) -> None:
+    def __init__(self, *, runner=subprocess.run, timeout_seconds: float = 10.0, max_output_bytes: int = 1_000_000) -> None:
         self.runner = runner
         self.timeout_seconds = timeout_seconds
         self.max_output_bytes = max_output_bytes
@@ -91,6 +91,15 @@ def _split_timestamp(line: str, *, fallback: datetime) -> tuple[datetime, str]:
             return parsed.astimezone(timezone.utc), line[length:].lstrip()
         except ValueError:
             continue
+    # Python logging format: "2026-09-01 10:53:21,536 LEVEL message" (19-char prefix + ",mmm").
+    try:
+        parsed = datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S")
+        millis = line[20:23]
+        if line[19] == "," and millis.isdigit() and len(line) > 23 and line[23] == " ":
+            parsed = parsed.replace(microsecond=int(millis) * 1000, tzinfo=timezone.utc)
+            return parsed, line[24:]
+    except ValueError:
+        pass
     return fallback, line
 
 

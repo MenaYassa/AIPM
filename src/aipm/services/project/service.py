@@ -8,7 +8,7 @@ from threading import Event
 from aipm.core.app import Application
 from aipm.core.exceptions import ProviderError
 from aipm.models.project import Project, ProjectCapabilities
-from aipm.providers.git.provider import GitProvider
+from aipm.providers.git.provider import GitDiscoveryCancelled, GitError, GitProvider
 
 
 class DiscoveryCancelled(ProviderError):
@@ -91,13 +91,22 @@ class ProjectService:
                 if bounded and git_enrichments > max_git_enrichments:
                     raise DiscoveryLimitExceeded("project discovery Git enrichment bound reached")
                 if bounded:
-                    project.git = self.git_provider.repository_bounded(
-                        project,
-                        timeout_seconds=git_timeout_seconds,
-                        max_items=max_git_items,
-                        cancel_event=cancel_event,
-                        deadline=deadline,
-                    )
+                    try:
+                        project.git = self.git_provider.repository_bounded(
+                            project,
+                            timeout_seconds=git_timeout_seconds,
+                            max_items=max_git_items,
+                            cancel_event=cancel_event,
+                            deadline=deadline,
+                        )
+                    except GitDiscoveryCancelled:
+                        raise
+                    except GitError as exc:
+                        # One unhealthy repository must not zero out project sampling;
+                        # degrade to an un-enriched project and keep the row flowing.
+                        if self.app.logger is not None:
+                            self.app.logger.warning(f"project:git_enrichment_skipped - Git telemetry unavailable for {project.name}: {exc}")
+                        project.git = None
                 else:
                     project.git = self.git_provider.repository(project)
             projects.append(project)

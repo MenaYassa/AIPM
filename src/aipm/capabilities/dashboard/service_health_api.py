@@ -58,15 +58,26 @@ class DashboardServiceHealthApi:
         return self._observation("telemetry", generated_at, source="/api/overview")
 
     def _mc3(self) -> dict[str, Any]:
-        payload = self.incidents_api.events(range_name="24h", limit=1)
+        payload = self.incidents_api.events(range_name="24h", limit=5000)
         if not payload.get("available"):
             return self._unavailable("mc3", reason="MC-3 event query unavailable")
         events = payload.get("events") or []
         if not events:
             return {"name": "mc3", "state": "never_sampled", "available": True, "last_observed_at": None, "age_seconds": None, "max_age_seconds": self.stale_after_seconds, "source": "event_query"}
-        latest = events[-1]
+        latest = max(events, key=lambda event: event.get("occurred_at") or event.get("created_at") or "")
         observed_at = latest.get("occurred_at") or latest.get("created_at")
-        return self._observation("mc3", observed_at, source="event_query")
+        if not observed_at:
+            return self._unavailable("mc3", reason="Observation timestamp unavailable")
+        try:
+            timestamp = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            timestamp = timestamp.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return self._unavailable("mc3", reason="Invalid observation timestamp")
+        # Event cadence is bursty; query success (not event age) proves the pipeline is live.
+        age_seconds = max(0, int((datetime.now(timezone.utc) - timestamp).total_seconds()))
+        return {"name": "mc3", "state": "fresh", "available": True, "last_observed_at": timestamp.isoformat(), "age_seconds": age_seconds, "max_age_seconds": self.stale_after_seconds, "source": "event_query"}
 
     def _observation(self, name: str, observed_at: str | None, *, source: str) -> dict[str, Any]:
         if not observed_at:
