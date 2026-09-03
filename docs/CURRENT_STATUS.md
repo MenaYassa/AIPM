@@ -1,10 +1,10 @@
 # AIPM Current Status
 
-**Status date:** 2026-09-01 (supersedes the 2026-08-28 reconciliation; see the final section)
+**Status date:** 2026-09-03 (supersedes the 2026-09-02 reconciliation; see the final section)
 
-**Canonical repository checkpoint:** `ee308ac600f2148166efa1146a455b6bc1fe2a06` (18 commits ahead of the previously published checkpoint `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`)
+**Canonical repository checkpoint:** `c04c017efa21540082783fc4377f2b50ce3c86a3` (published `origin/main`; carries the MC-6.12 transport rate-limit regression tests and the telemetry remediation lineage)
 
-**Repository parity:** `HEAD` is `origin/main`; the MC-6.12 telemetry/service-runtime remediation is committed at the checkpoint above (and published at `43e440316df8db3721b3815983228b7d6939585b`, which carries it).
+**Repository parity:** `HEAD` is `origin/main` at `c04c017efa21540082783fc4377f2b50ce3c86a3`.
 
 ## Purpose of this document
 
@@ -77,11 +77,19 @@ The following boundaries remain in force:
 
 ## Broader AIPM production roadmap
 
-The separate `PRODUCTION_ROADMAP.md` remains incomplete. It covers safe `aipm update` management transactions rather than the read-only Mission Control cockpit. Remaining work includes production-grade update planning, explicit approval, critical Git transaction safety, restore points and rollback, separate planner/executor/verifier services, structured audit history, disposable integration fixtures, CI/release hygiene, and separately approved real-VPS read-only integration. Mission Control completion does not imply completion of that broader product roadmap.
+The separate `PRODUCTION_ROADMAP.md` remains incomplete. It covers safe `aipm update` management transactions rather than the read-only Mission Control cockpit. Remaining work includes production-grade update planning, critical Git transaction safety hardening, separate planner/executor/verifier services with presentation decoupling, disposable integration fixtures, CI/release hygiene, and separately approved real-VPS read-only integration. The P1 **restore points and deterministic rollback** workstream is now implemented at repository level: `RollbackManager`/`RestoreResult` (`src/aipm/services/update/rollback.py`, `src/aipm/models/rollback.py`) restore project files from a `BackupEngine` snapshot archive without deleting anything, keep `.git`, volumes, databases, and runtime state out of scope, fail closed on unsafe archive members (symlinks, traversal, non-regular files), and the update engine's failure path automatically restores from the pre-update snapshot with the restore outcome recorded in the audit record (`UpdateAudit.restore`). Regression coverage lives in `tests/test_update_rollback.py` (10 tests). Mission Control completion does not imply completion of that broader product roadmap.
 
 ## Documentation governance
 
 This document is the current status authority. Historical documents may retain their original scope and narrative, but each now carries a current-state notice. New status claims must identify whether they are repository evidence, operator-supplied production evidence, or fresh web-observable evidence. No documentation update authorizes code, deployment, service, database, infrastructure, Cloudflare, notification, or action-plane changes.
+
+## Current-state reconciliation — 2026-09-03 (production roadmap: restore points and deterministic rollback)
+
+Repository evidence in this section is verified against the working tree at `c04c017efa21540082783fc4377f2b50ce3c86a3` (`HEAD` == `origin/main`), plus the unstaged work described here.
+
+The roadmap position after MC-6.12 remains unchanged: MC-6.12 operational completion (executor/production action plane) and MC-6.13 post-4E remain separately authorized and denied, so the next authorized workstream is the broader production roadmap's safe `aipm update` transaction. Within it, the P1 "Explicit rollback and restore points" item is now implemented at repository level: `RollbackManager` (`src/aipm/services/update/rollback.py`) restores project files from a `BackupEngine` snapshot archive per an explicit contract — restores exactly the regular files captured in the snapshot, never deletes anything, reports files created after the snapshot as left in place, keeps `.git`, `BackupEngine.DEFAULT_EXCLUDES` directories, volumes, databases, and runtime state out of scope, and fails closed on non-regular, symlink, path-traversal, or foreign-prefix archive members. `RestoreResult` (`src/aipm/models/rollback.py`) is the typed outcome (attempted/success, restored, left_in_place, skipped, error). The update engine's failure path attempts an automatic restore from the pre-update snapshot when a snapshot exists, prints the restore outcome, records it in `UpdateAudit.restore` (additive audit field), and never masks the original failure. Dry-run, blocked, and approval-denied paths never restore.
+
+Validation: `tests/test_update_rollback.py` (10 tests) passes; the full suite is 1158 passed, 1 skipped, 2 failed — the same two documented pre-existing failures (`tests/test_mc612_stage15_privilege.py::test_assert_detects_human_session_without_executor_rule`, `tests/test_mc612_stage25a_identity_setup.py::test_s6_privileged_group_contamination_fails`). Still open in the broader roadmap: production-grade update planning, Git transaction safety hardening, separate planner/executor/verifier services with Rich decoupling, disposable integration fixtures, CI/release hygiene, and separately approved real-VPS read-only integration (blocked on credentials/approval). This reconciliation is repository evidence only; no deployment, service, database, or action-plane state was changed. See the dated reconciliation in [`PRODUCTION_ROADMAP.md`](../PRODUCTION_ROADMAP.md) for the same record.
 
 ## Current-state reconciliation — 2026-09-02 (control-plane state correction)
 

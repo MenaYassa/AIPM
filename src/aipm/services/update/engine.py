@@ -13,12 +13,14 @@ from rich.table import Table
 from aipm.core.exceptions import UpdateError
 from aipm.engines.health.engine import HealthEngine
 from aipm.models.update import UpdateAudit, UpdatePlan
+from aipm.models.rollback import RestoreResult
 from aipm.providers.compose.provider import ComposeProvider
 from aipm.services.backup.engine import BackupEngine
 from aipm.services.git.service import GitService
 from aipm.services.project.service import ProjectService
 from aipm.services.update.audit import AuditService
 from aipm.services.update.planner import UpdatePlanner
+from aipm.services.update.rollback import RollbackManager
 
 
 class UpdateEngine:
@@ -33,6 +35,7 @@ class UpdateEngine:
         health_engine: HealthEngine | None = None,
         planner: UpdatePlanner | None = None,
         audit_service: AuditService | None = None,
+        rollback_manager: RollbackManager | None = None,
         console: Console | None = None,
         runner: Callable = subprocess.run,
     ):
@@ -48,6 +51,7 @@ class UpdateEngine:
             health_engine=self.health_engine,
         )
         self.audit_service = audit_service or AuditService()
+        self.rollback_manager = rollback_manager or RollbackManager()
         self.runner = runner
 
     def run_command(self, command: list[str], cwd: Path, step_name: str) -> str:
@@ -165,6 +169,16 @@ class UpdateEngine:
             self.console.print(f"[bold green]Update completed and health verification passed.[/bold green] Audit: {audit_path}")
             return audit
         except Exception as exc:
+            restore: RestoreResult | None = None
+            if snapshot_path is not None:
+                restore = self.rollback_manager.restore(snapshot_path, project)
+                if restore.success:
+                    self.console.print(
+                        "[yellow]Update failed; project files were restored from the pre-update snapshot.[/yellow] "
+                        f"Files created after the snapshot were left in place: {len(restore.left_in_place)}."
+                    )
+                else:
+                    self.console.print(f"[red]Automatic restore failed:[/red] {restore.error}")
             audit = self._audit(
                 plan,
                 started_at,
@@ -173,6 +187,7 @@ class UpdateEngine:
                 snapshot_path=snapshot_path,
                 health_after=health_after,
                 error=str(exc),
+                restore=restore,
             )
             audit_path = self.audit_service.write(audit)
             if isinstance(exc, UpdateError):
@@ -201,6 +216,7 @@ class UpdateEngine:
         snapshot_path: Path | None = None,
         health_after=None,
         error: str | None = None,
+        restore: RestoreResult | None = None,
     ) -> UpdateAudit:
         return UpdateAudit(
             project=plan.project,
@@ -213,4 +229,5 @@ class UpdateEngine:
             snapshot_path=snapshot_path,
             health_after=health_after,
             error=error,
+            restore=restore,
         )
