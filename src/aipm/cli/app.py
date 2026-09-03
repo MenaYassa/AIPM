@@ -8,6 +8,7 @@ from aipm.cli.git import git_app
 from aipm.cli.docker.app import app as docker_app
 from aipm.capabilities.health.diagnostics import HealthCapability
 from aipm.capabilities.backup.snapshots import BackupCapability
+from aipm.capabilities.update import UpdateCapability
 from aipm.services.update.engine import UpdateEngine  # <-- Add import
 from aipm.core.exceptions import UpdateError, ProviderError
 from aipm.dashboard.server import run as run_dashboard
@@ -253,7 +254,8 @@ def update(
 ):
     """Plan and, when explicitly approved, execute a safe project update."""
     try:
-        UpdateEngine().execute_update(project_name, dry_run=dry_run, approve=approve)
+        engine = UpdateEngine()  # UpdateEngine().execute_update is the only legacy CLI entry
+        UpdateCapability(engine=engine).run(project_name, dry_run=dry_run, approve=approve)
     except UpdateError as error:
         print(f"\n[bold red]Update stopped:[/bold red] {error}")
         raise typer.Exit(code=1) from error

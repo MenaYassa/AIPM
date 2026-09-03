@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
 
 from aipm.core.exceptions import GitTransactionError, UpdateError
 from aipm.engines.health.engine import HealthEngine
@@ -28,7 +25,12 @@ from aipm.services.update.verifier import UpdateVerifier
 
 
 class UpdateEngine:
-    """Coordinate a planned update while keeping mutation behind providers/services."""
+    """Coordinate a planned update while keeping mutation behind providers/services.
+
+    The engine is presentation-free: it produces typed outcomes
+    (``UpdateAudit``) and structured errors; the CLI capability layer owns
+    all Rich output.
+    """
 
     def __init__(
         self,
@@ -41,11 +43,9 @@ class UpdateEngine:
         audit_service: AuditService | None = None,
         rollback_manager: RollbackManager | None = None,
         verifier: UpdateVerifier | None = None,
-        console: Console | None = None,
         runner: Callable = subprocess.run,
         git_transaction: GitTransactionRunner | None = None,
     ):
-        self.console = console or Console()
         self.project_service = project_service or ProjectService()
         self.git_service = git_service or GitService()
         self.backup_engine = backup_engine or BackupEngine()
@@ -81,49 +81,28 @@ class UpdateEngine:
     def plan_update(self, project_name: str, dry_run: bool = False) -> UpdatePlan:
         return self.planner.plan(project_name, dry_run=dry_run)
 
-    def render_plan(self, plan: UpdatePlan) -> None:
-        self.console.print(
-            Panel.fit(
-                "\n".join(
-                    [
-                        f"Project       : {plan.project}",
-                        f"Risk          : {plan.risk.value.upper()}",
-                        f"Proceed       : {'yes' if plan.proceed else 'no'}",
-                        f"Approval      : {'required' if plan.approval_required else 'not required'}",
-                        f"Snapshot      : {'required' if plan.snapshot_required else 'not required'}",
-                        f"Restart       : {'yes' if plan.estimated_restart else 'no'}",
-                    ]
-                ),
-                title="Update Plan",
-            )
-        )
-        actions = Table(title="Planned actions")
-        actions.add_column("#", justify="right")
-        actions.add_column("Action")
-        for index, action in enumerate(plan.actions, start=1):
-            actions.add_row(str(index), action)
-        self.console.print(actions)
-        if plan.reasons:
-            reasons = Table(title="Reasons and safety notes")
-            reasons.add_column("Reason")
-            for reason in plan.reasons:
-                reasons.add_row(reason)
-            self.console.print(reasons)
-
-    def execute_update(self, project_name: str, *, dry_run: bool = False, approve: bool = False) -> UpdateAudit:
+    def execute_update(
+        self,
+        project_name: str,
+        *,
+        dry_run: bool = False,
+        approve: bool = False,
+        plan: UpdatePlan | None = None,
+    ) -> UpdateAudit:
         started_at = datetime.now(timezone.utc)
-        plan = self.plan_update(project_name, dry_run=dry_run)
-        self.render_plan(plan)
+        if plan is None:
+            plan = self.plan_update(project_name, dry_run=dry_run)
+        else:
+            self._validate_reused_plan(plan, project_name, dry_run=dry_run)
 
         if dry_run:
             audit = self._audit(plan, started_at, "dry-run", "planned")
             audit_path = self.audit_service.write(audit)
-            self.console.print(f"[green]Dry-run complete; no state was changed.[/green] Audit: {audit_path}")
-            return audit
+            return _attach_audit_path(audit, audit_path)
 
         if not plan.proceed:
             audit = self._audit(plan, started_at, "execute", "blocked", error="Plan requires manual review.")
-            self.audit_service.write(audit)
+            audit_path = self.audit_service.write(audit)
             raise UpdateError("Update blocked: the plan requires manual review. No state was changed.")
 
         if plan.approval_required and not approve:
@@ -139,7 +118,6 @@ class UpdateEngine:
         try:
             archive = self.backup_engine.create_snapshot(project)
             snapshot_path = archive.archive_path
-            self.console.print(f"[green]Snapshot created:[/green] {archive.archive_path}")
 
             git_transaction = self.git_transaction.run(
                 project,
@@ -161,10 +139,6 @@ class UpdateEngine:
                     f"Post-update verification failed: {details}. "
                     f"Snapshot: {archive.archive_path}"
                 )
-            if verification.status is UpdateVerificationStatus.WARNING:
-                self.console.print(
-                    f"[yellow]Update verified with warnings:[/yellow] {len(verification.warnings)} warning-level finding(s); no rollback required."
-                )
 
             audit = self._audit(
                 plan,
@@ -177,21 +151,13 @@ class UpdateEngine:
                 git_transaction=git_transaction,
             )
             audit_path = self.audit_service.write(audit)
-            self.console.print(f"[bold green]Update completed and health verification passed.[/bold green] Audit: {audit_path}")
-            return audit
+            return _attach_audit_path(audit, audit_path)
         except Exception as exc:
             if isinstance(exc, GitTransactionError):
                 git_transaction = exc.result
             restore: RestoreResult | None = None
             if snapshot_path is not None:
                 restore = self.rollback_manager.restore(snapshot_path, project)
-                if restore.success:
-                    self.console.print(
-                        "[yellow]Update failed; project files were restored from the pre-update snapshot.[/yellow] "
-                        f"Files created after the snapshot were left in place: {len(restore.left_in_place)}."
-                    )
-                else:
-                    self.console.print(f"[red]Automatic restore failed:[/red] {restore.error}")
             audit = self._audit(
                 plan,
                 started_at,
@@ -206,17 +172,32 @@ class UpdateEngine:
             )
             audit_path = self.audit_service.write(audit)
             if isinstance(exc, UpdateError):
-                raise UpdateError(f"{exc} Audit: {audit_path}") from exc
-            raise UpdateError(f"Update failed: {exc}. Audit: {audit_path}") from exc
+                raise UpdateError(f"{exc} Audit: {audit_path}{_restore_note(restore)}") from exc
+            raise UpdateError(f"Update failed: {exc}. Audit: {audit_path}{_restore_note(restore)}") from exc
+
+    def _validate_reused_plan(self, plan: UpdatePlan, project_name: str, *, dry_run: bool) -> None:
+        """Fail closed when a caller-supplied plan does not match this execution.
+
+        The operator must see and approve exactly the plan that runs: the
+        plan must target the requested project and must not be a dry-run
+        plan executed as a state-changing update (or vice versa).
+        """
+        if plan.project != project_name:
+            raise UpdateError(
+                f"Refusing to execute plan for project '{plan.project}' against requested project '{project_name}'."
+            )
+        if plan.dry_run != dry_run:
+            raise UpdateError(
+                "Refusing to execute a plan whose dry-run flag does not match the requested mode "
+                f"(plan dry_run={plan.dry_run}, requested dry_run={dry_run})."
+            )
 
     def _execute_runtime(self, project) -> None:
         project_path = Path(project.path)
         custom_runner = project_path / "start_services.py"
         if custom_runner.is_file():
-            self.console.print("[cyan]Running project start_services.py...[/cyan]")
             self.run_command([sys.executable, str(custom_runner)], cwd=project_path, step_name="Custom runtime rebuild")
         elif project.capabilities.has_compose:
-            self.console.print("[cyan]Rebuilding Compose services...[/cyan]")
             self.compose_provider.up(project, detach=True, build=True, remove_orphans=True)
         else:
             raise UpdateError("Project has neither start_services.py nor a Compose configuration.")
@@ -250,3 +231,28 @@ class UpdateEngine:
             verification=verification,
             git_transaction=git_transaction,
         )
+
+
+def _attach_audit_path(audit: UpdateAudit, audit_path: Path) -> UpdateAudit:
+    """Return an audit carrying where its JSON record was written.
+
+    ``UpdateAudit`` is frozen; replace is used to attach the additive
+    ``audit_path`` field without mutating the written record's other fields.
+    """
+    return replace(audit, audit_path=audit_path)
+
+
+def _restore_note(restore: RestoreResult | None) -> str:
+    """Operator-facing restore outcome for failed-update errors.
+
+    The engine no longer prints; the restore outcome of a failed update is
+    appended to the raised error so the CLI surface keeps reporting it.
+    """
+    if restore is None:
+        return ""
+    if restore.success:
+        return (
+            "; project files were restored from the pre-update snapshot "
+            f"({len(restore.left_in_place)} file(s) created after the snapshot were left in place)"
+        )
+    return f"; automatic restore failed: {restore.error}"

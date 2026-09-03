@@ -52,3 +52,4 @@ class UpdateAudit:
     restore: RestoreResult | None = None
     verification: UpdateVerification | None = None
     git_transaction: GitTransactionResult | None = None
+    audit_path: Path | None = None
