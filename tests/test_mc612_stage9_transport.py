@@ -418,6 +418,89 @@ def test_unknown_action_is_404_not_500(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+def test_authorize_rate_limit_returns_429_after_thirty_requests(tmp_path: Path):
+    app, _service, _db, _ledger, _plans, _clock = build_transport(tmp_path)
+    client = TestClient(app)
+    auth = login(client)
+    statuses = []
+    for i in range(35):
+        response = client.post(
+            "/plans/project-demo/authorize",
+            json={"fields": {"title": f"Title {i}"}, "idempotency_key": f"idem-rl-{i:03d}"},
+            headers=csrf_headers(auth["csrf"]),
+        )
+        statuses.append(response.status_code)
+    assert statuses[:30] == [200] * 30
+    assert statuses[30:] == [429] * 5
+    body = client.post(
+        "/plans/project-demo/authorize",
+        json={"fields": {"title": "One more"}, "idempotency_key": "idem-rl-999"},
+        headers=csrf_headers(auth["csrf"]),
+    )
+    assert body.status_code == 429
+    assert body.json()["detail"]["error"] == "conflict"
+    assert "slow down" in body.json()["detail"]["message"]
+    assert client.get("/audit/verify").json()["valid"] is True
+
+
+def test_confirm_rate_limit_returns_429_after_thirty_requests(tmp_path: Path):
+    app, _service, _db, _ledger, _plans, _clock = build_transport(tmp_path)
+    client = TestClient(app)
+    auth = login(client)
+    decision = client.post(
+        "/plans/project-demo/authorize",
+        json={"fields": {"title": "Rate limited confirm"}, "idempotency_key": "idem-rl-confirm"},
+        headers=csrf_headers(auth["csrf"]),
+    ).json()
+    action_id = decision["action_id"]
+    statuses = []
+    for _ in range(35):
+        response = client.post(f"/actions/{action_id}/confirm", headers=csrf_headers(auth["csrf"]))
+        statuses.append(response.status_code)
+    assert all(status != 429 for status in statuses[:30])
+    assert statuses[0] == 200
+    assert statuses[30:] == [429] * 5
+    assert statuses[30] == client.post(f"/actions/{action_id}/confirm", headers=csrf_headers(auth["csrf"])).status_code == 429
+
+
+def test_rate_limit_is_per_session(tmp_path: Path):
+    app, _service, _db, _ledger, _plans, _clock = build_transport(tmp_path)
+    client_a = TestClient(app)
+    auth_a = login(client_a)
+    for i in range(30):
+        assert client_a.post(
+            "/plans/project-demo/authorize",
+            json={"fields": {"title": f"Title {i}"}, "idempotency_key": f"idem-per-session-{i}"},
+            headers=csrf_headers(auth_a["csrf"]),
+        ).status_code == 200
+    client_b = TestClient(app)
+    auth_b = login(client_b)
+    response = client_b.post(
+        "/plans/project-demo/authorize",
+        json={"fields": {"title": "Other session"}, "idempotency_key": "idem-per-session-other"},
+        headers=csrf_headers(auth_b["csrf"]),
+    )
+    assert response.status_code == 200
+
+
+def test_rate_limiter_window_expires_and_keys_are_isolated(monkeypatch: pytest.MonkeyPatch):
+    from aipm.control_plane.transport import _RateLimiter
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr("aipm.control_plane.transport.time.monotonic", lambda: clock["now"])
+    limiter = _RateLimiter(limit=3, window_seconds=10.0)
+    assert [limiter.allow("session") for _ in range(4)] == [True, True, True, False]
+    clock["now"] = 12.0
+    assert limiter.allow("session") is True
+    limiter2 = _RateLimiter(limit=1, window_seconds=10.0)
+    assert [limiter2.allow("a"), limiter2.allow("b")] == [True, True]
+
+
+# ---------------------------------------------------------------------------
 # Kill switch transport verbs
 # ---------------------------------------------------------------------------
 
