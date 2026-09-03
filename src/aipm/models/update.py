@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 
 from aipm.models.git import GitRepository
+from aipm.models.git_transaction import GitTransactionResult
 from aipm.models.health_report import HealthReport
 from aipm.models.rollback import RestoreResult
 from aipm.models.verification import UpdateVerification
@@ -50,3 +51,4 @@ class UpdateAudit:
     error: str | None = None
     restore: RestoreResult | None = None
     verification: UpdateVerification | None = None
+    git_transaction: GitTransactionResult | None = None

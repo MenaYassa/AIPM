@@ -12,6 +12,8 @@ class GitTransactionResult:
 
     stash_applied: bool
 
+    stash_preserved: bool = False
+
     conflicts: list[str] = field(default_factory=list)
 
     warnings: list[str] = field(default_factory=list)

@@ -10,8 +10,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from aipm.core.exceptions import UpdateError
+from aipm.core.exceptions import GitTransactionError, UpdateError
 from aipm.engines.health.engine import HealthEngine
+from aipm.models.git_transaction import GitTransactionResult
 from aipm.models.update import UpdateAudit, UpdatePlan
 from aipm.models.rollback import RestoreResult
 from aipm.models.verification import UpdateVerificationStatus
@@ -20,6 +21,7 @@ from aipm.services.backup.engine import BackupEngine
 from aipm.services.git.service import GitService
 from aipm.services.project.service import ProjectService
 from aipm.services.update.audit import AuditService
+from aipm.services.update.git_transaction import GitTransactionRunner
 from aipm.services.update.planner import UpdatePlanner
 from aipm.services.update.rollback import RollbackManager
 from aipm.services.update.verifier import UpdateVerifier
@@ -41,6 +43,7 @@ class UpdateEngine:
         verifier: UpdateVerifier | None = None,
         console: Console | None = None,
         runner: Callable = subprocess.run,
+        git_transaction: GitTransactionRunner | None = None,
     ):
         self.console = console or Console()
         self.project_service = project_service or ProjectService()
@@ -57,6 +60,7 @@ class UpdateEngine:
         self.rollback_manager = rollback_manager or RollbackManager()
         self.verifier = verifier or UpdateVerifier()
         self.runner = runner
+        self.git_transaction = git_transaction or GitTransactionRunner(git_service=self.git_service)
 
     def run_command(self, command: list[str], cwd: Path, step_name: str) -> str:
         try:
@@ -131,33 +135,19 @@ class UpdateEngine:
         snapshot_path: Path | None = None
         health_after = None
         verification = None
+        git_transaction: GitTransactionResult | None = None
         try:
             archive = self.backup_engine.create_snapshot(project)
             snapshot_path = archive.archive_path
             self.console.print(f"[green]Snapshot created:[/green] {archive.archive_path}")
 
-            stash_created = False
-            if plan.stash_required:
-                self.git_service.stash(project, f"AIPM update {started_at.isoformat()}")
-                stash_created = True
-            try:
-                if plan.git and plan.git.exists and plan.git.remote_url:
-                    self.git_service.fetch(project)
-                    if plan.pull_required:
-                        self.git_service.pull(project)
-                self._execute_runtime(project)
-                if stash_created:
-                    try:
-                        self.git_service.apply_stash(project)
-                    except Exception as exc:
-                        raise UpdateError(
-                            "Local safety stash could not be applied cleanly; it was preserved for manual recovery. "
-                            f"Resolve the conflict before retrying: {exc}"
-                        ) from exc
-                    self.git_service.drop_stash(project)
-            except Exception:
-                raise
-
+            git_transaction = self.git_transaction.run(
+                project,
+                stash_required=plan.stash_required,
+                fetch_required=bool(plan.git and plan.git.exists and plan.git.remote_url),
+                pull_required=plan.pull_required,
+            )
+            self._execute_runtime(project)
             refreshed = self.project_service.get_project(project.name)
             health_after = self.health_engine.analyze(refreshed)
             verification = self.verifier.verify_update(
@@ -184,11 +174,14 @@ class UpdateEngine:
                 snapshot_path=snapshot_path,
                 health_after=health_after,
                 verification=verification,
+                git_transaction=git_transaction,
             )
             audit_path = self.audit_service.write(audit)
             self.console.print(f"[bold green]Update completed and health verification passed.[/bold green] Audit: {audit_path}")
             return audit
         except Exception as exc:
+            if isinstance(exc, GitTransactionError):
+                git_transaction = exc.result
             restore: RestoreResult | None = None
             if snapshot_path is not None:
                 restore = self.rollback_manager.restore(snapshot_path, project)
@@ -209,6 +202,7 @@ class UpdateEngine:
                 error=str(exc),
                 restore=restore,
                 verification=verification,
+                git_transaction=git_transaction,
             )
             audit_path = self.audit_service.write(audit)
             if isinstance(exc, UpdateError):
@@ -239,6 +233,7 @@ class UpdateEngine:
         error: str | None = None,
         restore: RestoreResult | None = None,
         verification=None,
+        git_transaction: GitTransactionResult | None = None,
     ) -> UpdateAudit:
         return UpdateAudit(
             project=plan.project,
@@ -253,4 +248,5 @@ class UpdateEngine:
             error=error,
             restore=restore,
             verification=verification,
+            git_transaction=git_transaction,
         )
