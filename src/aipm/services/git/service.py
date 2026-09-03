@@ -69,6 +69,9 @@ class GitService:
     def changed_files(self, project: Project) -> list[str]:
         return self.provider.changed_files(project)
 
+    def remote_changed_files(self, project: Project) -> list[str] | None:
+        return self.provider.remote_changed_files(project)
+
     def prepare_update(self, project: Project) -> GitUpdatePlan:
         """
         Analyzes the repository state and returns a plan for updating.
@@ -95,6 +98,31 @@ class GitService:
         if repo.detached:
             reasons.append("Repository is in detached HEAD state.")
             review_required = True
+
+        # Remote divergence: classify what an incoming pull would change.
+        # Read-only: compares HEAD against the existing origin tracking ref.
+        if repo.remote_url:
+            incoming = self.provider.remote_changed_files(project)
+            if incoming is None:
+                review_required = True
+                reasons.append(
+                    "Incoming remote changes could not be analyzed read-only; manual review is required."
+                )
+            elif incoming:
+                classification = self.conflicts.classify(incoming)
+                if classification["critical"]:
+                    review_required = True
+                    reasons.append(
+                        "Incoming remote changes modify critical infrastructure files: "
+                        + ", ".join(classification["critical"])
+                        + "."
+                    )
+                else:
+                    reasons.append(
+                        f"{len(incoming)} file(s) will change on pull: "
+                        + ", ".join(incoming)
+                        + "."
+                    )
 
         # Local commits ahead
         if repo.ahead:

@@ -325,6 +325,37 @@ class GitProvider:
         except GitCommandError as exc:
             raise GitError(f"Restoring the worktree failed: {exc}") from exc
 
+    def remote_changed_files(self, project: Project) -> list[str] | None:
+        """List the files an incoming pull would change, without contacting the remote.
+
+        Compares HEAD against the existing ``origin/<branch>`` tracking ref
+        (three-dot diff), so this is a read-only analysis of already-fetched
+        state: no fetch, no pull, no worktree mutation. Returns ``None`` when
+        the analysis cannot be performed read-only (detached HEAD, missing
+        tracking ref, unborn HEAD, or a Git error) so callers can fail closed
+        instead of assuming there is nothing incoming.
+        """
+        try:
+            repo = git.Repo(project.path)
+        except (InvalidGitRepositoryError, NoSuchPathError, GitCommandError):
+            return None
+        try:
+            branch = None if repo.head.is_detached else repo.active_branch.name
+        except (TypeError, ValueError, GitCommandError):
+            return None
+        if not branch:
+            return None
+        if self._origin(repo) is None:
+            return None
+        remote_branch = f"origin/{branch}"
+        try:
+            if remote_branch not in {ref.name for ref in repo.refs}:
+                return None
+            output = repo.git.diff("--name-only", f"HEAD...{remote_branch}")
+        except (GitCommandError, ValueError):
+            return None
+        return sorted({line for line in output.splitlines() if line.strip()})
+
     def current_sha(self, project: Project) -> str:
         current = self._current_commit(self._repo(project))
         if current is None:
