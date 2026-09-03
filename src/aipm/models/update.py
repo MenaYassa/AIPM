@@ -8,6 +8,7 @@ from pathlib import Path
 from aipm.models.git import GitRepository
 from aipm.models.health_report import HealthReport
 from aipm.models.rollback import RestoreResult
+from aipm.models.verification import UpdateVerification
 
 
 class UpdateRisk(Enum):
@@ -48,3 +49,4 @@ class UpdateAudit:
     health_after: HealthReport | None = None
     error: str | None = None
     restore: RestoreResult | None = None
+    verification: UpdateVerification | None = None

@@ -14,6 +14,7 @@ from aipm.core.exceptions import UpdateError
 from aipm.engines.health.engine import HealthEngine
 from aipm.models.update import UpdateAudit, UpdatePlan
 from aipm.models.rollback import RestoreResult
+from aipm.models.verification import UpdateVerificationStatus
 from aipm.providers.compose.provider import ComposeProvider
 from aipm.services.backup.engine import BackupEngine
 from aipm.services.git.service import GitService
@@ -21,6 +22,7 @@ from aipm.services.project.service import ProjectService
 from aipm.services.update.audit import AuditService
 from aipm.services.update.planner import UpdatePlanner
 from aipm.services.update.rollback import RollbackManager
+from aipm.services.update.verifier import UpdateVerifier
 
 
 class UpdateEngine:
@@ -36,6 +38,7 @@ class UpdateEngine:
         planner: UpdatePlanner | None = None,
         audit_service: AuditService | None = None,
         rollback_manager: RollbackManager | None = None,
+        verifier: UpdateVerifier | None = None,
         console: Console | None = None,
         runner: Callable = subprocess.run,
     ):
@@ -52,6 +55,7 @@ class UpdateEngine:
         )
         self.audit_service = audit_service or AuditService()
         self.rollback_manager = rollback_manager or RollbackManager()
+        self.verifier = verifier or UpdateVerifier()
         self.runner = runner
 
     def run_command(self, command: list[str], cwd: Path, step_name: str) -> str:
@@ -126,6 +130,7 @@ class UpdateEngine:
         project = self.project_service.get_project(plan.project)
         snapshot_path: Path | None = None
         health_after = None
+        verification = None
         try:
             archive = self.backup_engine.create_snapshot(project)
             snapshot_path = archive.archive_path
@@ -155,16 +160,31 @@ class UpdateEngine:
 
             refreshed = self.project_service.get_project(project.name)
             health_after = self.health_engine.analyze(refreshed)
-            if health_after.critical:
-                details = "; ".join(
-                    f"{finding.component}: {finding.title}" for finding in health_after.findings if finding.severity.value == "critical"
-                )
+            verification = self.verifier.verify_update(
+                project.name,
+                health_before=plan.health_before,
+                health_after=health_after,
+            )
+            if verification.status is UpdateVerificationStatus.FAILURE:
+                details = "; ".join([*verification.failures, *( [verification.error] if verification.error else [] )])
                 raise UpdateError(
-                    f"Post-update health verification failed: {details}. "
+                    f"Post-update verification failed: {details}. "
                     f"Snapshot: {archive.archive_path}"
                 )
+            if verification.status is UpdateVerificationStatus.WARNING:
+                self.console.print(
+                    f"[yellow]Update verified with warnings:[/yellow] {len(verification.warnings)} warning-level finding(s); no rollback required."
+                )
 
-            audit = self._audit(plan, started_at, "execute", "success", snapshot_path=snapshot_path, health_after=health_after)
+            audit = self._audit(
+                plan,
+                started_at,
+                "execute",
+                "success",
+                snapshot_path=snapshot_path,
+                health_after=health_after,
+                verification=verification,
+            )
             audit_path = self.audit_service.write(audit)
             self.console.print(f"[bold green]Update completed and health verification passed.[/bold green] Audit: {audit_path}")
             return audit
@@ -188,6 +208,7 @@ class UpdateEngine:
                 health_after=health_after,
                 error=str(exc),
                 restore=restore,
+                verification=verification,
             )
             audit_path = self.audit_service.write(audit)
             if isinstance(exc, UpdateError):
@@ -217,6 +238,7 @@ class UpdateEngine:
         health_after=None,
         error: str | None = None,
         restore: RestoreResult | None = None,
+        verification=None,
     ) -> UpdateAudit:
         return UpdateAudit(
             project=plan.project,
@@ -230,4 +252,5 @@ class UpdateEngine:
             health_after=health_after,
             error=error,
             restore=restore,
+            verification=verification,
         )
