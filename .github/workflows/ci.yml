@@ -1,0 +1,67 @@
+# CI for the AIPM repository: validation-only. Runs the full test
+# suite and the existing release-validation tooling on every push to
+# main and every pull request. No deployment, no publishing, no
+# secrets, no external state: every step runs against the freshly
+# checked-out repository tree.
+#
+# Validation chain (mirrors the local "Development and verification"
+# contract in README.md / CONTRIBUTING.md):
+#   1. uv sync --frozen --extra dev     (locked, reproducible env)
+#   2. full pytest run                  (no exclusions; see
+#      CONTRIBUTING.md "Known host-state-dependent tests" for the two
+#      tests that depend on host state that clean GitHub runners do
+#      not have — they pass on clean runners)
+#   3. ops/validate-release.py --development
+#   4. ops/build-release.py             (generated build_meta.json /
+#      release-manifest.json are gitignored, so the tracked tree
+#      stays clean)
+#   5. ops/validate-release.py          (production mode: clean tree
+#      + build metadata commit == HEAD)
+#
+# Actions are pinned to full commit SHAs (not mutable tags); the pins
+# are verified in tests/test_ci_workflow.py. To update an action,
+# change both the pin here and the expected set in that test file.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Validation-only: the workflow needs no write permissions and no
+# secrets. contents: read is the minimum for checkout on pull
+# requests.
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # A stuck full-suite run must fail rather than hang indefinitely.
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository (pinned, no persisted credentials)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up uv (pinned) with Python 3.12
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Install locked dependencies (uv sync --frozen)
+        run: uv sync --frozen --extra dev
+
+      - name: Run full test suite (no exclusions)
+        run: .venv/bin/python -m pytest -p no:cacheprovider -q
+
+      - name: Validate release state (development mode)
+        run: .venv/bin/python ops/validate-release.py --development
+
+      - name: Generate release metadata and manifest
+        run: .venv/bin/python ops/build-release.py
+
+      - name: Validate release state (production mode)
+        run: .venv/bin/python ops/validate-release.py
