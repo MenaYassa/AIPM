@@ -7,13 +7,25 @@ refused at construction, not merely discouraged.
 
 Surface: login/logout with the canonical owner authenticator and opaque
 server-side sessions; CSRF-protected operator verbs (authorize, confirm,
-execute, reconcile, rollback, kill switch); bounded read views; and audit
-chain verification. There is deliberately no generic command/execution route
-and no path to legacy mutation machinery, providers, or process execution.
+execute, reconcile, rollback, kill switch); bounded update-plane verbs
+(authorization request, fail-closed execution, status); bounded read views;
+and audit chain verification. There is deliberately no generic
+command/execution route and no path to legacy mutation machinery, providers,
+or process execution.
+
+Update-plane contract (C2): the update authorization route performs ONLY the
+canonical authorize step of authorize → confirmation-required → confirm. The
+canonical ConfirmationBinding/ConfirmationStore remains the sole approval
+authority; this transport never consumes a confirmation, never fabricates
+one, and stores no approval state. Because the authorize→confirm composition
+is not wired into this transport yet (C4), every authorization response is
+explicitly marked "approval": "deferred" so an authorization decision can
+never be mistaken for an approved update.
 """
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from collections import defaultdict, deque
 from typing import Any
@@ -34,6 +46,19 @@ _MAX_FIELD_LENGTH = 2000
 _RATE_WINDOW_SECONDS = 60.0
 _RATE_LIMIT_AUTHORIZE = 30
 _RATE_LIMIT_CONFIRM = 30
+_RATE_LIMIT_UPDATE_APPROVAL = 30
+
+# Dashboard project identifiers are 24 lowercase hex characters (the
+# Mission Control inventory identity). A registered staging control-plane
+# target may carry this identifier as its target_id; the transport only
+# ever resolves it against the canonical plan store via the service.
+_PROJECT_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
+
+# Canonical update-plan digest binding: the operator presents the digest of
+# the update plan they reviewed; it travels inside ActionRequest.metadata so
+# the canonical identity/confirmation/contract machinery binds the approval
+# to the exact plan content. The transport never interprets it as authority.
+_UPDATE_PLAN_DIGEST_KEY = "update_plan_digest"
 
 _SAFE_ERROR_CODES = {
     PlanningErrorCode.INVALID_REQUEST: (422, "invalid_request"),
@@ -128,6 +153,7 @@ def create_operator_app(
         raise ValueError("session store inactivity timeout exceeds the transport cookie budget")
     limiter_authorize = _RateLimiter(limit=_RATE_LIMIT_AUTHORIZE)
     limiter_confirm = _RateLimiter(limit=_RATE_LIMIT_CONFIRM)
+    limiter_update_approval = _RateLimiter(limit=_RATE_LIMIT_UPDATE_APPROVAL)
 
     app = FastAPI(title="AIPM Control Plane Operator Transport", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -196,6 +222,16 @@ def create_operator_app(
         if not isinstance(value, str) or not value or len(value) > 128 or any(character in value for character in "/\\\0"):
             raise _error("invalid_request", f"Invalid {name}", 422)
         return value
+
+    def _bounded_project_id(value: str) -> str:
+        if not isinstance(value, str) or _PROJECT_ID_PATTERN.fullmatch(value) is None:
+            raise _error("invalid_request", "Invalid project identifier", 422)
+        return value
+
+    def _update_plan_digest_pair(value) -> tuple[str, str]:
+        if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+            raise _error("invalid_request", "A 64-character hex update_plan_digest is required", 422)
+        return (_UPDATE_PLAN_DIGEST_KEY, value)
 
     def _run(domain_callable):
         try:
@@ -329,6 +365,101 @@ def create_operator_app(
             }
 
         return _run(_authorize)
+
+    # ------------------------------------------------------------------
+    # Update plane (canonical approval flow over update projects)
+    # ------------------------------------------------------------------
+
+    @app.post("/updates/{project_id}/approval")
+    async def request_update_authorization(project_id: str, request: Request):
+        # Authorize step ONLY. The canonical update approval composition is
+        # authorize → confirmation-required → confirm, with the canonical
+        # ConfirmationBinding/ConfirmationStore as the authoritative approval
+        # state. This transport does not consume or fabricate confirmations
+        # and keeps no approval state of its own, so the confirmation step is
+        # deferred until C4 wires the composition. The response therefore
+        # reports "approval": "deferred": an authorization decision is never
+        # presented as an approved update. When C4 lands, this handler will
+        # additionally delegate the confirmation step to the canonical
+        # confirmation flow after authorization succeeds.
+        session = _resolve_session(request)
+        _require_csrf(request)
+        if not limiter_update_approval.allow(session.session_id):
+            raise _error("conflict", "Too many update approval attempts; slow down", 429)
+        project_id = _bounded_project_id(project_id)
+        payload = await _json_body(request)
+        allowed_keys = {"idempotency_key", _UPDATE_PLAN_DIGEST_KEY}
+        if not isinstance(payload, dict) or not payload or len(payload) > _MAX_BODY_FIELDS:
+            raise _error("invalid_request", "Malformed request body", 422)
+        for key in payload:
+            if key not in allowed_keys:
+                raise _error("invalid_request", f"Field {key!r} is not authorable", 422)
+        idempotency_key = payload.get("idempotency_key")
+        if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
+            raise _error("invalid_request", "A bounded idempotency_key is required", 422)
+        digest_pair = _update_plan_digest_pair(payload.get(_UPDATE_PLAN_DIGEST_KEY))
+
+        target_view = _run(lambda: service.plan_view(project_id))
+        if target_view is None:
+            raise _error("not_found", "Project is not registered with the control plane", 404)
+
+        action_request = ActionRequest(
+            operation=OperationKind.UPDATE_PROJECT_PLAN,
+            target_id=project_id,
+            idempotency_key=idempotency_key,
+            metadata=(digest_pair,),
+            environment=target_view["environment"],
+        )
+
+        def _authorize():
+            decision = service.authorize(session.session_id, action_request)
+            identity = decision.action_identity
+            return {
+                "decision_id": decision.decision_id,
+                "allowed": decision.allowed,
+                "code": decision.code.value,
+                "action_id": identity.action_id if identity else None,
+                "confirmation_required": decision.confirmation_required,
+                "expires_at": decision.expires_at.isoformat(),
+                # Explicit: this decision is NOT a confirmed approval. The
+                # canonical confirmation step (authorize → confirm) is
+                # composed in C4; until then the approval is deferred.
+                "approval": "deferred",
+            }
+
+        return _run(_authorize)
+
+    @app.post("/updates/{project_id}/execute")
+    async def run_update_for_project(project_id: str, request: Request):
+        # Execution of update-plane actions requires the C4 runtime wiring
+        # (executor service over IPC with a plan-bound execution contract).
+        # Until C4 lands, this verb is deliberately not mutation-capable and
+        # fails closed: no target is resolved, no plan is read, no state is
+        # touched, and no execution path exists in this transport. C4 will
+        # replace this handler's body with delegation to the canonical
+        # action execution flow (authorize → confirm → snapshot → lease →
+        # contract → IPC executor) for the action this project's approval
+        # registered.
+        _resolve_session(request)
+        _require_csrf(request)
+        _bounded_project_id(project_id)
+        raise _error("unavailable", "Update execution is not available in this composition", 503)
+
+    @app.get("/updates/{project_id}/status")
+    def update_status(project_id: str, request: Request):
+        # Read-only projection over already-recorded control-plane state; it
+        # never advances, invents, or fabricates lifecycle state. Action-level
+        # progress remains on the existing /actions/{action_id} read view.
+        _resolve_session(request)
+        project_id = _bounded_project_id(project_id)
+        plan_view = _run(lambda: service.plan_view(project_id))
+        if plan_view is None:
+            raise _error("not_found", "Project is not registered with the control plane", 404)
+        return {
+            "project_id": project_id,
+            "plan": _plan_payload(plan_view),
+            "execution": {"available": False},
+        }
 
     # ------------------------------------------------------------------
     # Actions
