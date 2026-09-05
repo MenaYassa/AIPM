@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -150,7 +151,14 @@ def test_mc5_routes_remain_get_only_and_acknowledgement_is_not_exposed() -> None
     source = server.read_text(encoding="utf-8")
     assert "@app.get(\"/api/overview\")" in source
     assert "@app.get(\"/api/services\")" in source
-    assert "@app.post" not in source
+    # MC-6.13/C5 supersedes the blanket "no POST" ban: the dashboard exposes
+    # exactly two authority-free POST proxies to the canonical operator
+    # transport. The invariant is now an exact allow-list, so any additional
+    # mutation surface still fails this test.
+    assert sorted(re.findall(r"@app\.post\(\"([^\"]+)\"\)", source)) == [
+        "/api/projects/{project_id}/update/approve",
+        "/api/projects/{project_id}/update/execute",
+    ]
     assert "@app.put" not in source
     assert "@app.patch" not in source
     assert "@app.delete" not in source

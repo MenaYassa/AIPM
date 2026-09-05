@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from aipm.capabilities.advisor.api import AdvisorApi, AdvisorAuthenticator, AdvisorOrchestrator
@@ -18,11 +18,43 @@ from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
 from aipm.capabilities.dashboard.logs_api import DashboardLogsApi
 from aipm.capabilities.dashboard.settings_api import DashboardSettingsApi
 from aipm.capabilities.dashboard.update_api import DashboardUpdateApi
+from aipm.capabilities.dashboard.update_proxy_api import DashboardUpdateProxyApi
 from aipm.capabilities.dashboard.context import MissionControlContext
 from aipm.core.app import Application
 from aipm.services.advisor.orchestration import AdvisorOrchestrationService
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+#: The canonical session-bound CSRF header. The dashboard neither generates
+#: nor verifies the token: it forwards the browser's canonical header to the
+#: canonical operator transport, which is the sole CSRF authority.
+CSRF_HEADER = "X-CSRF-Token"
+
+#: Fallback name for the canonical operator session cookie when no operator
+#: transport client is composed. The composed client always supplies the
+#: canonical name, so this constant never defines a second session identity.
+OPERATOR_SESSION_COOKIE = "aipm_cp_session"
+
+
+def _operator_session_cookie(request: "Request", proxy) -> str | None:
+    """Read the canonical operator session cookie from the browser request.
+
+    The dashboard stores no session of its own and never mints, rotates, or
+    validates one: the canonical cookie is forwarded unchanged so canonical
+    session, auth-epoch, and CSRF semantics apply exactly as they do on the
+    operator transport.
+    """
+
+    client = getattr(proxy, "client", None)
+    name = getattr(client, "session_cookie_name", None) or OPERATOR_SESSION_COOKIE
+    return request.cookies.get(name)
+
+
+async def _proxy_response(awaitable) -> "JSONResponse":
+    """Serialize a bounded proxy result; no upstream body is passed through."""
+
+    result = await awaitable
+    return JSONResponse(status_code=result.status, content=result.payload)
 
 
 def create_app(
@@ -38,6 +70,7 @@ def create_app(
     logs_api: DashboardLogsApi | None = None,
     settings_api: DashboardSettingsApi | None = None,
     update_api: DashboardUpdateApi | None = None,
+    update_proxy_api: DashboardUpdateProxyApi | None = None,
     advisor_api: AdvisorApi | None = None,
     advisor_authenticator: AdvisorAuthenticator | None = None,
     advisor_orchestrator: AdvisorOrchestrator | None = None,
@@ -57,6 +90,7 @@ def create_app(
         logs=logs_api,
         settings=settings_api,
         update=update_api,
+        update_proxy=update_proxy_api,
     )
     api = context.dashboard
     event_api = context.incidents
@@ -69,6 +103,7 @@ def create_app(
     logs_observation_api = context.logs
     settings_posture_api = context.settings
     update_plan_api = context.update
+    update_proxy = context.update_proxy
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
     def default_live_orchestrator():
         return AdvisorOrchestrationService(app_context.config).evaluate()
@@ -131,6 +166,50 @@ def create_app(
     @app.get("/api/projects/{project_id}/update-plan")
     def project_update_plan(project_id: str):
         return update_plan_api.update_plan(project_id)
+
+    # ------------------------------------------------------------------
+    # Update actions: authenticated proxy to the canonical operator transport
+    #
+    # These three routes are the ONLY mutation-capable dashboard surface and
+    # they own no authority: the canonical owner session cookie and canonical
+    # session-bound CSRF token are forwarded verbatim to the canonical
+    # operator transport, which performs authentication, CSRF verification,
+    # rate limiting, authorization, confirmation, snapshot, lease/fencing,
+    # execution-contract construction, the final execution gate, and audit.
+    # The dashboard never verifies a session, never checks a CSRF token,
+    # never stores approval state, and never reaches an engine.
+    # ------------------------------------------------------------------
+
+    @app.post("/api/projects/{project_id}/update/approve")
+    async def project_update_approve(project_id: str, request: Request):
+        return await _proxy_response(
+            update_proxy.approve(
+                project_id,
+                body=await request.body(),
+                session_cookie=_operator_session_cookie(request, update_proxy),
+                csrf_token=request.headers.get(CSRF_HEADER),
+            )
+        )
+
+    @app.post("/api/projects/{project_id}/update/execute")
+    async def project_update_execute(project_id: str, request: Request):
+        return await _proxy_response(
+            update_proxy.execute(
+                project_id,
+                body=await request.body(),
+                session_cookie=_operator_session_cookie(request, update_proxy),
+                csrf_token=request.headers.get(CSRF_HEADER),
+            )
+        )
+
+    @app.get("/api/projects/{project_id}/update/status")
+    async def project_update_status(project_id: str, request: Request):
+        return await _proxy_response(
+            update_proxy.status(
+                project_id,
+                session_cookie=_operator_session_cookie(request, update_proxy),
+            )
+        )
 
     @app.get("/api/systemd/units")
     def systemd_units(limit: int = Query(20, ge=1, le=20)):

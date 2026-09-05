@@ -1089,8 +1089,19 @@ class TestSourceBoundary:
         assert "UpdateFlightControl" not in source
 
     def test_no_new_mutation_routes_in_dashboard(self):
+        import re
+
         source = _read_code("src/aipm/dashboard/server.py")
-        for forbidden in ("execute_update", "update/execute", "update/rollback", "update/approve"):
+        # C5 supersedes the blanket route ban with an exact allow-list: the
+        # dashboard may proxy approval and execution to the canonical operator
+        # transport, but must never grow a rollback surface or call an
+        # execution primitive itself.
+        mutation_routes = sorted(re.findall(r"@app\.(?:post|put|patch|delete)\(\"([^\"]+)\"\)", source))
+        assert mutation_routes == [
+            "/api/projects/{project_id}/update/approve",
+            "/api/projects/{project_id}/update/execute",
+        ]
+        for forbidden in ("execute_update", "update/rollback", "rollback", "subprocess", "Popen"):
             assert forbidden not in source
 
     def test_update_plan_route_is_declared_get_only(self):

@@ -14,6 +14,7 @@ from aipm.capabilities.dashboard.service_health_api import DashboardServiceHealt
 from aipm.capabilities.dashboard.settings_api import DashboardSettingsApi
 from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
 from aipm.capabilities.dashboard.update_api import DashboardUpdateApi
+from aipm.capabilities.dashboard.update_proxy_api import DashboardUpdateProxyApi
 from aipm.core.app import Application
 
 
@@ -37,6 +38,7 @@ class MissionControlContext:
     logs: DashboardLogsApi
     settings: DashboardSettingsApi
     update: DashboardUpdateApi
+    update_proxy: DashboardUpdateProxyApi
 
     @classmethod
     def from_application(
@@ -54,6 +56,7 @@ class MissionControlContext:
         logs: DashboardLogsApi | None = None,
         settings: DashboardSettingsApi | None = None,
         update: DashboardUpdateApi | None = None,
+        update_proxy: DashboardUpdateProxyApi | None = None,
     ) -> "MissionControlContext":
         dashboard_api = dashboard or DashboardApi.from_application(application, include_history=True)
         incidents_api = incidents or DashboardIncidentsApi.from_application(application)
@@ -86,6 +89,10 @@ class MissionControlContext:
                 service_health_api=health_api,
             ),
             update=update or DashboardUpdateApi.from_application(application, dashboard_api=dashboard_api),
+            # The proxy is uncomposed by default: without an injected operator
+            # transport client every update verb fails closed. Composing the
+            # canonical client is C6 deployment work.
+            update_proxy=update_proxy or DashboardUpdateProxyApi(),
         )
 
     @property
