@@ -47,6 +47,7 @@ _RATE_WINDOW_SECONDS = 60.0
 _RATE_LIMIT_AUTHORIZE = 30
 _RATE_LIMIT_CONFIRM = 30
 _RATE_LIMIT_UPDATE_APPROVAL = 30
+_RATE_LIMIT_UPDATE_EXECUTE = 30
 
 # Dashboard project identifiers are 24 lowercase hex characters (the
 # Mission Control inventory identity). A registered staging control-plane
@@ -154,6 +155,7 @@ def create_operator_app(
     limiter_authorize = _RateLimiter(limit=_RATE_LIMIT_AUTHORIZE)
     limiter_confirm = _RateLimiter(limit=_RATE_LIMIT_CONFIRM)
     limiter_update_approval = _RateLimiter(limit=_RATE_LIMIT_UPDATE_APPROVAL)
+    limiter_update_execute = _RateLimiter(limit=_RATE_LIMIT_UPDATE_EXECUTE)
 
     app = FastAPI(title="AIPM Control Plane Operator Transport", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -372,16 +374,13 @@ def create_operator_app(
 
     @app.post("/updates/{project_id}/approval")
     async def request_update_authorization(project_id: str, request: Request):
-        # Authorize step ONLY. The canonical update approval composition is
-        # authorize → confirmation-required → confirm, with the canonical
-        # ConfirmationBinding/ConfirmationStore as the authoritative approval
-        # state. This transport does not consume or fabricate confirmations
-        # and keeps no approval state of its own, so the confirmation step is
-        # deferred until C4 wires the composition. The response therefore
-        # reports "approval": "deferred": an authorization decision is never
-        # presented as an approved update. When C4 lands, this handler will
-        # additionally delegate the confirmation step to the canonical
-        # confirmation flow after authorization succeeds.
+        # C4 composition: this handler delegates the WHOLE canonical approval
+        # composition (digest binding → authorize → confirmation-required →
+        # confirm) to the service layer. The transport never consumes or
+        # fabricates confirmations, never constructs bindings or contracts,
+        # and keeps no approval state of its own; it validates body shape,
+        # resolves the session, and forwards bounded values to the canonical
+        # service composition point.
         session = _resolve_session(request)
         _require_csrf(request)
         if not limiter_update_approval.allow(session.session_id):
@@ -403,47 +402,78 @@ def create_operator_app(
         if target_view is None:
             raise _error("not_found", "Project is not registered with the control plane", 404)
 
-        action_request = ActionRequest(
-            operation=OperationKind.UPDATE_PROJECT_PLAN,
-            target_id=project_id,
-            idempotency_key=idempotency_key,
-            metadata=(digest_pair,),
-            environment=target_view["environment"],
-        )
+        def _approve():
+            return service.approve_update_plan(
+                session.session_id,
+                target_id=project_id,
+                environment=target_view["environment"],
+                presented_digest=digest_pair[1],
+                idempotency_key=idempotency_key,
+            )
 
-        def _authorize():
-            decision = service.authorize(session.session_id, action_request)
-            identity = decision.action_identity
+        result = _run(_approve)
+        if not result["allowed"]:
             return {
-                "decision_id": decision.decision_id,
-                "allowed": decision.allowed,
-                "code": decision.code.value,
-                "action_id": identity.action_id if identity else None,
-                "confirmation_required": decision.confirmation_required,
-                "expires_at": decision.expires_at.isoformat(),
-                # Explicit: this decision is NOT a confirmed approval. The
-                # canonical confirmation step (authorize → confirm) is
-                # composed in C4; until then the approval is deferred.
-                "approval": "deferred",
+                "decision_id": result["decision_id"],
+                "allowed": False,
+                "code": result["code"],
+                "action_id": None,
+                "confirmation_required": False,
+                "expires_at": None,
+                "approval": "denied",
             }
-
-        return _run(_authorize)
+        return {
+            "decision_id": result["decision_id"],
+            "allowed": True,
+            "code": result["code"],
+            "action_id": result["action_id"],
+            "confirmation_required": True,
+            "expires_at": None,
+            # The canonical confirmation is already recorded; the response
+            # exposes only its safe read-only reference.
+            "confirmation_id": result["confirmation_id"],
+            "approval": "confirmed",
+        }
 
     @app.post("/updates/{project_id}/execute")
     async def run_update_for_project(project_id: str, request: Request):
-        # Execution of update-plane actions requires the C4 runtime wiring
-        # (executor service over IPC with a plan-bound execution contract).
-        # Until C4 lands, this verb is deliberately not mutation-capable and
-        # fails closed: no target is resolved, no plan is read, no state is
-        # touched, and no execution path exists in this transport. C4 will
-        # replace this handler's body with delegation to the canonical
-        # action execution flow (authorize → confirm → snapshot → lease →
-        # contract → IPC executor) for the action this project's approval
-        # registered.
-        _resolve_session(request)
+        # C4 composition: execution delegation to the canonical action flow.
+        # This handler never touches plans, confirmations, leases, or
+        # contracts itself; it resolves the project's registered approval
+        # action and delegates to the service's canonical gated execution
+        # (confirmation consumed exactly once, lease + fencing, bounded
+        # mutation, independent verification, then the composed update
+        # runtime). The body carries the action_id returned by the approval
+        # response; nothing else is accepted.
+        session = _resolve_session(request)
         _require_csrf(request)
-        _bounded_project_id(project_id)
-        raise _error("unavailable", "Update execution is not available in this composition", 503)
+        if not limiter_update_execute.allow(session.session_id):
+            raise _error("conflict", "Too many update execution attempts; slow down", 429)
+        project_id = _bounded_project_id(project_id)
+        payload = await _json_body(request)
+        if not isinstance(payload, dict) or set(payload) != {"action_id"}:
+            raise _error("invalid_request", "A single action_id is required", 422)
+        action_id = payload["action_id"]
+        if not isinstance(action_id, str) or not action_id or len(action_id) > 128:
+            raise _error("invalid_request", "A bounded action_id is required", 422)
+
+        # The action must be the approval action OF THIS project: the URL
+        # target and the action's bound target are part of the execution
+        # identity. A mismatch fails closed (never a cross-project replay).
+        action_view = _run(lambda: service.action_view(action_id))
+        if action_view is None or action_view.get("target_id") != project_id:
+            raise _error("confirmation_required", "No approved update action for this project", 409)
+
+        def _execute():
+            return service.run_approved_update(session.session_id, action_id=action_id)
+
+        result = _run(_execute)
+        return {
+            "action_id": result["action_id"],
+            "executed": result["executed"],
+            "outcome": result["outcome"],
+            "lifecycle_state": result["lifecycle_state"],
+        }
 
     @app.get("/updates/{project_id}/status")
     def update_status(project_id: str, request: Request):

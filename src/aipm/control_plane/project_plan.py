@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Mapping
 
-from aipm.control_plane.models import OperationKind
+from aipm.control_plane.models import BINDING_METADATA_KEYS, OperationKind
 
 _ALLOWED_FIELDS = frozenset({"title", "objective"})
 _SAFE_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -138,6 +138,18 @@ class InMemoryProjectPlanStore:
 
 def allowed_fields() -> frozenset[str]:
     return _ALLOWED_FIELDS
+
+
+def binding_fields() -> frozenset[str]:
+    """Metadata keys that bind an authorization to a plan identity.
+
+    Binding fields are authorization-channel decoration only: they are
+    verified by the composition layer against the authoritative plan
+    identity and must never reach ``ProjectPlan.update`` as mutation
+    fields.
+    """
+
+    return BINDING_METADATA_KEYS
 
 
 def _target(value: str) -> str:

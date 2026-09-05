@@ -46,6 +46,7 @@ from aipm.control_plane.models import (
     LifecycleState,
     OperationKind,
     PlanningErrorCode,
+    UpdateExecutionBinding,
 )
 from aipm.control_plane.owner_auth import OwnerAuthenticator
 from aipm.control_plane.planner import PlanOnlyPlanner
@@ -96,6 +97,8 @@ class OwnerControlPlaneService:
         "_actions",
         "_kill_switches",
         "_dry_run_sink",
+        "_current_plan_digest",
+        "_update_runtime",
         "_execution_mode",
         "_executor_ipc_client",
         "_snapshot_repo",
@@ -117,6 +120,8 @@ class OwnerControlPlaneService:
         actions: ActionRepository | None = None,
         kill_switches=None,
         dry_run_sink=None,
+        current_plan_digest=None,
+        update_runtime=None,
         execution_mode: str = "test",  # production MUST explicitly pass "ipc"
         executor_ipc_client=None,
         clock=None,
@@ -159,6 +164,8 @@ class OwnerControlPlaneService:
         object.__setattr__(self, "_actions", repository)
         object.__setattr__(self, "_kill_switches", kill_switches)
         object.__setattr__(self, "_dry_run_sink", dry_run_sink)
+        object.__setattr__(self, "_current_plan_digest", current_plan_digest)
+        object.__setattr__(self, "_update_runtime", update_runtime)
         object.__setattr__(self, "_execution_mode", execution_mode)
         object.__setattr__(self, "_executor_ipc_client", executor_ipc_client)
         object.__setattr__(self, "_snapshot_repo", None)
@@ -292,7 +299,7 @@ class OwnerControlPlaneService:
             plan_id=action.plan_id,
             expected_plan_revision=action.plan_revision,
             expected_plan_digest=decision.action_identity.target_digest,
-            mutation_fields=tuple(decision.request.metadata),
+            mutation_fields=tuple(decision.request.mutation_metadata),
             snapshot_id=snapshot.snapshot_id,
             decision_id=decision.decision_id,
             confirmation_id=confirmation_id,
@@ -576,7 +583,7 @@ class OwnerControlPlaneService:
             raise ControlPlaneError(PlanningErrorCode.CONFIRMATION_MISMATCH, "Unknown action")
         snapshot = self._snapshot_repo.snapshot_for_action(original_action_id)
         decision = self._actions.get_decision(original.decision_id) if original.decision_id else None
-        mutation_fields = {key: value for key, value in decision.request.metadata} if decision is not None and decision.request is not None else None
+        mutation_fields = dict(decision.request.mutation_metadata) if decision is not None and decision.request is not None else None
         current_plan = self._plans.read(original.scope.target_id)
         return plan_rollback(
             original_action=original,
@@ -726,7 +733,7 @@ class OwnerControlPlaneService:
             plan_id=action.plan_id,
             expected_plan_revision=action.plan_revision,
             expected_plan_digest=decision.action_identity.target_digest,
-            mutation_fields=tuple(decision.request.metadata),
+            mutation_fields=tuple(decision.request.mutation_metadata),
             snapshot_id=snapshot.snapshot_id,
             decision_id=decision.decision_id,
             confirmation_id=confirmation_id,
@@ -787,7 +794,7 @@ class OwnerControlPlaneService:
             plan_id=action.plan_id,
             expected_plan_revision=action.plan_revision,
             expected_plan_digest=decision.action_identity.target_digest,
-            mutation_fields=tuple(decision.request.metadata),
+            mutation_fields=tuple(decision.request.mutation_metadata),
             snapshot_id=action.snapshot_id or "unknown",
             decision_id=decision.decision_id,
             confirmation_id=self._confirmation_id_for(action_id) or "unknown",
@@ -862,6 +869,208 @@ class OwnerControlPlaneService:
             if binding.action_id == action_id:
                 return binding.confirmation_id
         return None
+
+    def _mutation_pairs_for_target(self, target_id: str) -> tuple[tuple[str, str], ...]:
+        """Current title/objective of the authoritative plan (bridge precedent).
+
+        The revision-bump mutation fields for a composed update approval:
+        the digest binding is what pins the approval; the mutation fields
+        keep the canonical contract non-empty without inventing new plan
+        content through the approval channel.
+        """
+
+        try:
+            plan = self._plans.read(target_id)
+        except ProjectPlanError as exc:
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Current plan is unavailable") from exc
+        return (("objective", plan.objective), ("title", plan.title))
+
+    def _update_binding_for(self, action: ActionLifecycle) -> "UpdateExecutionBinding":
+        """Derive the update execution binding from trusted durable state.
+
+        Composed ONLY here, after the canonical gated execution reached
+        VERIFIED_SUCCESS: the plan digest is the presented update-plan
+        digest recovered from the durable decision metadata pair (the
+        ``UpdatePlanIdentity`` digest space — never the control-plane
+        action digest, a different space), the confirmation reference is
+        the durable binding, and the project identity is the action's
+        bound target. Transport, dashboard, and the approval surface never
+        construct this binding. The composition root adapts it to the
+        engine-side execution contract; this layer never names engine
+        types.
+        """
+
+        decision = self._actions.get_decision(action.decision_id) if action.decision_id else None
+        if decision is None or decision.request is None or decision.action_identity is None:
+            raise ControlPlaneError(PlanningErrorCode.STORAGE_CORRUPT, "Action has no durable decision binding")
+        pairs = dict(decision.request.metadata)
+        plan_digest = pairs.get("update_plan_digest")
+        if not isinstance(plan_digest, str) or not plan_digest:
+            raise ControlPlaneError(PlanningErrorCode.STALE_EVIDENCE, "Authorized decision binds no update plan digest")
+        confirmation_id = self._confirmation_id_for(action.action_id)
+        if confirmation_id is None:
+            raise ControlPlaneError(PlanningErrorCode.CONFIRMATION_MISMATCH, "Action has no confirmation binding")
+        if self._update_runtime is None:
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Update runtime is not composed")
+        return UpdateExecutionBinding(
+            project_name=action.scope.target_id,
+            plan_digest=plan_digest,
+            confirmation_id=confirmation_id,
+        )
+
+    def _assert_binding_digest(self, decision, presented_digest: str) -> None:
+        """Fail closed unless the durable decision binds the presented digest.
+
+        The presented update-plan digest is carried inside the canonical
+        request metadata (the binding channel); the decision's embedded
+        request is the durable copy. NOTE: ``identity.plan_digest`` is the
+        control-plane ActionPlan digest — a DIFFERENT digest space from the
+        update-plan identity — so the comparison is against the durable
+        metadata pair, never against ``identity.plan_digest``.
+        """
+
+        request = decision.request
+        pairs = dict(request.metadata) if request is not None else {}
+        if pairs.get("update_plan_digest") != presented_digest:
+            raise ControlPlaneError(PlanningErrorCode.STALE_EVIDENCE, "Authorized identity does not bind the presented digest")
+
+    # ------------------------------------------------------------------
+    # C4: canonical update-plane composition (approve + run)
+    # ------------------------------------------------------------------
+
+    def approve_update_plan(
+        self,
+        session_id: str,
+        *,
+        target_id: str,
+        environment: str,
+        presented_digest: str,
+        idempotency_key: str,
+        now: datetime | None = None,
+    ) -> dict:
+        """Compose the canonical update approval: digest binding → authorize → confirm.
+
+        The presented ``update_plan_digest`` is verified at this boundary
+        against the authoritative plan identity through the injected
+        ``current_plan_digest`` port. On success the digest travels as
+        binding metadata inside a canonical ``ActionRequest`` whose mutation
+        fields are the plan's CURRENT title/objective (revision-bump
+        mutation, bridge precedent), so the durable identity, confirmation,
+        and contracts all bind to the exact plan content the operator
+        approved. Transport never performs any of this itself.
+        """
+
+        if not isinstance(target_id, str) or not target_id:
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid target reference")
+        if not isinstance(environment, str) or not environment:
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid environment")
+        if not isinstance(presented_digest, str) or len(presented_digest) != 64 or any(character not in "0123456789abcdef" for character in presented_digest):
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "A 64-hex update plan digest is required")
+        if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
+            raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "A bounded idempotency key is required")
+        if self._current_plan_digest is None:
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Plan digest verification is not composed")
+        authoritative_digest = self._current_plan_digest(target_id)
+        if not isinstance(authoritative_digest, str) or len(authoritative_digest) != 64 or any(character not in "0123456789abcdef" for character in authoritative_digest):
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Authoritative plan digest is unavailable")
+        if authoritative_digest != presented_digest:
+            # Fail closed: the plan changed after the operator reviewed it.
+            raise ControlPlaneError(PlanningErrorCode.STALE_EVIDENCE, "Presented plan digest does not match the authoritative plan")
+        mutation_pairs = self._mutation_pairs_for_target(target_id)
+        if not mutation_pairs:
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Current plan mutation fields are unavailable")
+        request = ActionRequest(
+            operation=OperationKind.UPDATE_PROJECT_PLAN,
+            target_id=target_id,
+            idempotency_key=idempotency_key,
+            metadata=mutation_pairs + (("update_plan_digest", presented_digest),),
+            environment=environment,
+        )
+        session = self.session(session_id, now=now)
+        decision = self.authorize(session.session_id, request, now=now)
+        if not decision.allowed:
+            return {
+                "allowed": False,
+                "code": decision.code.value,
+                "decision_id": decision.decision_id,
+                "action_id": None,
+                "confirmation_id": None,
+            }
+        identity = decision.action_identity
+        if identity is None:
+            raise ControlPlaneError(PlanningErrorCode.STORAGE_CORRUPT, "Allowed decision carries no identity")
+        self._assert_binding_digest(decision, presented_digest)
+        existing_confirmation_id = self._confirmation_id_for(identity.action_id)
+        if existing_confirmation_id is not None:
+            # Idempotent replay of an already-confirmed approval: the
+            # durable binding stands, no second confirmation is recorded.
+            return {
+                "allowed": True,
+                "code": decision.code.value,
+                "decision_id": decision.decision_id,
+                "action_id": identity.action_id,
+                "confirmation_id": existing_confirmation_id,
+                "plan_digest": presented_digest,
+            }
+        binding = self.confirm(session.session_id, decision.decision_id, now=now)
+        return {
+            "allowed": True,
+            "code": decision.code.value,
+            "decision_id": decision.decision_id,
+            "action_id": identity.action_id,
+            "confirmation_id": binding.confirmation_id,
+            "plan_digest": presented_digest,
+        }
+
+    def run_approved_update(self, session_id: str, *, action_id: str, now: datetime | None = None):
+        """Run one approved update action through the canonical gated flow.
+
+        Delegates to the canonical execution path (snapshot capture,
+        confirmations consumed exactly once, lease + fencing, gate checks,
+        bounded mutation, independent verification). On a verified outcome,
+        the update execution binding is derived from trusted durable state
+        and handed to the injected runtime port (the composition root binds
+        it to the update engine); a runtime failure is fail-closed with the
+        action's terminal state preserved. No retry, no fallback path.
+        """
+
+        if not isinstance(action_id, str) or not action_id:
+            raise ControlPlaneError(PlanningErrorCode.CONFIRMATION_MISMATCH, "Invalid action reference")
+        action = self._actions.get_action(action_id)
+        if action is None:
+            raise ControlPlaneError(PlanningErrorCode.CONFIRMATION_MISMATCH, "Unknown action")
+        was_terminal = action.state in {
+            LifecycleState.VERIFIED_SUCCESS,
+            LifecycleState.ROLLED_BACK,
+            LifecycleState.EXECUTION_FAILED,
+            LifecycleState.ROLLBACK_FAILED,
+        }
+        if action.state is LifecycleState.CONFIRMED:
+            # Fresh approval: the pre-mutation snapshot is part of the
+            # canonical execution preparation (capture → lease → mutate).
+            self.capture_snapshot(session_id, action_id, now=now)
+        result = self.execute_action(session_id, action_id, now=now)
+        action = self._actions.get_action(action_id)
+        if action is None:
+            raise ControlPlaneError(PlanningErrorCode.STORAGE_CORRUPT, "Executed action is missing from the store")
+        if action.state is not LifecycleState.VERIFIED_SUCCESS or was_terminal:
+            # Terminal replay: the confirmation was already consumed and
+            # the durable outcome stands; the runtime never re-runs. A
+            # re-application needs a fresh authorize → confirm chain.
+            return {
+                "executed": False,
+                "action_id": action_id,
+                "outcome": result.outcome.value if hasattr(result.outcome, "value") else str(result.outcome),
+                "lifecycle_state": action.state.value,
+            }
+        binding = self._update_binding_for(action)
+        self._update_runtime(binding)
+        return {
+            "executed": True,
+            "action_id": action_id,
+            "outcome": result.outcome.value if hasattr(result.outcome, "value") else str(result.outcome),
+            "lifecycle_state": action.state.value,
+        }
 
     def _last_lease(self, action_id: str):
         getter = getattr(self._actions, "last_lease", None)

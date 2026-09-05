@@ -31,6 +31,7 @@ from aipm.control_plane.models import (
     RiskLevel,
 )
 from aipm.control_plane.project_plan import allowed_fields as plan_allowed_fields
+from aipm.control_plane.project_plan import binding_fields as plan_binding_fields
 from aipm.control_plane.project_plan import ProjectPlan
 
 #: The bounded, closed operation allow-list. New operations require an
@@ -159,6 +160,7 @@ class AuthorizationPolicy:
     require_distinct_requester_approver: bool = True
     required_role: str = OWNER_ROLE
     allowed_fields: frozenset[str] = plan_allowed_fields()
+    binding_fields: frozenset[str] = plan_binding_fields()
     confirmation_kind: ConfirmationKind = ConfirmationKind.OWNER_CONFIRMATION
 
     def __post_init__(self) -> None:
@@ -179,6 +181,10 @@ class AuthorizationPolicy:
             raise ValueError("Invalid required role")
         if not isinstance(self.allowed_fields, frozenset) or not self.allowed_fields:
             raise ValueError("An explicit field allow-list is required")
+        if not isinstance(self.binding_fields, frozenset):
+            raise ValueError("Binding fields must be a frozenset")
+        if self.allowed_fields & self.binding_fields:
+            raise ValueError("Binding fields must be disjoint from mutable plan fields")
         kind = self.confirmation_kind if isinstance(self.confirmation_kind, ConfirmationKind) else ConfirmationKind(self.confirmation_kind)
         object.__setattr__(self, "confirmation_kind", kind)
 
@@ -236,7 +242,14 @@ class AuthorizationPolicy:
         if plan.is_expired(decided_at or plan.created_at):
             return self._deny(PolicyCode.PLAN_EXPIRED, request, decided_at, principal)
         if request.operation is OperationKind.UPDATE_PROJECT_PLAN:
-            if not request.fields or not request.fields.issubset(self.allowed_fields):
+            # Binding fields are authorization-channel decoration only: they
+            # may accompany a request (verified by the composition layer
+            # against the authoritative plan identity) but never authorize by
+            # themselves nor become mutation fields. Mutation fields
+            # (request.fields minus binding fields) must be non-empty and
+            # within the plan field allow-list.
+            mutation_fields = request.fields - self.binding_fields
+            if not mutation_fields or not mutation_fields.issubset(self.allowed_fields):
                 return self._deny(PolicyCode.FIELD_NOT_ALLOWED, request, decided_at, principal)
         elif request.operation is OperationKind.ROLLBACK_PROJECT_PLAN:
             # Rollback restores the immutable snapshot; it carries no new

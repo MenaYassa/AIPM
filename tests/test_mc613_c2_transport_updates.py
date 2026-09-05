@@ -205,10 +205,14 @@ def test_update_approval_resolves_registered_project_via_plan_store(tmp_path: Pa
     assert "not registered" in response.json()["detail"]["message"]
 
 
-def _custom_harness(tmp_path: Path):
+def _custom_harness(tmp_path: Path, *, compose_runtime: bool = True):
     """Canonical service whose policy/planner allow-list the 24-hex target,
     so service.authorize reaches the policy decision (rather than being
-    refused at the planner) and the transport contract can be observed."""
+    refused at the planner) and the transport contract can be observed.
+
+    C4 composition: the harness binds the two update-plane ports —
+    the authoritative plan-digest source and the update runtime —
+    through the service's canonical composition seams."""
 
     from aipm.control_plane.audit import SQLiteAuditLedger
     from aipm.control_plane.approval import OwnerConfirmationService
@@ -236,6 +240,17 @@ def _custom_harness(tmp_path: Path):
     _register_project(plans)
     planner = PlanOnlyPlanner(clock=clock, target_allow_list=frozenset({PROJECT_ID}))
     actions = SQLiteActionRepository(db, audit=ledger)
+
+    def _current_plan_digest(target_id: str) -> str:
+        plan = plans.read(target_id)
+        return plan.canonical_digest
+
+    runtime_calls: list[dict] = []
+
+    def _update_runtime(contract) -> dict:
+        runtime_calls.append({"project_name": contract.project_name, "plan_digest": contract.plan_digest, "confirmation_id": contract.confirmation_id})
+        return {"ran": True}
+
     service = OwnerControlPlaneService(
         authenticator=authenticator,
         sessions=sessions,
@@ -248,43 +263,48 @@ def _custom_harness(tmp_path: Path):
         kill_switches=None,
         clock=clock,
         execution_mode="test",
+        current_plan_digest=_current_plan_digest,
+        update_runtime=_update_runtime if compose_runtime else None,
     )
     app = create_operator_app(service, bind="127.0.0.1")
-    return app, service
+    return app, service, runtime_calls
 
 
 def test_update_approval_delegates_to_canonical_authority(tmp_path: Path):
-    """The decision comes from the canonical policy, relayed verbatim."""
+    """C4: the approval route delegates to the canonical composition.
 
-    app, _service = _custom_harness(tmp_path)
+    With the CORRECT presented digest (the authoritative plan digest), the
+    canonical service composes authorize → confirm; the transport relays the
+    composed result with only the safe read-only confirmation reference."""
+
+    app, service, _calls = _custom_harness(tmp_path, compose_runtime=False)
     client = TestClient(app)
     auth = login(client)
+    correct_digest = service.plan_view(PROJECT_ID)["canonical_digest"]
     response = client.post(
         _approval_url(),
-        json={"idempotency_key": "k1", "update_plan_digest": DIGEST},
+        json={"idempotency_key": "k1", "update_plan_digest": correct_digest},
         headers=csrf_headers(auth["csrf"]),
     )
     assert response.status_code == 200
     payload = response.json()
-    # Canonical decision fields plus the explicit C2 deferral marker only;
-    # the transport adds no verdict, approval, or confirmation of its own.
-    assert set(payload) == {"decision_id", "allowed", "code", "action_id", "confirmation_required", "expires_at", "approval"}
-    assert payload["allowed"] is False
-    assert payload["code"] == "field_not_allowed"
-    assert payload["action_id"] is None
-    assert payload["confirmation_required"] is False
+    assert payload["allowed"] is True
+    assert payload["approval"] == "confirmed"
+    assert payload["action_id"] is not None
+    assert payload["confirmation_id"] is not None
+    # The confirmation binding is durable canonical state, not transport state.
+    action = service.lifecycle(payload["action_id"])
+    assert action is not None
+    assert service._confirmation_id_for(payload["action_id"]) == payload["confirmation_id"]
 
 
 def test_update_authorization_is_explicitly_not_final_approval(tmp_path: Path):
-    """C2 contract: the route performs ONLY the canonical authorize step.
+    """A MISMATCHED presented digest is never an approved update.
 
-    The response must be explicitly marked approval=deferred so an
-    authorization decision can never be mistaken for an approved update.
-    The transport never consumes a confirmation, never fabricates one, and
-    returns no confirmation identity.
-    """
+    Fail-closed through the canonical error vocabulary: the approval route
+    returns a stale-plan denial and no confirmation is recorded anywhere."""
 
-    app, _service = _custom_harness(tmp_path)
+    app, service, _calls = _custom_harness(tmp_path, compose_runtime=False)
     client = TestClient(app)
     auth = login(client)
     response = client.post(
@@ -292,14 +312,9 @@ def test_update_authorization_is_explicitly_not_final_approval(tmp_path: Path):
         json={"idempotency_key": "k1", "update_plan_digest": DIGEST},
         headers=csrf_headers(auth["csrf"]),
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["approval"] == "deferred"
-    # No confirmation state may be fabricated by the transport.
-    assert "confirmation_id" not in payload
-    assert "confirmed" not in payload
-    # Canonical decision fields remain exactly the authorize-step outputs.
-    assert set(payload) == {"decision_id", "allowed", "code", "action_id", "confirmation_required", "expires_at", "approval"}
+    assert response.status_code == 409
+    payload = response.json()["detail"]
+    assert payload["error"] == "stale_plan"
 
 
 def test_transport_authorization_route_does_not_compose_confirmation():
@@ -400,44 +415,82 @@ def test_transport_never_instantiates_legacy_approval_authority():
 
 
 # ---------------------------------------------------------------------------
-# Fail-closed execute (pending C4)
+# Execute delegation (C4)
 # ---------------------------------------------------------------------------
 
 
-def test_update_execute_is_fail_closed_before_c4(tmp_path: Path):
-    app, service, _db, _ledger, plans, _clock = build_transport(tmp_path)
+def test_update_execute_requires_bounded_body(tmp_path: Path):
+    app, _service, _db, _ledger, plans, _clock = build_transport(tmp_path)
     _register_project(plans)
     client = TestClient(app)
     auth = login(client)
     response = client.post(f"/updates/{PROJECT_ID}/execute", headers=csrf_headers(auth["csrf"]))
-    assert response.status_code == 503
+    assert response.status_code == 422
     payload = response.json()["detail"]
-    assert payload["error"] == "unavailable"
-    # The stub must not resolve the target or touch any state.
-    assert service.plan_view(PROJECT_ID)["revision"] == 1
+    assert payload["error"] == "invalid_request"
+
+
+def test_update_execute_delegates_to_canonical_flow(tmp_path: Path):
+    """Full composed chain over HTTP: approve → execute → runtime port fired."""
+
+    app, service, runtime_calls = _custom_harness(tmp_path)
+    client = TestClient(app)
+    auth = login(client)
+    correct_digest = service.plan_view(PROJECT_ID)["canonical_digest"]
+    approval = client.post(
+        _approval_url(),
+        json={"idempotency_key": "k1", "update_plan_digest": correct_digest},
+        headers=csrf_headers(auth["csrf"]),
+    )
+    assert approval.status_code == 200
+    approval_payload = approval.json()
+    assert approval_payload["allowed"] is True
+    action_id = approval_payload["action_id"]
+    response = client.post(
+        f"/updates/{PROJECT_ID}/execute",
+        json={"action_id": action_id},
+        headers=csrf_headers(auth["csrf"]),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["executed"] is True
+    assert payload["action_id"] == action_id
+    assert payload["lifecycle_state"] == "verified_success"
+    # The runtime port fired exactly once with the trusted binding values.
+    assert len(runtime_calls) == 1
+    call = runtime_calls[0]
+    assert call["project_name"] == PROJECT_ID
+    assert call["confirmation_id"] == approval_payload["confirmation_id"]
+    assert len(call["plan_digest"]) == 64
+    # The plan revision advanced exactly once (bounded mutation).
+    assert service.plan_view(PROJECT_ID)["revision"] == 2
 
 
 def test_update_execute_fail_closed_for_unregistered_project(tmp_path: Path):
     app, _service, _db, _ledger, _plans, _clock = build_transport(tmp_path)
     client = TestClient(app)
     auth = login(client)
-    response = client.post(f"/updates/{OTHER_PROJECT_ID}/execute", headers=csrf_headers(auth["csrf"]))
-    assert response.status_code == 503
+    response = client.post(
+        f"/updates/{OTHER_PROJECT_ID}/execute",
+        json={"action_id": "a" * 32},
+        headers=csrf_headers(auth["csrf"]),
+    )
+    assert response.status_code == 409
 
 
-def test_update_execute_never_mutates_plan_state(tmp_path: Path):
+def test_update_execute_never_mutates_plan_state_without_approval(tmp_path: Path):
     app, _service, _db, _ledger, plans, _clock = build_transport(tmp_path)
     _register_project(plans)
     client = TestClient(app)
     auth = login(client)
     headers = csrf_headers(auth["csrf"])
-    client.post(
-        _approval_url(),
-        json={"idempotency_key": "k1", "update_plan_digest": DIGEST},
+    response = client.post(
+        f"/updates/{PROJECT_ID}/execute",
+        json={"action_id": "a" * 32},
         headers=headers,
     )
+    assert response.status_code == 409
     before = plans.read(PROJECT_ID)
-    client.post(f"/updates/{PROJECT_ID}/execute", headers=headers)
     after = plans.read(PROJECT_ID)
     assert (before.revision, before.title, before.objective) == (after.revision, after.title, after.objective)
 

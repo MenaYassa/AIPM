@@ -24,6 +24,11 @@ CONFIRMATION_TTL = timedelta(minutes=10)
 ENVIRONMENT_VALUES = ("staging", "production")
 _SAFE_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+# Authorization-channel binding keys: verified at the composition layer and
+# excluded from mutation metadata (models is the import-safe leaf module;
+# aipm.control_plane.project_plan re-exposes this set as binding_fields()).
+BINDING_METADATA_KEYS = frozenset({"update_plan_digest"})
+_BINDING_METADATA_KEYS = BINDING_METADATA_KEYS
 SAFE_ID_PATTERN = _SAFE_ID
 _SAFE_VALUE = re.compile(r"^[^\x00-\x1f\x7f]{1,128}$")
 _SENSITIVE_MARKERS = ("/", "\\\\", "token=", "password=", "secret", "credential", "authorization", "traceback", "exception=", "provider", "destination")
@@ -153,6 +158,17 @@ class ActionRequest:
         """Canonical mutation field names carried by this request."""
 
         return frozenset(key for key, _value in self.metadata)
+
+    @property
+    def mutation_metadata(self) -> tuple[tuple[str, str], ...]:
+        """Metadata pairs that may become plan mutation fields.
+
+        Binding fields (authorization-channel decoration, e.g. the update
+        plan digest) are excluded so they can never reach
+        ``ProjectPlan.update`` through a contract's ``mutation_fields``.
+        """
+
+        return tuple((key, value) for key, value in self.metadata if key not in _BINDING_METADATA_KEYS)
 
     def canonical(self) -> str:
         payload = {
@@ -309,6 +325,29 @@ class ConfirmationBinding:
 
     def is_expired(self, now: datetime) -> bool:
         return _utc(now) >= self.expires_at
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateExecutionBinding:
+    """Control-plane-owned binding handed to the composed update runtime.
+
+    Derived ONLY from trusted durable state after canonical gated execution
+    reached a verified outcome. The composition root adapts it to the
+    engine-side execution contract; the control plane never names engine
+    types. ``plan_digest`` is the presented update-plan digest (the
+    ``UpdatePlanIdentity`` digest space) recovered from the durable decision
+    metadata pair — never the control-plane action digest, which is a
+    different digest space.
+    """
+
+    project_name: str
+    plan_digest: str
+    confirmation_id: str
+
+    def __post_init__(self) -> None:
+        _bounded_string(self.project_name, name="project identity", maximum=MAX_TARGET_ID, pattern=_SAFE_ID)
+        _bounded_string(self.plan_digest, name="update plan digest", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
+        _bounded_string(self.confirmation_id, name="confirmation reference", maximum=32, pattern=re.compile(r"^[0-9a-f]{32}$"))
 
 
 # MC-6.12 Stage 2 non-executing lifecycle foundation.

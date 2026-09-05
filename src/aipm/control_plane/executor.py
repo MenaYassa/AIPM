@@ -615,7 +615,10 @@ class Executor:
             # The rollback contract's bounded mutation is the snapshot restore.
             mutation_fields = tuple(sorted(self._snapshot_restore_fields(snapshot).items()))
         else:
-            mutation_fields = tuple(decision.request.metadata)
+            # Binding metadata (e.g. the presented update plan digest) is
+            # authorization-channel decoration; it never becomes a plan
+            # mutation field.
+            mutation_fields = tuple(decision.request.mutation_metadata)
         kill_switch_epoch = self._kill_switches.switch(action.scope.environment).epoch if self._kill_switches is not None else 1
         return ExecutionContract(
             contract_version=EXECUTION_CONTRACT_VERSION,
