@@ -48,6 +48,7 @@ from aipm.control_plane.models import (
 )
 from aipm.control_plane.policy import AuthorizationDecision
 from aipm.control_plane.project_plan import Environment, PlanConflict, ProjectPlan, ProjectPlanError
+from aipm.control_plane.session import OwnerSession
 
 DATABASE_FILENAME = "control_plane.db"
 SNAPSHOT_VERSION_DEFAULT = "mc612-snapshot-v1"

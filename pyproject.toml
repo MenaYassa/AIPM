@@ -29,7 +29,22 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "ruff>=0.13",
 ]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Narrow, correctness-focused static gate (deliberately not a style or
+# formatting exercise): E9 = syntax errors, F821 = undefined names,
+# F541 = f-strings without placeholders. F821 is the class that
+# surfaced real latent NameError defects in the control plane.
+# Unused-import/variable rules (F401/F841) and style rules (E4/E7)
+# are intentionally not selected: the existing tree has hundreds of
+# instances and enabling them would force a mass cleanup; that is a
+# separate, deliberate piece of work.
+select = ["E9", "F821", "F541"]
 
 [project.scripts]
 aipm = "aipm.cli.app:app"

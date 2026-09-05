@@ -1,8 +1,8 @@
 # AIPM Current Status
 
-**Status date:** 2026-09-03 (supersedes the 2026-09-02 reconciliation; see the final section)
+**Status date:** 2026-09-05 (supersedes the 2026-09-03 status date; see the final sections)
 
-**Canonical repository checkpoint:** `c04c017efa21540082783fc4377f2b50ce3c86a3` (published `origin/main`; carries the MC-6.12 transport rate-limit regression tests and the telemetry remediation lineage)
+**Canonical repository checkpoint:** `9092118b8ec88ab7af796abd67215f12db8faeaf` (published `origin/main`; carries the CI/release-hygiene and changelog lineage on top of the MC-6.12 transport rate-limit regression tests and the telemetry remediation lineage)
 
 **Repository parity:** `HEAD` is `origin/main` at `c04c017efa21540082783fc4377f2b50ce3c86a3`.
 
@@ -80,6 +80,12 @@ The separate `PRODUCTION_ROADMAP.md` remains incomplete. It covers safe `aipm up
 ## Documentation governance
 
 This document is the current status authority. Historical documents may retain their original scope and narrative, but each now carries a current-state notice. New status claims must identify whether they are repository evidence, operator-supplied production evidence, or fresh web-observable evidence. No documentation update authorizes code, deployment, service, database, infrastructure, Cloudflare, notification, or action-plane changes.
+
+## Current-state reconciliation — 2026-09-05 (production roadmap: static-check CI element)
+
+Repository evidence in this section is verified against the working tree at `9092118b8ec88ab7af796abd67215f12db8faeaf` (`HEAD` == `origin/main`), plus the unstaged work described here.
+
+Within the safe `aipm update` transaction workstream, the static-checks element of the P2 "Integration testing and release readiness" item — "then add CI for tests, packaging, static checks, and security scans" — is now implemented at repository level. Ruff joins the dev extra (`ruff>=0.13`, locked at 0.16.6 in `uv.lock`) with a narrow correctness configuration in `pyproject.toml` (`select = ["E9", "F821", "F541"]`: syntax errors, undefined names, placeholder-less f-strings); wider rule families (unused imports/variables, style classes) are deliberately not selected because the existing tree carries hundreds of such instances and enabling them would force the mass cleanup this guardrail slice excludes. The CI validation chain gains one offline step — `uv run --no-sync ruff check .` between the full pytest run and the release-validation chain — with no new actions, no egress, no secrets, and no permission changes; `tests/test_ci_workflow.py` grows from 16 to 18 tests, adding static-check ordering and offline/locked contracts without weakening any existing assertion. Enforcing the gate surfaced and fixed five real defects: the in-memory `acquire_lease` referenced `advanced` before assignment (a latent `NameError` on every in-memory lease acquisition — the SQLite implementation already ordered this correctly), `executor.py` and `sqlite_store.py` used undefined annotation names (`Any`, `OwnerSession`), `systemd_executor.py`'s `except SystemdRestartError` referenced an unimported name so the error handler itself would have raised `NameError`, and one test f-string silently transformed its asserted sudoers literal. Fix surface: five lines plus one statement reorder; no unrelated cleanup. Still open in the broader roadmap: dependency/secret scanning (pip-audit/gitleaks — requires a CI policy decision against the certified no-egress/no-third-party-action posture), the P2 documentation remainder (upgrade guide premature with no version tags; release-checklist consolidation covered by `docs/MC-6.12_RELEASE_AND_CUTOVER.md`), and separately approved real-VPS read-only integration (blocked on credentials/approval). This remains repository-only work: not deployed, no live-VPS validation; the MC-6.12 executor and production action execution remain unauthorized and unimplemented. See the dated reconciliation in [`PRODUCTION_ROADMAP.md`](../PRODUCTION_ROADMAP.md) for the same record.
 
 ## Current-state reconciliation — 2026-09-04 (production roadmap: CI / release hygiene)
 

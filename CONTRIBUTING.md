@@ -21,7 +21,8 @@ uv sync --frozen --extra dev
 ```
 
 This creates a `.venv` with the package installed (editable) and the
-`dev` extra (`pytest>=8`). The lockfile is authoritative: CI installs
+`dev` extra (`pytest>=8`, `ruff>=0.13` for the static-check gate). The
+lockfile is authoritative: CI installs
 with `--frozen` and does not resolve dependencies, so a change to
 `pyproject.toml` dependencies must be accompanied by a regenerated
 `uv.lock` (`uv lock`) in the same change.
@@ -41,6 +42,24 @@ self-contained: it uses disposable temporary repositories and
 directories for Git, Docker, Compose, SQLite, and update-transaction
 coverage and does not require a Docker daemon, network access, or any
 path outside the checkout's `tmp_path` fixtures.
+
+## Static checks
+
+```bash
+uv run --no-sync ruff check .
+```
+
+(or `.venv/bin/ruff check .` if the venv is active). The gate is a
+narrow correctness check, deliberately not a style or formatting
+exercise: it fails on syntax errors, undefined names, and f-strings
+without placeholders (the rule set is declared in `pyproject.toml`
+under `[tool.ruff.lint]`). CI runs the same command between the test
+suite and the release-validation chain, using the ruff version pinned
+in `uv.lock` — no downloads, no extra actions. Wider rule sets
+(unused imports/variables, style classes) are intentionally not
+selected; enabling them would require a separate, deliberate cleanup
+of the existing tree, which is out of scope for the static-check
+guardrail.
 
 ### Known host-state-dependent tests
 
@@ -70,6 +89,7 @@ here.
 The repository carries its own release-tooling contract:
 
 ```bash
+uv run --no-sync ruff check .
 .venv/bin/python ops/validate-release.py --development  # development mode
 .venv/bin/python ops/build-release.py                   # build metadata + manifest
 .venv/bin/python ops/validate-release.py                # production mode
@@ -88,7 +108,8 @@ checkout.
 
 `.github/workflows/ci.yml` is validation-only: it checks out the
 repository, installs the locked dependencies, runs the full test
-suite, and runs the release-validation chain. It never publishes,
+suite, runs the offline ruff static check, and runs the
+release-validation chain. It never publishes,
 deploys, or touches anything outside the runner. Its posture
 (pinned action SHAs, `permissions: contents: read`,
 `persist-credentials: false`, no secrets, no `pull_request_target`,

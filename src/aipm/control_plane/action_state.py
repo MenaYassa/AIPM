@@ -253,6 +253,13 @@ class InMemoryActionRepository:
             raise ControlPlaneError(PlanningErrorCode.STATE_CONFLICT, "An active lease already exists for this action")
         fencing_token = max((lease.fencing_token for lease in self._leases.values() if lease.action_id == action_id), default=0) + 1
         granted_at = now
+        advanced = self.advance_action(
+            action_id,
+            expected_version=expected_version,
+            next_state=_LifecycleState.LEASED,
+            approver_subject=current.requester_subject,
+            now=now,
+        )
         lease = ExecutionLease(
             lease_id=_secrets.token_hex(16),
             action_id=action_id,
@@ -262,13 +269,6 @@ class InMemoryActionRepository:
             granted_at=granted_at,
             expires_at=granted_at + DEFAULT_LEASE_TTL,
             action_version=advanced.version,
-        )
-        advanced = self.advance_action(
-            action_id,
-            expected_version=expected_version,
-            next_state=_LifecycleState.LEASED,
-            approver_subject=current.requester_subject,
-            now=now,
         )
         self._leases[action_id] = lease
         self._append_evidence(audit_drafts or (

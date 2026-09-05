@@ -578,4 +578,4 @@ def test_chown_recursive_is_bounded():
 
 def test_sudoers_rule_is_exact():
     content = SETUP.read_text()
-    assert f'SUDOERS_RULE="${{EXECUTOR_USER}} ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"' in content
+    assert 'SUDOERS_RULE="${EXECUTOR_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart aipm-telemetry.service"' in content

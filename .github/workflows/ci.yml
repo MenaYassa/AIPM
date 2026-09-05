@@ -11,11 +11,13 @@
 #      CONTRIBUTING.md "Known host-state-dependent tests" for the two
 #      tests that depend on host state that clean GitHub runners do
 #      not have — they pass on clean runners)
-#   3. ops/validate-release.py --development
-#   4. ops/build-release.py             (generated build_meta.json /
+#   3. ruff static check                (offline; locked ruff from the
+#      dev extra; narrow correctness gate per pyproject.toml)
+#   4. ops/validate-release.py --development
+#   5. ops/build-release.py             (generated build_meta.json /
 #      release-manifest.json are gitignored, so the tracked tree
 #      stays clean)
-#   5. ops/validate-release.py          (production mode: clean tree
+#   6. ops/validate-release.py          (production mode: clean tree
 #      + build metadata commit == HEAD)
 #
 # Actions are pinned to full commit SHAs (not mutable tags); the pins
@@ -56,6 +58,9 @@ jobs:
 
       - name: Run full test suite (no exclusions)
         run: .venv/bin/python -m pytest -p no:cacheprovider -q
+
+      - name: Static check (ruff, offline, locked)
+        run: uv run --no-sync ruff check .
 
       - name: Validate release state (development mode)
         run: .venv/bin/python ops/validate-release.py --development

@@ -18,6 +18,7 @@ from aipm.control_plane.executor import ExecutionRefused
 from aipm.control_plane.gate import FinalExecutionGate, GateCode
 from aipm.control_plane.models import LifecycleState
 from aipm.control_plane.systemd_provider import (
+    SystemdRestartError,
     SystemdRestartPolicy,
     SystemdRestartProvider,
     SystemdRestartResult,

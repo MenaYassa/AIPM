@@ -172,6 +172,7 @@ class TestValidationChain:
         expected_in_order = [
             "uv sync --frozen --extra dev",
             ".venv/bin/python -m pytest -p no:cacheprovider -q",
+            "uv run --no-sync ruff check .",
             ".venv/bin/python ops/validate-release.py --development",
             ".venv/bin/python ops/build-release.py",
             ".venv/bin/python ops/validate-release.py",
@@ -183,6 +184,43 @@ class TestValidationChain:
         assert positions == sorted(positions), (
             "validation chain steps are out of order"
         )
+
+    def test_static_check_runs_after_tests_and_before_release_validation(self):
+        workflow = _load_workflow()
+        runs = _run_steps(_steps(workflow["jobs"]["validate"]))
+        static_positions = [
+            i for i, run in enumerate(runs) if "ruff check" in run
+        ]
+        assert static_positions, "static check step missing"
+        assert len(static_positions) == 1, "exactly one static check step expected"
+        static_pos = static_positions[0]
+        pytest_positions = [
+            i for i, run in enumerate(runs) if "pytest" in run
+        ]
+        release_positions = [
+            i for i, run in enumerate(runs)
+            if "ops/validate-release.py" in run or "ops/build-release.py" in run
+        ]
+        assert static_positions[0] > max(pytest_positions), (
+            "static check must run after the test suite"
+        )
+        assert static_positions[0] < min(release_positions), (
+            "static check must run before release validation"
+        )
+
+    def test_static_check_is_offline_locked_and_local(self):
+        workflow = _load_workflow()
+        runs = _run_steps(_steps(workflow["jobs"]["validate"]))
+        static_runs = [run for run in runs if "ruff" in run]
+        assert len(static_runs) == 1
+        run = static_runs[0]
+        # Uses the locked environment (--no-sync: no re-resolution, no
+        # new network egress beyond the locked sync) and checks the
+        # whole tree; no pip/wget/curl download path, no action.
+        assert "ruff check ." in run
+        assert "--no-sync" in run
+        for token in ("pip install", "curl", "wget", "http"):
+            assert token not in run, token
 
     def test_full_suite_runs_with_no_exclusions_or_deselects(self):
         workflow = _load_workflow()
