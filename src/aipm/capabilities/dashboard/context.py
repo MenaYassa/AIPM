@@ -13,6 +13,7 @@ from aipm.capabilities.dashboard.server_api import DashboardServerApi
 from aipm.capabilities.dashboard.service_health_api import DashboardServiceHealthApi
 from aipm.capabilities.dashboard.settings_api import DashboardSettingsApi
 from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
+from aipm.capabilities.dashboard.update_api import DashboardUpdateApi
 from aipm.core.app import Application
 
 
@@ -35,6 +36,7 @@ class MissionControlContext:
     systemd: DashboardSystemdApi
     logs: DashboardLogsApi
     settings: DashboardSettingsApi
+    update: DashboardUpdateApi
 
     @classmethod
     def from_application(
@@ -51,6 +53,7 @@ class MissionControlContext:
         systemd: DashboardSystemdApi | None = None,
         logs: DashboardLogsApi | None = None,
         settings: DashboardSettingsApi | None = None,
+        update: DashboardUpdateApi | None = None,
     ) -> "MissionControlContext":
         dashboard_api = dashboard or DashboardApi.from_application(application, include_history=True)
         incidents_api = incidents or DashboardIncidentsApi.from_application(application)
@@ -82,6 +85,7 @@ class MissionControlContext:
                 application,
                 service_health_api=health_api,
             ),
+            update=update or DashboardUpdateApi.from_application(application, dashboard_api=dashboard_api),
         )
 
     @property

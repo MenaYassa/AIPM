@@ -17,6 +17,7 @@ from aipm.capabilities.dashboard.project_api import DashboardProjectApi
 from aipm.capabilities.dashboard.systemd_api import DashboardSystemdApi
 from aipm.capabilities.dashboard.logs_api import DashboardLogsApi
 from aipm.capabilities.dashboard.settings_api import DashboardSettingsApi
+from aipm.capabilities.dashboard.update_api import DashboardUpdateApi
 from aipm.capabilities.dashboard.context import MissionControlContext
 from aipm.core.app import Application
 from aipm.services.advisor.orchestration import AdvisorOrchestrationService
@@ -36,6 +37,7 @@ def create_app(
     systemd_api: DashboardSystemdApi | None = None,
     logs_api: DashboardLogsApi | None = None,
     settings_api: DashboardSettingsApi | None = None,
+    update_api: DashboardUpdateApi | None = None,
     advisor_api: AdvisorApi | None = None,
     advisor_authenticator: AdvisorAuthenticator | None = None,
     advisor_orchestrator: AdvisorOrchestrator | None = None,
@@ -54,6 +56,7 @@ def create_app(
         systemd=systemd_api,
         logs=logs_api,
         settings=settings_api,
+        update=update_api,
     )
     api = context.dashboard
     event_api = context.incidents
@@ -65,6 +68,7 @@ def create_app(
     systemd_observation_api = context.systemd
     logs_observation_api = context.logs
     settings_posture_api = context.settings
+    update_plan_api = context.update
     app = FastAPI(title="AIPM Mission Control", version="0.1.0", docs_url=None, redoc_url=None)
     def default_live_orchestrator():
         return AdvisorOrchestrationService(app_context.config).evaluate()
@@ -123,6 +127,10 @@ def create_app(
     @app.get("/api/projects/{project_id}/health")
     def project_health(project_id: str):
         return project_detail_api.health(project_id)
+
+    @app.get("/api/projects/{project_id}/update-plan")
+    def project_update_plan(project_id: str):
+        return update_plan_api.update_plan(project_id)
 
     @app.get("/api/systemd/units")
     def systemd_units(limit: int = Query(20, ge=1, le=20)):
