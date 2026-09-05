@@ -18,8 +18,10 @@ from aipm.services.backup.engine import BackupEngine
 from aipm.services.git.service import GitService
 from aipm.services.project.service import ProjectService
 from aipm.services.update.audit import AuditService
+from aipm.services.update.execution_contract import ExecutionContract
 from aipm.services.update.git_transaction import GitTransactionRunner
 from aipm.services.update.planner import UpdatePlanner
+from aipm.services.update.plan_identity import UpdatePlanIdentity
 from aipm.services.update.rollback import RollbackManager
 from aipm.services.update.verifier import UpdateVerifier
 
@@ -88,12 +90,22 @@ class UpdateEngine:
         dry_run: bool = False,
         approve: bool = False,
         plan: UpdatePlan | None = None,
+        execution_contract: ExecutionContract | None = None,
     ) -> UpdateAudit:
         started_at = datetime.now(timezone.utc)
         if plan is None:
             plan = self.plan_update(project_name, dry_run=dry_run)
         else:
             self._validate_reused_plan(plan, project_name, dry_run=dry_run)
+
+        # Composed control-plane path: an execution contract binds the plan to
+        # the authorized confirmation. The binding is verified BEFORE any
+        # runtime mutation (snapshot, git, services, health) is attempted.
+        # Fail-closed: a supplied contract that is malformed, or whose plan
+        # digest does not equal this plan's canonical identity digest, stops
+        # execution here. The legacy CLI path (no contract) is unchanged.
+        if execution_contract is not None:
+            self._validate_execution_contract(execution_contract, plan)
 
         if dry_run:
             audit = self._audit(plan, started_at, "dry-run", "planned")
@@ -190,6 +202,33 @@ class UpdateEngine:
             raise UpdateError(
                 "Refusing to execute a plan whose dry-run flag does not match the requested mode "
                 f"(plan dry_run={plan.dry_run}, requested dry_run={dry_run})."
+            )
+
+    def _validate_execution_contract(self, contract: ExecutionContract, plan: UpdatePlan) -> None:
+        """Fail closed when an execution contract does not bind this exact plan.
+
+        Integrity/binding check only: the engine remains a runtime-mechanics
+        layer and re-derives no authorization. The contract must carry the
+        project identity and the authorized plan digest; the digest is
+        recomputed from the plan the engine is about to execute using the
+        canonical :class:`UpdatePlanIdentity` derivation, and any missing or
+        mismatched value refuses execution before any runtime mutation
+        (snapshot, git transaction, services, health, verification) starts.
+        """
+        if not isinstance(contract, ExecutionContract):
+            raise UpdateError("Refusing to execute under a malformed execution contract.")
+        if not contract.project_name or contract.project_name != plan.project:
+            raise UpdateError(
+                "Refusing to execute: the execution contract is not bound to this project "
+                f"(contract project '{contract.project_name or ''}', plan project '{plan.project}')."
+            )
+        expected_digest = UpdatePlanIdentity.from_plan(plan).digest()
+        if not contract.plan_digest:
+            raise UpdateError("Refusing to execute: the execution contract carries no plan digest.")
+        if contract.plan_digest != expected_digest:
+            raise UpdateError(
+                "Refusing to execute: the execution contract was issued for a different plan "
+                f"(contract digest {contract.plan_digest}, plan digest {expected_digest})."
             )
 
     def _execute_runtime(self, project) -> None:

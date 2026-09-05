@@ -1072,7 +1072,13 @@ class TestSourceBoundary:
 
     def test_engine_does_not_import_new_modules(self):
         source = _read_code("src/aipm/services/update/engine.py")
-        assert "plan_identity" not in source
+        # C1 evolution: the engine now binds execution to the canonical plan
+        # identity digest (approved architecture). It must consume the
+        # canonical derivation only — never re-implement it — and must stay
+        # free of approval state machinery.
+        assert "from aipm.services.update.plan_identity import UpdatePlanIdentity" in source
+        assert "def digest" not in source
+        assert "hashlib" not in source
         assert "UpdateApproval" not in source
         assert "UpdateFlightControl" not in source
 

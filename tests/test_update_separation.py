@@ -6,6 +6,7 @@ on /home/ubuntu or any real production repository.
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +24,7 @@ from aipm.services.backup.engine import BackupEngine
 from aipm.services.project.service import ProjectService
 from aipm.services.update.audit import AuditService
 from aipm.services.update.engine import UpdateEngine
+from aipm.services.update.execution_contract import ExecutionContract
 from aipm.services.update.planner import UpdatePlanner
 from aipm.services.update.rollback import RollbackManager
 from aipm.services.update.verifier import UpdateVerifier
@@ -129,7 +131,7 @@ def healthy_plan(project: Project, *, dry_run: bool, approval_required: bool = T
 
 def build_engine(tmp_path: Path, project: Project, plan: UpdatePlan, runner=ok_runner) -> UpdateEngine:
     backup = FakeBackup(tmp_path / "backups")
-    backup.root.mkdir()
+    backup.root.mkdir(exist_ok=True)
     return UpdateEngine(
         project_service=FakeProjectService(project),
         git_service=FakeGitService(),
@@ -353,3 +355,177 @@ def test_capability_imports_no_control_plane_and_stays_cli_side():
     source = inspect.getsource(capability_module)
     assert "control_plane" not in source
     assert "subprocess" not in source
+
+
+# ---------------------------------------------------------------------------
+# C1 — engine-side execution-contract binding (fail-closed, pre-mutation)
+# ---------------------------------------------------------------------------
+
+
+def matching_contract(plan: UpdatePlan) -> "ExecutionContract":
+    from aipm.services.update.plan_identity import UpdatePlanIdentity
+
+    return ExecutionContract(
+        project_name=plan.project,
+        plan_digest=UpdatePlanIdentity.from_plan(plan).digest(),
+        confirmation_id="c" * 32,
+    )
+
+
+def test_execution_contract_model_rejects_malformed_binding_material():
+    from aipm.services.update.execution_contract import ExecutionContract
+
+    good = {"project_name": "demo", "plan_digest": "d" * 64, "confirmation_id": "c" * 32}
+    ExecutionContract(**good)  # well-formed values construct
+
+    bad_contracts = [
+        {**good, "project_name": ""},          # empty project
+        {**good, "project_name": "a/b"},       # path separator
+        {**good, "project_name": None},        # not a string
+        {**good, "plan_digest": "D" * 64},     # uppercase hex
+        {**good, "plan_digest": "d" * 63},     # wrong length
+        {**good, "plan_digest": ""},           # missing digest
+        {**good, "plan_digest": None},
+        {**good, "confirmation_id": "c" * 31},  # wrong length
+        {**good, "confirmation_id": "C" * 32},  # uppercase hex
+    ]
+    for bad in bad_contracts:
+        with pytest.raises(ValueError):
+            ExecutionContract(**bad)
+
+
+def test_engine_executes_with_a_matching_contract(tmp_path: Path):
+    project = make_project(tmp_path)
+    plan = healthy_plan(project, dry_run=False, approval_required=True)
+    engine = build_engine(tmp_path, project, plan)
+
+    audit = engine.execute_update("demo", approve=True, execution_contract=matching_contract(plan))
+
+    assert audit.outcome == "success"
+    assert audit.audit_path is not None and audit.audit_path.exists()
+    assert engine.backup_engine.created  # runtime path ran fully under the contract
+
+
+def test_engine_refuses_contract_digest_mismatch_before_any_mutation(tmp_path: Path):
+    project = make_project(tmp_path)
+    plan = healthy_plan(project, dry_run=False, approval_required=True)
+    engine = build_engine(tmp_path, project, plan)
+
+    # A different plan the operator did NOT see: vary a security-relevant
+    # identity field (risk) so the canonical digest differs. The contract is
+    # well-formed, so the refusal comes from the engine's binding check.
+    other_plan = replace(plan, risk=UpdateRisk.HIGH)
+    other_contract = matching_contract(other_plan)
+    assert other_contract.plan_digest != matching_contract(plan).plan_digest
+
+    with pytest.raises(UpdateError, match="issued for a different plan"):
+        engine.execute_update("demo", approve=True, execution_contract=other_contract)
+
+    assert not engine.backup_engine.created        # no snapshot attempted
+    assert engine.compose_provider.calls == []     # no runtime mutation
+    assert list((tmp_path / "audit").glob("*.json")) == []  # refusal precedes audit records
+    assert plan.actions == healthy_plan(project, dry_run=False, approval_required=True).actions  # plan untouched
+
+
+def test_engine_refuses_contract_for_a_different_project(tmp_path: Path):
+    project = make_project(tmp_path)
+    plan = healthy_plan(project, dry_run=False, approval_required=True)
+    engine = build_engine(tmp_path, project, plan)
+
+    foreign = matching_contract(plan)
+    from dataclasses import replace
+    foreign = replace(foreign, project_name="other")
+
+    with pytest.raises(UpdateError, match="not bound to this project"):
+        engine.execute_update("demo", approve=True, execution_contract=foreign)
+
+    assert not engine.backup_engine.created
+    assert engine.compose_provider.calls == []
+    assert list((tmp_path / "audit").glob("*.json")) == []
+
+
+def test_engine_contract_rejection_happens_before_blocked_and_approval_gates(tmp_path: Path):
+    """Ordering: the binding check fires even when later gates would also refuse.
+
+    A plan that is both unconfirmed (approval_required, no --yes) and carrying
+    a mismatched contract must be refused by the contract check first — proof
+    that the binding check sits before every runtime-mutation gate.
+    """
+    project = make_project(tmp_path)
+    unconfirmed = UpdatePlan(
+        project=project.name,
+        project_path=project.path,
+        dry_run=False,
+        proceed=True,
+        approval_required=True,
+        risk=UpdateRisk.BLOCKED,  # a review-blocking plan the operator never approved
+        reasons=["Compose file has unresolved keys"],
+    )
+    engine = build_engine(tmp_path, project, unconfirmed)
+    mismatched = matching_contract(healthy_plan(project, dry_run=False))
+
+    with pytest.raises(UpdateError, match="issued for a different plan"):
+        engine.execute_update("demo", approve=False, execution_contract=mismatched)
+
+    assert not engine.backup_engine.created
+    assert list((tmp_path / "audit").glob("*.json")) == []
+
+
+def test_engine_contract_check_tolerates_plan_field_changes_that_change_digest(tmp_path: Path):
+    """Any security-relevant plan mutation must invalidate the contract.
+
+    Changing only a non-identity field (project_path, an observation string)
+    keeps the digest stable and the contract valid — evidence that the binding
+    targets the canonical identity, not incidental fields.
+    """
+    from aipm.services.update.plan_identity import UpdatePlanIdentity
+
+    project = make_project(tmp_path)
+    plan = healthy_plan(project, dry_run=False, approval_required=True)
+    engine = build_engine(tmp_path, project, plan)
+
+    same_identity = replace(plan, project_path=str(tmp_path / "elsewhere"))
+    assert UpdatePlanIdentity.from_plan(same_identity).digest() == matching_contract(plan).plan_digest
+    audit = engine.execute_update("demo", approve=True, plan=same_identity, execution_contract=matching_contract(plan))
+    assert audit.outcome == "success"
+
+    changed_identity = replace(plan, risk=UpdateRisk.HIGH)
+    assert UpdatePlanIdentity.from_plan(changed_identity).digest() != matching_contract(plan).plan_digest
+    rejection_engine = build_engine(tmp_path, project, plan)
+    with pytest.raises(UpdateError, match="issued for a different plan"):
+        rejection_engine.execute_update("demo", approve=True, plan=changed_identity, execution_contract=matching_contract(plan))
+    assert not rejection_engine.backup_engine.created
+
+
+def test_engine_without_contract_keeps_legacy_cli_path(tmp_path: Path):
+    """The CLI legacy path (no contract) is unchanged by C1."""
+    project = make_project(tmp_path)
+    plan = healthy_plan(project, dry_run=False, approval_required=True)
+    engine = build_engine(tmp_path, project, plan)
+
+    audit = engine.execute_update("demo", approve=True)
+
+    assert audit.outcome == "success"
+    assert engine.backup_engine.created
+
+
+def test_engine_never_gates_on_flight_control_and_contract_module_stays_pure():
+    from aipm.services.update import execution_contract as module
+
+    source = inspect.getsource(module)
+    for forbidden in ("subprocess", "os.system", "Popen", "socket", "requests.", "urllib", "httpx"):
+        assert forbidden not in source
+    assert "control_plane" not in source
+    # The contract type's own code carries no engine or execution behavior:
+    # scan only code identifiers via AST (docstrings/comments excluded).
+    import ast
+
+    tree = ast.parse(inspect.getsource(ExecutionContract))
+    identifiers: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            identifiers.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            identifiers.add(node.attr)
+    for forbidden in ("engine", "execute_update", "subprocess", "Popen"):
+        assert not any(forbidden in name for name in identifiers)
