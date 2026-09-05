@@ -216,6 +216,7 @@ def test_payload_contains_no_paths_secrets_or_commands():
         "estimated_restart",
         "stash_required",
         "pull_required",
+        "plan_digest",
     }
 
 

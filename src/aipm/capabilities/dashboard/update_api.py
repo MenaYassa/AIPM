@@ -14,6 +14,7 @@ from aipm.core.exceptions import ProviderError
 from aipm.models.mission_control import Observation, ObservationError
 from aipm.services.project.intelligence import ProjectIntelligenceService
 from aipm.services.project.service import ProjectService
+from aipm.services.update.plan_identity import UpdatePlanIdentity
 from aipm.services.update.planner import UpdatePlanner
 
 MAX_REASONS = 32
@@ -63,6 +64,12 @@ class DashboardUpdateApi:
             return self._error("PROJECT_NOT_FOUND", "Project is unavailable")
         except Exception:
             return self._error("UPDATE_PLAN_UNAVAILABLE", "Update plan is unavailable")
+        # Canonical digest of the exact plan the operator is shown. It is
+        # derived by the canonical UpdatePlanIdentity only (never
+        # reimplemented here): the plan shown, the identity hashed, and the
+        # digest returned are the same canonical content. C4 will bind this
+        # same digest into the control-plane ActionRequest metadata.
+        plan_digest = UpdatePlanIdentity.from_plan(plan).digest()
         payload = {
             "update_plan": {
                 "project": plan.project,
@@ -76,6 +83,7 @@ class DashboardUpdateApi:
                 "estimated_restart": plan.estimated_restart,
                 "stash_required": plan.stash_required,
                 "pull_required": plan.pull_required,
+                "plan_digest": plan_digest,
             },
         }
         response = self._success(payload)
