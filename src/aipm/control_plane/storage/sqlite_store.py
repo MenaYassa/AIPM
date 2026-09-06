@@ -668,6 +668,26 @@ class SQLiteActionRepository:
             return None
         return _lifecycle_from_row(row)
 
+    def non_terminal_action_ids(self, *, limit: int = 1000) -> list[str]:
+        """Enumerate action ids not in a terminal lifecycle state.
+
+        Ordering is deterministic (created_at, action_id) and the result is
+        bounded by ``limit`` so a restart sweep cannot scan unbounded rows.
+        """
+
+        from aipm.control_plane.lifecycle import terminal_states
+
+        if limit < 1:
+            raise _corrupt("Enumeration limit must be positive")
+        terminal = ", ".join("?" for _ in terminal_states())
+        rows = self._db.connection.execute(
+            "SELECT action_id FROM actions"
+            f" WHERE lifecycle_state NOT IN ({terminal})"
+            " ORDER BY created_at, action_id LIMIT ?",
+            (*[state.value for state in sorted(terminal_states(), key=lambda s: s.value)], limit),
+        ).fetchall()
+        return [row["action_id"] for row in rows]
+
     def advance_action(self, action_id: str, *, expected_version: int, next_state, approver_subject: str, now, audit_drafts=()) -> ActionLifecycle:
         row = self._db.connection.execute(
             "SELECT * FROM actions WHERE action_id = ?",

@@ -127,6 +127,20 @@ class InMemoryActionRepository:
             return None
         return self._actions.get(action_id)
 
+    def non_terminal_action_ids(self, *, limit: int = 1000) -> list[str]:
+        """Enumerate action ids not in a terminal lifecycle state (deterministic, bounded)."""
+
+        from aipm.control_plane.lifecycle import terminal_states
+
+        if limit < 1:
+            raise ControlPlaneError(PlanningErrorCode.STORAGE_CORRUPT, "Enumeration limit must be positive")
+        terminal = terminal_states()
+        ordered = sorted(
+            (lifecycle for lifecycle in self._actions.values() if lifecycle.state not in terminal),
+            key=lambda lifecycle: (lifecycle.created_at, lifecycle.action_id),
+        )
+        return [lifecycle.action_id for lifecycle in ordered[:limit]]
+
     def advance_action(self, action_id: str, *, expected_version: int, next_state, approver_subject: str, now: Any, audit_drafts=()) -> ActionLifecycle:
         lifecycle = self._actions.get(action_id)
         if lifecycle is None:
@@ -220,14 +234,14 @@ class InMemoryActionRepository:
         self._leases[action_id] = replace(lease, state="released", released_at=now)
         return True
 
-    def active_lease(self, action_id: str):
+    def active_lease(self, action_id: str, *, now: Any = None):
         import datetime as _dt
 
         lease = getattr(self, "_leases", {}).get(action_id)
         if lease is None:
             return None
-        now = _dt.datetime.now(_dt.timezone.utc)
-        if lease.state != "granted" or lease.expires_at <= now:
+        moment = now if now is not None else _dt.datetime.now(_dt.timezone.utc)
+        if lease.state != "granted" or lease.expires_at <= moment:
             return None
         return lease
 
@@ -249,7 +263,7 @@ class InMemoryActionRepository:
         if current.is_expired(now):
             raise ControlPlaneError(PlanningErrorCode.EXPIRED_PLAN, "Action has expired")
         self._leases = getattr(self, "_leases", {})
-        if self.active_lease(action_id) is not None:
+        if self.active_lease(action_id, now=now) is not None:
             raise ControlPlaneError(PlanningErrorCode.STATE_CONFLICT, "An active lease already exists for this action")
         fencing_token = max((lease.fencing_token for lease in self._leases.values() if lease.action_id == action_id), default=0) + 1
         granted_at = now
