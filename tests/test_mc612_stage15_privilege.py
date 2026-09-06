@@ -1,6 +1,7 @@
 """Shot 13B (privilege boundary correction) tests."""
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,18 @@ from aipm.control_plane.privilege import (
     audit_privilege_boundary,
 )
 
+
+
+def _stub_sudo_list(monkeypatch, *, stdout: str, returncode: int = 0) -> None:
+    """Force the effective check to observe a fixed `sudo -n -l` result."""
+
+    def fake_run(args, **kwargs):
+        assert args == ["sudo", "-n", "-l"]
+        return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(
+        "aipm.control_plane.privilege.subprocess.run", fake_run
+    )
 
 
 # --- sudo -l output parsing ---
@@ -113,7 +126,11 @@ def test_assert_raises_when_not_confirmed():
         assert_privilege_boundary_ok(privilege_boundary_confirmed=False)
 
 
-def test_assert_detects_human_session_without_executor_rule():
+def test_assert_detects_human_session_without_executor_rule(monkeypatch):
+    # A human session lists only the broad passworded sudo grant; the executor's
+    # narrow NOPASSWD rule is scoped to aipm-executor and absent here.
+    _stub_sudo_list(monkeypatch, stdout=MINA_OUTPUT)
+
     result = audit_privilege_boundary(
         privilege_boundary_confirmed=True,
         effective_check=True,
@@ -121,8 +138,39 @@ def test_assert_detects_human_session_without_executor_rule():
 
     assert result.confirmed_by_operator is True
     assert result.effective_check_attempted is True
+    assert result.effective_check_succeeded is True
+    assert result.human_broad_sudo_detected is True
+    assert result.aipm_narrow_rule_present is False
     assert result.status is PrivilegeCheckStatus.AIPM_RULE_MISSING
     assert result.drift is True
+
+
+def test_audit_reports_unavailable_when_sudo_requires_authentication(monkeypatch):
+    _stub_sudo_list(monkeypatch, stdout="", returncode=1)
+
+    result = audit_privilege_boundary(
+        privilege_boundary_confirmed=True,
+        effective_check=True,
+    )
+
+    assert result.status is PrivilegeCheckStatus.UNAVAILABLE
+    assert result.effective_check_attempted is True
+    assert result.effective_check_succeeded is False
+    assert result.drift is False
+
+
+def test_audit_reports_exact_match_for_executor_session(monkeypatch):
+    _stub_sudo_list(monkeypatch, stdout=EXECUTOR_OUTPUT)
+
+    result = audit_privilege_boundary(
+        privilege_boundary_confirmed=True,
+        effective_check=True,
+    )
+
+    assert result.status is PrivilegeCheckStatus.EXACT_MATCH
+    assert result.human_broad_sudo_detected is False
+    assert result.aipm_narrow_rule_present is True
+    assert result.drift is False
 
 
 # --- Real VPS audit (with installed sudoers rule) ---

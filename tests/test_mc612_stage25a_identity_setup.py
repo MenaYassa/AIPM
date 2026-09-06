@@ -454,23 +454,17 @@ def test_s6_privileged_group_contamination_fails(sandbox):
     g_aipm = add_group(sandbox, "aipm")
     g_exec = add_group(sandbox, "aipm-executor")
     add_group(sandbox, "aipm-runtime")
+    # Contaminate: put aipm-executor into sudo as a supplementary member. The
+    # membership lives in the stub group DB so `id -Gn` stays hermetic and no
+    # real host identity can satisfy (or trip) the guard.
+    add_group(sandbox, "sudo", members="aipm-executor")
     add_user(sandbox, "aipm", g_aipm)
     add_user(sandbox, "aipm-executor", g_exec)
-    # Contaminate: put aipm-executor into sudo via a supplementary group entry.
-    # The script consults `id -Gn` — stub it via a fake id after the real one.
-    fake_id = sandbox["bin"] / "id"
-    fake_id.write_text(
-        "#!/bin/bash\n"
-        'if [ "$1" = "-Gn" ] && [ "$2" = "aipm-executor" ]; then\n'
-        '  echo "aipm-executor sudo aipm-runtime"; exit 0\n'
-        "fi\n"
-        'exec /usr/bin/id "$@"\n'
-    )
-    fake_id.chmod(0o755)
     result = run_script(SETUP, "--apply", env=sandbox["env"])
     assert result.returncode != 0
     assert "STOP" in result.stderr
     assert "aipm-executor is in a privileged group" in result.stderr
+    assert "aipm is in a privileged group" not in result.stderr
 
 
 # ---------------------------------------------------------------------------
