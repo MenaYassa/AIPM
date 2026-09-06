@@ -60,7 +60,7 @@ from aipm.control_plane.executor import (
 )
 from aipm.control_plane.bridge import DryRunMutationRecord, LegacyUpdateIntent, UpdateActionRequestAdapter
 from aipm.control_plane.rollback import ROLLBACK_PLAN_VERSION, RollbackPlan, RollbackSafetyCode, plan_rollback
-from aipm.control_plane.session import OwnerSession, OwnerSessionStore
+from aipm.control_plane.session import OwnerSession, OwnerSessionStore, SessionStore
 
 
 class _TerminalExecutionResult:
@@ -128,8 +128,11 @@ class OwnerControlPlaneService:
     ) -> None:
         if not isinstance(authenticator, OwnerAuthenticator):
             raise TypeError("authenticator must be OwnerAuthenticator")
-        if not isinstance(sessions, OwnerSessionStore):
-            raise TypeError("sessions must be OwnerSessionStore")
+        # C6.1 composition: any canonical SessionStore composes (in-memory
+        # staging double or DurableSessionStore); the protocol check keeps
+        # the durable store admissible without a parallel session authority.
+        if not isinstance(sessions, (OwnerSessionStore, SessionStore)):
+            raise TypeError("sessions must implement the SessionStore contract")
         if not isinstance(policy, AuthorizationPolicy):
             raise TypeError("policy must be the canonical AuthorizationPolicy")
         if not isinstance(confirmations, OwnerConfirmationService):

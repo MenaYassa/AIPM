@@ -211,6 +211,29 @@ def version():
 
 
 @app.command()
+def serve_operator_transport(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address. Loopback-only; non-loopback binds are refused."),
+    port: int = typer.Option(8789, "--port", min=1, max=65535, help="HTTP port for the operator transport."),
+):
+    """Compose the durable control plane and serve the operator transport.
+
+    Startup order is fail closed: open the dedicated control-plane SQLite
+    store, compose the durable stores, run the startup recovery sweep, and
+    only then bind the loopback listener. Any composition or sweep failure
+    exits before the listener accepts traffic. The update runtime is
+    deliberately not composed (fail-closed execution boundary).
+    """
+
+    from aipm.control_plane.composition import serve_operator_transport
+
+    try:
+        serve_operator_transport(host=host, port=port)
+    except Exception as exc:
+        typer.echo(f"Operator transport refused to start: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def hello():
     """Sanity check."""
 

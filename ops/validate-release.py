@@ -63,6 +63,7 @@ REQUIRED_SYSTEMD = [
     "ops/systemd/aipm-dashboard.service",
     "ops/systemd/aipm-events.service",
     "ops/systemd/aipm-executor.service",
+    "ops/systemd/aipm-operator-transport.service",
     "ops/systemd/aipm-telemetry.service",
 ]
 

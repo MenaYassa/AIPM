@@ -16,7 +16,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from aipm.control_plane.identity import OwnerPrincipal
 
@@ -59,6 +59,7 @@ class OwnerSession:
         return secrets.compare_digest(presented.encode("utf-8"), self.csrf_token.encode("utf-8"))
 
 
+@runtime_checkable
 class SessionStore(Protocol):
     """Interface for session stores; a durable replacement can implement this."""
 

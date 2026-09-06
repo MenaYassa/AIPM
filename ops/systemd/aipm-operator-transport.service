@@ -1,0 +1,38 @@
+[Unit]
+Description=AIPM operator transport (durable control plane, loopback-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aipm
+Group=aipm
+WorkingDirectory=/home/ubuntu/aipm
+Environment=PYTHONUNBUFFERED=1
+Environment=AIPM_ENVIRONMENT=production
+Environment=AIPM_CONFIG=/home/ubuntu/aipm/config/aipm.yaml
+Environment=AIPM_LOG_FILE=/var/lib/aipm/logs/aipm.log
+Environment=AIPM_CONTROL_PLANE_DB=/var/lib/aipm/state/control_plane/control_plane.db
+Environment=AIPM_OPERATOR_TRANSPORT_PORT=8789
+# Owner Argon2id verifier is injected by the systemd drop-in / environment file:
+#   /etc/aipm/operator-transport.env  (mode 0640, owner root, group aipm)
+EnvironmentFile=-/etc/aipm/operator-transport.env
+ExecStart=/home/ubuntu/aipm/.venv/bin/aipm serve-operator-transport --host 127.0.0.1 --port 8789
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/var/lib/aipm/state/control_plane /var/lib/aipm/logs
+BindReadOnlyPaths=/home/ubuntu/aipm/config/aipm.yaml
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=multi-user.target
