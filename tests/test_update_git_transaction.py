@@ -194,6 +194,144 @@ def test_runner_stashes_dirty_and_untracked_then_applies_and_drops(tmp_path: Pat
     assert stash_list == ""
 
 
+# --- pre-existing (operator-owned) stash entries are never applied or dropped
+
+
+def stash_entries(work: Path) -> list[str]:
+    return subprocess.run(
+        ["git", "stash", "list"], cwd=work, check=True, capture_output=True, text=True
+    ).stdout.splitlines()
+
+
+def test_runner_leaves_foreign_stash_untouched_when_nothing_to_stash(tmp_path: Path):
+    """`git stash push` exits zero and creates nothing on a clean tree.
+
+    A stale ``stash_required`` plan must therefore not cause the transaction to
+    apply and drop a pre-existing stash entry it does not own.
+    """
+    project = make_repo(tmp_path)
+    work = Path(project.path)
+    (work / "preserved.txt").write_text("precious unrelated work\n", encoding="utf-8")
+    git("stash", "push", "-u", "-m", "operator preservation stash", cwd=work)
+    assert len(stash_entries(work)) == 1
+    assert not (work / "preserved.txt").exists()
+
+    result = GitTransactionRunner().run(
+        project, stash_required=True, fetch_required=False, pull_required=False
+    )
+
+    assert result.success is True
+    assert result.stashed is False
+    assert result.stash_applied is False
+    assert result.stash_preserved is False
+    assert any("existing stash entries were left untouched" in w for w in result.warnings)
+    entries = stash_entries(work)
+    assert len(entries) == 1
+    assert "operator preservation stash" in entries[0]
+    # the foreign stash was not applied into the worktree either
+    assert not (work / "preserved.txt").exists()
+    stash_show = subprocess.run(
+        ["git", "stash", "show", "-p", "--include-untracked", "stash@{0}"],
+        cwd=work, check=True, capture_output=True, text=True,
+    ).stdout
+    assert "precious unrelated work" in stash_show
+
+
+def test_runner_drops_only_its_own_stash_when_foreign_stash_exists(tmp_path: Path):
+    project = make_repo(tmp_path)
+    work = Path(project.path)
+    (work / "preserved.txt").write_text("precious unrelated work\n", encoding="utf-8")
+    git("stash", "push", "-u", "-m", "operator preservation stash", cwd=work)
+    (work / "config.txt").write_text("operator edit\n", encoding="utf-8")
+
+    result = GitTransactionRunner().run(
+        project, stash_required=True, fetch_required=False, pull_required=False
+    )
+
+    assert result.success is True
+    assert result.stashed is True
+    assert result.stash_applied is True
+    assert result.stash_preserved is False
+    assert result.warnings == []
+    # the transaction's own stash is gone; the operator's remains at stash@{0}
+    entries = stash_entries(work)
+    assert len(entries) == 1
+    assert "operator preservation stash" in entries[0]
+    assert (work / "config.txt").read_text(encoding="utf-8") == "operator edit\n"
+    assert not (work / "preserved.txt").exists()
+
+
+def test_runner_refuses_to_stash_when_existing_entries_cannot_be_read(tmp_path: Path):
+    project = make_repo(tmp_path)
+
+    class UnreadableStashList:
+        def repository(self, project):
+            raise RuntimeError("stash list exploded")
+
+        def stash(self, project, message):
+            raise AssertionError("stash must not run when existing entries are unreadable")
+
+        def fetch(self, project):
+            raise AssertionError("fetch must not run")
+
+        def pull(self, project):
+            raise AssertionError("pull must not run")
+
+        def apply_stash(self, project):
+            raise AssertionError("apply must not run")
+
+        def drop_stash(self, project):
+            raise AssertionError("drop must not run")
+
+    with pytest.raises(GitTransactionError) as excinfo:
+        GitTransactionRunner(git_service=UnreadableStashList()).run(
+            project, stash_required=True, fetch_required=False, pull_required=False
+        )
+
+    result = excinfo.value.result
+    assert result.success is False
+    assert result.stashed is False
+    assert result.stash_preserved is False
+    assert result.errors == ["stash inspection failed: stash list exploded"]
+
+
+def test_runner_preserves_unverifiable_stash_instead_of_dropping_it(tmp_path: Path):
+    project = make_repo(tmp_path)
+
+    class UnverifiableStash:
+        def __init__(self):
+            self.calls = 0
+
+        def repository(self, project):
+            self.calls += 1
+            if self.calls == 1:
+                return GitRepository(exists=True, branch="main")
+            raise RuntimeError("post-stash listing exploded")
+
+        def stash(self, project, message):
+            pass
+
+        def fetch(self, project):
+            raise AssertionError("fetch must not run when the stash is unverifiable")
+
+        def apply_stash(self, project):
+            raise AssertionError("apply must not run when the stash is unverifiable")
+
+        def drop_stash(self, project):
+            raise AssertionError("drop must not run when the stash is unverifiable")
+
+    with pytest.raises(GitTransactionError) as excinfo:
+        GitTransactionRunner(git_service=UnverifiableStash()).run(
+            project, stash_required=True, fetch_required=True, pull_required=True
+        )
+
+    result = excinfo.value.result
+    assert result.success is False
+    assert result.stashed is True
+    assert result.stash_preserved is True
+    assert result.errors == ["stash verification failed: post-stash listing exploded"]
+
+
 # --- pull ---------------------------------------------------------------------
 
 
@@ -277,6 +415,9 @@ def test_runner_stash_failure_returns_typed_result(tmp_path: Path):
     project = make_repo(tmp_path)
 
     class ExplodingStashService:
+        def repository(self, project):
+            return GitRepository(exists=True, branch="main")
+
         def stash(self, project, message):
             raise RuntimeError("stash exploded")
 
@@ -310,8 +451,14 @@ def test_runner_conflict_enumeration_failure_does_not_mask_apply_error(tmp_path:
     project = make_repo(tmp_path)
 
     class FailingApplyAndConflicts:
+        def __init__(self):
+            self.stashes: list[str] = []
+
+        def repository(self, project):
+            return GitRepository(exists=True, branch="main", stashes=list(self.stashes))
+
         def stash(self, project, message):
-            pass
+            self.stashes.append(f"stash@{{0}}: On main: {message}")
 
         def fetch(self, project):
             pass

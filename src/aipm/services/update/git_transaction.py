@@ -13,6 +13,11 @@ class GitTransactionRunner:
 
     - The stash is dropped only after a successful apply; on any apply failure
       the stash is preserved and the exact conflicting files are reported.
+    - Only a stash this transaction actually created is ever applied or dropped.
+      ``git stash push`` exits zero and creates nothing when the tree is clean,
+      so the entry count is compared before and after: unless a new entry
+      appeared, no apply and no drop run and pre-existing stashes owned by the
+      operator are left untouched.
     - Operator changes are never discarded: no checkout/reset/clean runs, and a
       failed apply leaves the merge state for manual resolution.
     - Every failure raises ``GitTransactionError`` carrying the typed
@@ -22,6 +27,9 @@ class GitTransactionRunner:
 
     def __init__(self, git_service: GitService | None = None):
         self.git_service = git_service or GitService()
+
+    def _stash_count(self, project) -> int:
+        return len(self.git_service.repository(project).stashes)
 
     def run(
         self,
@@ -41,8 +49,25 @@ class GitTransactionRunner:
 
         if stash_required:
             try:
+                stashes_before = self._stash_count(project)
+            except Exception as exc:
+                result = GitTransactionResult(
+                    success=False,
+                    stashed=False,
+                    pulled=False,
+                    stash_applied=False,
+                    stash_preserved=False,
+                    conflicts=[],
+                    warnings=warnings,
+                    errors=[f"stash inspection failed: {exc}"],
+                )
+                raise GitTransactionError(
+                    "Git transaction refused to create a safety stash because the existing stash "
+                    f"entries could not be read; nothing was changed: {exc}",
+                    result,
+                ) from exc
+            try:
                 self.git_service.stash(project, "AIPM safety stash")
-                stashed = True
             except Exception as exc:
                 result = GitTransactionResult(
                     success=False,
@@ -55,6 +80,30 @@ class GitTransactionRunner:
                     errors=[f"stash failed: {exc}"],
                 )
                 raise GitTransactionError(f"Git transaction failed while creating the safety stash: {exc}", result) from exc
+            try:
+                stashed = self._stash_count(project) > stashes_before
+            except Exception as exc:
+                # The push may have created an entry; refuse to apply or drop
+                # anything we cannot identify and leave it for manual recovery.
+                result = GitTransactionResult(
+                    success=False,
+                    stashed=True,
+                    pulled=False,
+                    stash_applied=False,
+                    stash_preserved=True,
+                    conflicts=[],
+                    warnings=warnings,
+                    errors=[f"stash verification failed: {exc}"],
+                )
+                raise GitTransactionError(
+                    "Git transaction could not verify the safety stash it created; any stashed "
+                    f"local changes were preserved for manual recovery: {exc}",
+                    result,
+                ) from exc
+            if not stashed:
+                warnings.append(
+                    "no local changes were stashed; existing stash entries were left untouched"
+                )
 
         try:
             if fetch_required:
