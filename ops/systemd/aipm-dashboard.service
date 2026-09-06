@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=aipm
 Group=aipm
+SupplementaryGroups=docker
 WorkingDirectory=/home/ubuntu/aipm
 Environment=PYTHONUNBUFFERED=1
 Environment=AIPM_CONFIG=/home/ubuntu/aipm/config/aipm.yaml
