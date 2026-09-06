@@ -1,6 +1,6 @@
 # AIPM Mission Control Status and Roadmap
 
-> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked. The preservation stash this notice previously referenced no longer exists; see the stash-loss reconciliation in `docs/CURRENT_STATUS.md`.
 
 
 **Status date:** 2026-08-28
@@ -93,7 +93,7 @@ The authoritative implementation sequence is defined in [`MC-6_IMPLEMENTATION_PL
 
 **Status: PASS_EXISTING.** MC-6.9 conformance is accepted using the existing bounded evidence/history implementation. The design note remains preserved separately in the stash and is not part of current main. No new event/history database, schema, worker, or notification path is permitted.
 
-The untracked `docs/MC-6.9_DESIGN.md` remains preserved in `stash@{0}` as a separate design artifact. It must not be applied or committed without separate authorization.
+The untracked `docs/MC-6.9_DESIGN.md` was held only in the preservation stash and was never committed. That stash no longer exists and the note is unrecoverable; see the stash-loss reconciliation in [`CURRENT_STATUS.md`](CURRENT_STATUS.md).
 
 ### MC-6.10 — Settings posture and notification safety
 
@@ -249,7 +249,7 @@ NOTIFICATIONS=DISABLED
 
 ## Current-state reconciliation — 2026-08-28
 
-The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` remains intentionally untouched and contains the separate incident-reopen workstream plus `docs/MC-6.9_DESIGN.md`; those items are not part of published current main.
+The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` described here no longer exists: its incident-reopen workstream was later committed and is published in main, while the untracked `docs/MC-6.9_DESIGN.md` was lost with the stash and is unrecoverable. See the stash-loss reconciliation in `docs/CURRENT_STATUS.md`.
 
 The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
 

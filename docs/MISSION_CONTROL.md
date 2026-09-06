@@ -1,6 +1,6 @@
 # AIPM Mission Control
 
-> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked, and the incident-reopen workstream remains preserved separately in `stash@{0}`.
+> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked. The preservation stash this notice previously referenced no longer exists; see the stash-loss reconciliation in `docs/CURRENT_STATUS.md`.
 
 
 Mission Control is the Handbook 2.0 capability of AIPM. MC-1.5 keeps the current interface and JSON contract while moving infrastructure inspection into typed, read-only AIPM telemetry services.
@@ -90,7 +90,9 @@ Cloudflared container
     -> AIPM dashboard
 ```
 
-The public hostname is `vpanel.03092017.xyz`. The Cloudflared origin remains the bridge-side endpoint `http://172.20.0.1:8788`; nginx forwards only to the loopback dashboard. Do not document or configure the containerized tunnel to use `http://127.0.0.1:8787`, because that targets the container’s own loopback namespace rather than the host dashboard.
+The public hostname is `vpanel.03092017.xyz`. The Cloudflared origin remains the bridge-side endpoint on port `8788`; nginx forwards only to the loopback dashboard (nginx currently binds `0.0.0.0:8788` on the host, so the listener is also reachable on the host's other interfaces). Do not document or configure the containerized tunnel to use `http://127.0.0.1:8787`, because that targets the container's own loopback namespace rather than the host dashboard.
+
+Cloudflare Access is the selected authenticator for this hostname but is **intentionally disabled during development**, so the path above currently carries unauthenticated public traffic to the read-only surfaces. That is an accepted development configuration and not a production-safe one: enable Cloudflare Access or an equivalent authenticated perimeter before treating the hostname as production. See the public exposure contract in [`CURRENT_STATUS.md`](CURRENT_STATUS.md).
 
 Do not put a Cloudflare API token in the AIPM repository or in the browser. Cloudflared and Docker remain infrastructure-owned and are not modified by Mission Control advisor work.
 
@@ -121,7 +123,7 @@ ReadWritePaths=/var/lib/aipm
 WantedBy=multi-user.target
 ```
 
-The dashboard needs read access to the Docker socket to inspect containers. That permission is powerful. The documented public hostname is protected by the confirmed Cloudflare Access edge boundary; retain a dedicated host policy and do not expose the dashboard port directly to the internet.
+Container inspection needs read access to the Docker socket. That permission is powerful and is granted per service rather than per identity: `aipm-telemetry.service` carries `SupplementaryGroups=docker` and is the only unit that samples Docker, while `aipm-dashboard.service` and `aipm-events.service` deliberately omit it. The `aipm` login identity must therefore **not** be an `/etc/group` member of `docker`, `sudo`, `admin`, `root`, or `wheel` — `ops/setup-aipm-identity.sh` fails closed if it is. Cloudflare Access is the selected edge authentication boundary for the documented public hostname but is **not currently enabled** in the development deployment (see the exposure contract in [`CURRENT_STATUS.md`](CURRENT_STATUS.md)); retain a dedicated host policy, never bind the dashboard port to a public interface, and enable an authenticated perimeter before any production public exposure.
 
 ## Verification checklist
 
@@ -378,7 +380,7 @@ Event and incident retention is independent from high-frequency telemetry retent
 
 ## MC-4.5 production hardening
 
-MC-4.5 hardens notification retries, suppression windows, delivery claims, schema integrity, retention, UNKNOWN reconciliation, metrics, and startup validation. Review [`MC-4.5_PRODUCTION_RUNBOOK.md`](MC-4.5_PRODUCTION_RUNBOOK.md) before enabling notifications. The dashboard remains loopback-only by default; the documented public hostname is protected by the confirmed Cloudflare Access edge boundary. No production Cloudflare or systemd mutation is performed by this milestone.
+MC-4.5 hardens notification retries, suppression windows, delivery claims, schema integrity, retention, UNKNOWN reconciliation, metrics, and startup validation. Review [`MC-4.5_PRODUCTION_RUNBOOK.md`](MC-4.5_PRODUCTION_RUNBOOK.md) before enabling notifications. The dashboard remains loopback-only by default; Cloudflare Access is the selected edge boundary for the documented public hostname but is currently disabled for development, so that hostname is presently unauthenticated (see the public exposure contract in [`CURRENT_STATUS.md`](CURRENT_STATUS.md)). No production Cloudflare or systemd mutation is performed by this milestone.
 
 
 ## MC-2.1 Telemetry Performance & Sampling
@@ -398,7 +400,7 @@ MC-6.13 Phase 4C remains the explicit fixture-driven presentation capability on 
 
 ### Current operational gates
 
-Repository advisor work does not authorize or imply target-VPS application deployment. Runtime validation and any service rollout remain separate operational gates. The current dashboard ingress architecture is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`; Cloudflare Access is the confirmed edge authentication boundary for that public hostname. AIPM relies on the private edge protection and does not verify Cloudflare JWTs or identity headers. The dashboard remains loopback-bound; Cloudflared/Docker configuration, credentials, live SQLite, and Systemd runtime changes are outside the MC-6.13 repository scope.
+Repository advisor work does not authorize or imply target-VPS application deployment. Runtime validation and any service rollout remain separate operational gates. The current dashboard ingress architecture is Cloudflared container → `172.20.0.1:8788` → host nginx reverse proxy → `127.0.0.1:8787`, serving `vpanel.03092017.xyz`; Cloudflare Access is the *selected* edge authentication boundary for that public hostname and is currently disabled for development, so the hostname is presently unauthenticated (see the public exposure contract in [`CURRENT_STATUS.md`](CURRENT_STATUS.md)). AIPM verifies no Cloudflare JWTs or identity headers in either mode, so the perimeter is the only authentication boundary and must be enabled before production public exposure. The dashboard remains loopback-bound; Cloudflared/Docker configuration, credentials, live SQLite, and Systemd runtime changes are outside the MC-6.13 repository scope.
 
 ### MC-6.13 Phase 4C.1 production completeness capture
 
@@ -445,7 +447,7 @@ The complete current ledger is in [`MC-6_STATUS.md`](MC-6_STATUS.md), the milest
 
 ## Current-state reconciliation — 2026-08-28
 
-The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` remains intentionally untouched and contains the separate incident-reopen workstream plus `docs/MC-6.9_DESIGN.md`; those items are not part of published current main.
+The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md). The repository checkpoint is `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`, and local `HEAD`, `origin/main`, and remote `main` are equal with ahead/behind `0/0`, a clean worktree, and no staged files. The preservation stash `stash@{0}` described here no longer exists: its incident-reopen workstream was later committed and is published in main, while the untracked `docs/MC-6.9_DESIGN.md` was lost with the stash and is unrecoverable. See the stash-loss reconciliation in `docs/CURRENT_STATUS.md`.
 
 The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
 
