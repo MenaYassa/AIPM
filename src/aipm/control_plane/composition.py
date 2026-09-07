@@ -162,6 +162,7 @@ def compose_operator_service(
     with_kill_switch: bool = True,
     run_sweep: bool = True,
     update_engine: object | None = None,
+    executor_ipc_client: object | None = None,
 ) -> dict:
     """Compose the canonical OwnerControlPlaneService on durable stores.
 
@@ -226,7 +227,16 @@ def compose_operator_service(
         from aipm.composition import compose_update_runtime, update_plan_digest_port
 
         current_plan_digest = update_plan_digest_port(update_engine)
-        update_runtime = compose_update_runtime(update_engine)
+        if executor_ipc_client is not None:
+            # C6.4: with an executor IPC client, the post-verification
+            # update runtime crosses to the executor process instead of
+            # driving the engine in-process (no parallel authority: same
+            # engine-side contract, sent over the existing channel).
+            from aipm.composition import compose_ipc_update_runtime
+
+            update_runtime = compose_ipc_update_runtime(executor_ipc_client)
+        else:
+            update_runtime = compose_update_runtime(update_engine)
     else:
         current_plan_digest = project_plan_digest_port(plans)
         update_runtime = None
@@ -243,6 +253,7 @@ def compose_operator_service(
         kill_switches=kill_switches,
         clock=clock,
         execution_mode="ipc",
+        executor_ipc_client=executor_ipc_client,
         current_plan_digest=current_plan_digest,
         update_runtime=update_runtime,
     )
@@ -298,11 +309,16 @@ def serve_operator_transport(
     clock: Callable[[], object] | None = None,
     allowed_targets: frozenset[str] | set[str] | None = None,
     with_kill_switch: bool = True,
+    executor_ipc_client: object | None = None,
 ) -> dict:
     """Compose, sweep, then serve the operator transport on loopback only.
 
     The sweep runs BEFORE the listener binds; any failure in composition or
     sweep propagates and the process exits without ever accepting traffic.
+    ``executor_ipc_client`` is optional and fail-closed: without it the
+    composed service runs the canonical execution path but refuses any
+    action whose post-verification runtime would be needed (the pre-flight
+    composition check in the service fires before any state change).
     """
 
     from aipm.control_plane.transport import run_operator_transport
@@ -314,6 +330,7 @@ def serve_operator_transport(
         allowed_targets=allowed_targets,
         with_kill_switch=with_kill_switch,
         run_sweep=True,
+        executor_ipc_client=executor_ipc_client,
     )
     raw_port = port if port is not None else os.environ.get(OPERATOR_TRANSPORT_PORT_ENV, DEFAULT_OPERATOR_TRANSPORT_PORT)
     resolved_port = _bounded_port(raw_port)

@@ -283,54 +283,6 @@ class OwnerControlPlaneService:
         self._register_allowed_action(decision, request, principal, now=now, extra_evidence_drafts=extra_evidence_drafts, lifecycle_refs=lifecycle_refs)
         return decision
 
-    def _execute_via_ipc(self, session_id: str, action_id: str, action, lease, decision, confirmation_id, snapshot, kill_switch_epoch, *, now=None):
-        """Route execution through the executor service via Unix-domain IPC.
-
-        This is the PRODUCTION path. There is no in-process fallback.
-        If the executor service is unavailable, the execution fails with a
-        bounded error and the action remains in its current state.
-        """
-        if self._executor_ipc_client is None:
-            raise ControlPlaneError(PlanningErrorCode.SESSION_INVALID, "Executor IPC client is not configured")
-        contract = ExecutionContract(
-            contract_version=EXECUTION_CONTRACT_VERSION,
-            action_id=action_id,
-            action_version=action.version,
-            operation=ExecutorCapability.UPDATE_PROJECT_PLAN,
-            target_id=action.scope.target_id,
-            environment=action.scope.environment,
-            plan_id=action.plan_id,
-            expected_plan_revision=action.plan_revision,
-            expected_plan_digest=decision.action_identity.target_digest,
-            mutation_fields=tuple(decision.request.mutation_metadata),
-            snapshot_id=snapshot.snapshot_id,
-            decision_id=decision.decision_id,
-            confirmation_id=confirmation_id,
-            policy_version=action.scope.policy_version,
-            verification_version=_verification_version_value(),
-            kill_switch_epoch=kill_switch_epoch,
-            lease_id=lease.lease_id,
-            fencing_token=lease.fencing_token,
-            expires_at=action.expires_at,
-            capability_version="1",
-        )
-        from aipm.control_plane.executor_ipc import ExecutionRequest
-        request = ExecutionRequest(
-            action_id=contract.action_id,
-            capability_id=contract.operation.value,
-            target_id=contract.target_id,
-            contract_digest=contract.digest(),
-            lease_id=contract.lease_id,
-            fencing_token=contract.fencing_token,
-        )
-        response = self._executor_ipc_client.send(request)
-        return {
-            "action_id": response.action_id,
-            "outcome": response.outcome,
-            "provider_code": response.provider_code,
-            "evidence_reference": response.evidence_reference,
-        }
-
     def _read_current_plan(self, target_id: str):
         try:
             return self._plans.read(target_id)
@@ -724,8 +676,12 @@ class OwnerControlPlaneService:
         if lease is None:
             raise ControlPlaneError(PlanningErrorCode.STATE_CONFLICT, "Action has no active lease")
         kill_switch_epoch = self._kill_switches.switch(action.scope.environment).epoch if self._kill_switches is not None else 1
-        if self._execution_mode == "ipc":
-            return self._execute_via_ipc(session_id, action_id, action, lease, decision, confirmation_id, snapshot, kill_switch_epoch, now=now)
+        if self._execution_mode == "ipc" and self._executor_ipc_client is None:
+            # Fail closed BEFORE the confirmation is consumed or the plan is
+            # mutated: an ipc-mode composition without the executor IPC
+            # channel has no executor for the post-verification engine
+            # execution (no silent in-process fallback exists in any mode).
+            raise ControlPlaneError(PlanningErrorCode.SESSION_INVALID, "Executor IPC client is not configured")
         contract = ExecutionContract(
             contract_version=EXECUTION_CONTRACT_VERSION,
             action_id=action.action_id,
@@ -783,7 +739,7 @@ class OwnerControlPlaneService:
         decision = self._actions.get_decision(action.decision_id) if action.decision_id else None
         if decision is None or decision.request is None or decision.action_identity is None:
             raise ControlPlaneError(PlanningErrorCode.STORAGE_CORRUPT, "Action has no durable decision binding")
-        lease = self._actions.active_lease(action_id, now=moment) or self._last_lease(action_id)
+        lease = self._actions.active_lease(action_id, now=moment) or getattr(self._actions, "last_lease", lambda _aid: None)(action_id)
         if lease is None:
             raise ControlPlaneError(PlanningErrorCode.STATE_CONFLICT, "Action has no lease to reconcile against")
         kill_switch_epoch = self._kill_switches.switch(action.scope.environment).epoch if self._kill_switches is not None else 1
@@ -913,12 +869,28 @@ class OwnerControlPlaneService:
         confirmation_id = self._confirmation_id_for(action.action_id)
         if confirmation_id is None:
             raise ControlPlaneError(PlanningErrorCode.CONFIRMATION_MISMATCH, "Action has no confirmation binding")
+        evidence = self._actions.get_contract_evidence(action_id=action.action_id)
+        if evidence is None or not evidence.get("contract_digest"):
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Action has no durable contract evidence")
+        lease = None
+        lease_getter = getattr(self._actions, "active_lease", None)
+        if lease_getter is not None:
+            lease = lease_getter(action.action_id)
+        if lease is None:
+            last_getter = getattr(self._actions, "last_lease", None)
+            lease = last_getter(action.action_id) if last_getter else None
+        if lease is None:
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Action has no durable lease evidence")
         if self._update_runtime is None:
             raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Update runtime is not composed")
         return UpdateExecutionBinding(
             project_name=action.scope.target_id,
             plan_digest=plan_digest,
             confirmation_id=confirmation_id,
+            action_id=action.action_id,
+            contract_digest=evidence["contract_digest"],
+            lease_id=lease.lease_id,
+            fencing_token=lease.fencing_token,
         )
 
     def _assert_binding_digest(self, decision, presented_digest: str) -> None:
@@ -1074,10 +1046,6 @@ class OwnerControlPlaneService:
             "outcome": result.outcome.value if hasattr(result.outcome, "value") else str(result.outcome),
             "lifecycle_state": action.state.value,
         }
-
-    def _last_lease(self, action_id: str):
-        getter = getattr(self._actions, "last_lease", None)
-        return getter(action_id) if getter else None
 
     # ------------------------------------------------------------------
     # Kill switch operator verbs (staging only; production is permanent)

@@ -37,6 +37,14 @@ MAX_RESPONSE_SIZE = 4096
 PROTOCOL_VERSION = "mc612-executor-ipc-v1"
 CALLER_UID = None  # set at service construction; None = accept any uid in allowed set
 
+# C6.4 capability identifiers carried on the wire. The legacy systemd-restart
+# capability keeps its historical id for deployment compatibility; the update
+# capability requires the engine binding fields below.
+CAPABILITY_LEGACY_RESTART = "update_project_plan"
+CAPABILITY_EXECUTE_UPDATE_PLAN = "execute_update_plan"
+
+_HEX = set("0123456789abcdef")
+
 
 class ExecutorIPCError(ValueError):
     """Raised when an IPC request fails structural validation."""
@@ -44,7 +52,16 @@ class ExecutorIPCError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ExecutionRequest:
-    """Bounded execution request from the control plane."""
+    """Bounded execution request from the control plane.
+
+    C6.4: ``plan_digest`` and ``confirmation_id`` are optional engine
+    binding fields, REQUIRED together when ``capability_id`` is
+    ``execute_update_plan`` and absent-or-ignored for the legacy restart
+    capability. They name the canonical ``UpdatePlanIdentity`` digest of
+    the exact plan the operator approved and the consumed confirmation
+    reference; no commands, argv, paths, env, or shell content is ever
+    transmitted.
+    """
 
     action_id: str
     capability_id: str
@@ -52,6 +69,8 @@ class ExecutionRequest:
     contract_digest: str
     lease_id: str
     fencing_token: int
+    plan_digest: str | None = None
+    confirmation_id: str | None = None
 
     @classmethod
     def from_json(cls, data: bytes) -> "ExecutionRequest":
@@ -67,24 +86,48 @@ class ExecutionRequest:
             raise ExecutorIPCError(f"Missing required fields: {missing}")
         if len(payload) > 16:
             raise ExecutorIPCError("Too many request fields")
+        plan_digest = payload.get("plan_digest")
+        confirmation_id = payload.get("confirmation_id")
+        capability_id = payload["capability_id"]
+        if capability_id == CAPABILITY_EXECUTE_UPDATE_PLAN:
+            if not isinstance(plan_digest, str) or not plan_digest:
+                raise ExecutorIPCError("execute_update_plan requires plan_digest")
+            if not isinstance(confirmation_id, str) or not confirmation_id:
+                raise ExecutorIPCError("execute_update_plan requires confirmation_id")
+        for name, value, size in (
+            ("plan_digest", plan_digest, 64),
+            ("confirmation_id", confirmation_id, 32),
+        ):
+            if value is None:
+                continue
+            if not isinstance(value, str) or len(value) != size or not set(value) <= _HEX:
+                raise ExecutorIPCError(f"Invalid {name}")
         return cls(
             action_id=payload["action_id"],
-            capability_id=payload["capability_id"],
+            capability_id=capability_id,
             target_id=payload["target_id"],
             contract_digest=payload["contract_digest"],
             lease_id=payload["lease_id"],
             fencing_token=payload["fencing_token"],
+            plan_digest=plan_digest if isinstance(plan_digest, str) else None,
+            confirmation_id=confirmation_id if isinstance(confirmation_id, str) else None,
         )
 
     def to_json(self) -> bytes:
-        return json.dumps({
+        payload = {
             "action_id": self.action_id,
             "capability_id": self.capability_id,
             "target_id": self.target_id,
             "contract_digest": self.contract_digest,
             "lease_id": self.lease_id,
             "fencing_token": self.fencing_token,
-        }, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        }
+        # Legacy frames stay byte-compatible with the deployed executor.
+        if self.plan_digest is not None:
+            payload["plan_digest"] = self.plan_digest
+        if self.confirmation_id is not None:
+            payload["confirmation_id"] = self.confirmation_id
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +326,15 @@ class ExecutorIPCClient:
         object.__setattr__(self, name, value)
 
     def send(self, request: ExecutionRequest, *, timeout: float = 30.0) -> ExecutionResponse:
+        """Send one bounded request; transport failure maps to unknown_outcome.
+
+        The request may have crossed the executor's mutation boundary before
+        the failure, so a timeout, connection refusal, reset, or unreadable
+        reply is classified as ``unknown_outcome`` (receipt evidence decides),
+        never as ``failed``. Structural validation errors raised by
+        ``to_json``'s frame encoding bounds still propagate.
+        """
+
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         try:
@@ -298,5 +350,9 @@ class ExecutorIPCClient:
             )
         except socket.timeout:
             return ExecutionResponse(outcome="unknown_outcome", provider_code="timeout", action_id=request.action_id, evidence_reference="")
+        except (OSError, ExecutorIPCError, json.JSONDecodeError, KeyError, TypeError):
+            # Connection refused/reset, frame cap breach on the reply, or a
+            # malformed reply: the mutation may already have happened.
+            return ExecutionResponse(outcome="unknown_outcome", provider_code="transport_failure", action_id=request.action_id, evidence_reference="")
         finally:
             sock.close()

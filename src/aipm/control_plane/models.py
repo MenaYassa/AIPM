@@ -338,16 +338,32 @@ class UpdateExecutionBinding:
     ``UpdatePlanIdentity`` digest space) recovered from the durable decision
     metadata pair — never the control-plane action digest, which is a
     different digest space.
+
+    C6.4: the binding additionally carries the durable execution evidence
+    (action identity, contract digest, lease identity, fencing token) so
+    the IPC-backed update runtime can key the executor's exactly-once
+    mutation receipt and bind the engine contract without a second
+    authority. The evidence is recovered from the same trusted durable
+    state; no field is client input.
     """
 
     project_name: str
     plan_digest: str
     confirmation_id: str
+    action_id: str
+    contract_digest: str
+    lease_id: str
+    fencing_token: int
 
     def __post_init__(self) -> None:
         _bounded_string(self.project_name, name="project identity", maximum=MAX_TARGET_ID, pattern=_SAFE_ID)
         _bounded_string(self.plan_digest, name="update plan digest", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
         _bounded_string(self.confirmation_id, name="confirmation reference", maximum=32, pattern=re.compile(r"^[0-9a-f]{32}$"))
+        _bounded_string(self.action_id, name="action identity", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
+        _bounded_string(self.contract_digest, name="contract digest", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
+        _bounded_string(self.lease_id, name="lease identity", maximum=32, pattern=re.compile(r"^[0-9a-f]{32}$"))
+        if not isinstance(self.fencing_token, int) or isinstance(self.fencing_token, bool) or self.fencing_token < 1:
+            raise ValueError("Invalid execution fencing token")
 
 
 # MC-6.12 Stage 2 non-executing lifecycle foundation.

@@ -128,6 +128,9 @@ def run(
     unit_name: str = typer.Option("aipm-telemetry.service", "--unit", help="The canonical systemd unit name."),
     unit_id: str = typer.Option("aipm-telemetry", "--unit-id", help="The unit identifier for the allow-list."),
     target_id: str = typer.Option("aipm-telemetry", "--target-id", help="The target identifier."),
+    allowed_caller_uids: str = typer.Option(..., "--allowed-caller-uids", help="Comma-separated UIDs allowed to connect (SO_PEERCRED). Required; refuse to start unset."),
+    enable_update_plan: bool = typer.Option(False, "--enable-update-plan", help="Also serve the execute_update_plan capability (engine-backed). Without it the capability is refused."),
+    update_audit_dir: str = typer.Option(None, "--update-audit-dir", help="Engine audit directory for execute_update_plan (default: <receipt-db dir>/audit)."),
 ):
     """Run the standalone executor service.
 
@@ -135,16 +138,33 @@ def run(
     control plane. The executor does NOT require access to the
     control-plane database. It validates requests structurally and
     performs the exact authorized mutation.
+
+    Fail-closed startup: an explicit caller UID allow-list is REQUIRED
+    (a wildcard listen would accept any local uid across the privilege
+    boundary). The update capability is opt-in and refused unless
+    explicitly enabled with a writable engine audit directory.
     """
     import selectors
     import signal
     import threading
     from datetime import datetime, timedelta, timezone
 
-    from aipm.control_plane.executor_ipc import ExecutorIPCServer
+    from aipm.control_plane.executor_ipc import (
+        CAPABILITY_EXECUTE_UPDATE_PLAN,
+        ExecutorIPCServer,
+    )
     from aipm.control_plane.mutation_receipt import MutationReceiptStore
     from aipm.control_plane.systemd_provider import SystemdRestartPolicy, SystemdRestartProvider
     from aipm.control_plane.standalone_executor import StandaloneSystemdExecutor, ExecutionEnvelope
+
+    try:
+        uids = {int(item.strip()) for item in allowed_caller_uids.split(",") if item.strip()}
+    except ValueError as exc:
+        typer.echo("Invalid --allowed-caller-uids: expected comma-separated integers", err=True)
+        raise typer.Exit(code=2) from exc
+    if not uids or any(uid < 0 for uid in uids):
+        typer.echo("Invalid --allowed-caller-uids: at least one non-negative uid is required", err=True)
+        raise typer.Exit(code=2)
 
     policy = SystemdRestartPolicy(
         environment="staging",
@@ -156,8 +176,39 @@ def run(
     provider = SystemdRestartProvider(policies=[policy])
     receipts = MutationReceiptStore(receipt_db)
 
+    update_handler = None
+    if enable_update_plan:
+        from pathlib import Path as _Path
+
+        from aipm.composition.executor_update import compose_executor_update_handler
+        from aipm.services.update.engine import UpdateEngine
+
+        audit_dir = update_audit_dir
+        if audit_dir is None:
+            audit_dir = str(_Path(receipt_db).resolve().parent / "audit")
+        audit_path = _Path(audit_dir)
+        # Writability probe BEFORE binding the listener: the engine's audit
+        # service must be able to persist evidence there, or startup refuses.
+        # No permission is widened to make it pass.
+        try:
+            audit_path.mkdir(parents=True, exist_ok=True)
+            probe = audit_path / ".aipm-audit-probe"
+            probe.write_text("probe", encoding="utf-8")
+            probe.unlink()
+        except OSError as exc:
+            typer.echo(f"Update audit directory is not writable: {audit_dir} ({exc})", err=True)
+            raise typer.Exit(code=2) from exc
+        engine = UpdateEngine(audit_service=_make_audit_service(audit_dir))
+        update_handler = compose_executor_update_handler(engine=engine, receipts=receipts)
+
     def handler(request):
-        """Bridge IPC request to the standalone executor."""
+        """Bridge IPC requests to the capability-backed executors."""
+        if request.capability_id == CAPABILITY_EXECUTE_UPDATE_PLAN:
+            if update_handler is None:
+                from aipm.control_plane.executor_ipc import ExecutionResponse
+                return ExecutionResponse(outcome="refused", provider_code="capability_not_enabled", action_id=request.action_id, evidence_reference="")
+            return update_handler(request)
+        # Legacy systemd-restart capability (default; deployment compatible).
         envelope = ExecutionEnvelope(
             protocol_version="mc612-execution-envelope-v1",
             action_id=request.action_id,
@@ -184,7 +235,7 @@ def run(
             evidence_reference=result.evidence_reference,
         )
 
-    server = ExecutorIPCServer(socket_path=socket_path, handler=handler)
+    server = ExecutorIPCServer(socket_path=socket_path, handler=handler, allowed_caller_uids=uids)
     stop_event = threading.Event()
 
     def _signal_handler(signum, frame):
@@ -194,12 +245,18 @@ def run(
     signal.signal(signal.SIGINT, _signal_handler)
 
     server.start()
-    typer.echo(f"Executor service listening on {socket_path}", err=True)
+    typer.echo(f"Executor service listening on {socket_path} (caller uids: {sorted(uids)})", err=True)
     try:
         server.serve_forever(stop_event=stop_event)
     finally:
         server.stop()
         typer.echo("Executor service stopped.", err=True)
+
+
+def _make_audit_service(audit_dir: str):
+    from aipm.services.update.audit import AuditService
+
+    return AuditService(audit_dir=audit_dir)
 
 
 

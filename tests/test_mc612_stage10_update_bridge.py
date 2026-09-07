@@ -116,7 +116,10 @@ def test_cli_update_path_is_the_only_legacy_entry():
     for path in _Path("src/aipm/capabilities/dashboard").glob("*.py"):
         assert "UpdateEngine" not in path.read_text(encoding="utf-8"), path
     for path in _Path("src/aipm/control_plane").rglob("*.py"):
-        assert "execute_update" not in path.read_text(encoding="utf-8"), path
+        source = path.read_text(encoding="utf-8")
+        # The C6.4 wire capability is a name, not an invocation: ban the
+        # call syntax (".execute_update("), not the capability constant.
+        assert ".execute_update(" not in source, path
 
 
 # ---------------------------------------------------------------------------

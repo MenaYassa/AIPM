@@ -85,49 +85,13 @@ def build_service(tmp_path: Path, *, clock=None, execution_mode="test", executor
 
 
 def test_ipc_mode_does_not_use_in_process_executor(tmp_path: Path):
-    """When execution_mode=ipc, the service routes through IPC — no in-process fallback."""
+    """C6.4 contract: execution_mode=ipc runs the SAME canonical gated
+    execution (in-process, lease/gate/confirmation consumed exactly once)
+    — the executor IPC channel is only the post-verification update
+    runtime, so no client is invoked at execute_action time and no
+    in-process fallback / alternate path exists to fall back FROM."""
 
-    class _RefusingIPC:
-        """IPC client that records calls and refuses (executor not running)."""
-
-        def __init__(self):
-            self.calls = []
-
-        def send(self, request):
-            self.calls.append(request)
-            raise ConnectionRefusedError("Executor service not running")
-
-    ipc = _RefusingIPC()
-    service, db, ledger, plans, clock = build_service(tmp_path, execution_mode="ipc", executor_ipc_client=ipc)
-    session = service.login(SECRET)
-    decision = service.authorize(session.session_id, request())
-    identity = decision.action_identity
-    service.confirm(session.session_id, decision.decision_id, now=NOW + timedelta(minutes=1))
-    service.capture_snapshot(session.session_id, identity.action_id, now=NOW + timedelta(minutes=2))
-
-    with pytest.raises((ConnectionRefusedError, ControlPlaneError)):
-        service.execute_action(session.session_id, identity.action_id, now=NOW + timedelta(minutes=3))
-    # The plan was NOT mutated — no in-process fallback
-    assert plans.read("project-demo").revision == 1
-    # The IPC client was called
-    assert len(ipc.calls) == 1
-
-
-def test_ipc_mode_success_route(tmp_path: Path):
-    """When IPC succeeds, the action lifecycle is properly advanced."""
-
-    class _SuccessIPC:
-        def __init__(self):
-            self.calls = []
-
-        def send(self, request):
-            self.calls.append(request)
-            from aipm.control_plane.executor_ipc import ExecutionResponse
-            return ExecutionResponse(
-                outcome="verification_succeeded", provider_code="restart_ok",
-                action_id=request.action_id, evidence_reference="test")
-
-    ipc = _SuccessIPC()
+    ipc = _RecordingIPC()
     service, db, ledger, plans, clock = build_service(tmp_path, execution_mode="ipc", executor_ipc_client=ipc)
     session = service.login(SECRET)
     decision = service.authorize(session.session_id, request())
@@ -136,10 +100,66 @@ def test_ipc_mode_success_route(tmp_path: Path):
     service.capture_snapshot(session.session_id, identity.action_id, now=NOW + timedelta(minutes=2))
 
     result = service.execute_action(session.session_id, identity.action_id, now=NOW + timedelta(minutes=3))
-    assert result["outcome"] == "verification_succeeded"
-    assert len(ipc.calls) == 1
-    # The plan is NOT mutated by the IPC route (the executor does the mutation)
+    # The plan WAS mutated by the canonical executor (same as test mode).
+    assert plans.read("project-demo").revision == 2
+    assert result.outcome.value == "verification_succeeded"
+    # The IPC client is never a transport for execute_action.
+    assert ipc.calls == []
+
+
+def test_ipc_mode_without_executor_client_fails_closed(tmp_path: Path):
+    """execution_mode=ipc with no executor IPC client refuses BEFORE the
+    confirmation is consumed or the plan is mutated (fail-closed pre-flight
+    composition check; no silent direct-execution fallback)."""
+
+    service, db, ledger, plans, clock = build_service(tmp_path, execution_mode="ipc", executor_ipc_client=None)
+    session = service.login(SECRET)
+    decision = service.authorize(session.session_id, request())
+    identity = decision.action_identity
+    service.confirm(session.session_id, decision.decision_id, now=NOW + timedelta(minutes=1))
+    service.capture_snapshot(session.session_id, identity.action_id, now=NOW + timedelta(minutes=2))
+
+    with pytest.raises(ControlPlaneError, match="Executor IPC client is not configured"):
+        service.execute_action(session.session_id, identity.action_id, now=NOW + timedelta(minutes=3))
+    # Nothing ran: plan unchanged, confirmation untouched.
     assert plans.read("project-demo").revision == 1
+    confirmation = next(
+        binding for binding in service._confirmations.store.values()
+        if binding.action_id == identity.action_id
+    )
+    assert confirmation.state.value == "confirmed"
+
+
+class _RecordingIPC:
+    """IPC client stub that records send() calls and never gets one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def send(self, request):
+        self.calls.append(request)
+        raise AssertionError("execute_action must not send over IPC")
+
+
+def test_ipc_mode_success_route(tmp_path: Path):
+    """C6.4: there is no mid-execution IPC send in any mode; the canonical
+    in-process executor mutates the plan and verifies it. The executor IPC
+    channel is exercised post-verification by the composed update runtime
+    (covered by the C6.4 composition tests)."""
+
+    ipc = _RecordingIPC()
+    service, db, ledger, plans, clock = build_service(tmp_path, execution_mode="ipc", executor_ipc_client=ipc)
+    session = service.login(SECRET)
+    decision = service.authorize(session.session_id, request())
+    identity = decision.action_identity
+    service.confirm(session.session_id, decision.decision_id, now=NOW + timedelta(minutes=1))
+    service.capture_snapshot(session.session_id, identity.action_id, now=NOW + timedelta(minutes=2))
+
+    result = service.execute_action(session.session_id, identity.action_id, now=NOW + timedelta(minutes=3))
+    assert result.outcome.value == "verification_succeeded"
+    assert len(ipc.calls) == 0
+    # The canonical executor mutated the plan (the old IPC route did not).
+    assert plans.read("project-demo").revision == 2
 
 
 def test_test_mode_uses_in_process_executor(tmp_path: Path):
@@ -298,8 +318,12 @@ def test_production_is_denied_at_every_boundary(tmp_path: Path):
 
 def test_service_has_no_hidden_in_process_fallback():
     source = Path("src/aipm/control_plane/service.py").read_text(encoding="utf-8")
-    assert "_execute_via_ipc" in source
+    # C6.4: the mid-execution IPC send path is GONE; execution_mode still
+    # selects the fail-closed posture.
+    assert "_execute_via_ipc" not in source
     assert 'execution_mode == "ipc"' in source
+    # The executor IPC client must never be sent from the execution path.
+    assert "self._executor_ipc_client.send" not in source
     # No fallback that silently switches to in-process execution when IPC fails
     assert "fallback" not in source.lower() or "no fallback" in source.lower() or "no in-process fallback" in source.lower()
 

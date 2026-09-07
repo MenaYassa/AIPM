@@ -843,6 +843,28 @@ class SQLiteActionRepository:
 
         return SQLiteLeaseRepository(self._db).get(row["lease_id"])
 
+    def last_lease(self, action_id: str):
+        """Most recent durable lease for an action, released or granted.
+
+        C6.4 evidence source: the canonical executor releases the lease at
+        the terminal outcome, so post-VERIFIED_SUCCESS composition (the
+        IPC-backed update runtime) reads the durable lease identity from
+        the persisted row (highest fencing token). The row remains after
+        release; this is a read-only recovery of trusted durable state,
+        not a grant. No schema change is involved.
+        """
+
+        row = self._db.connection.execute(
+            "SELECT lease_id FROM execution_leases WHERE action_id = ?"
+            " ORDER BY fencing_token DESC LIMIT 1",
+            (action_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        from aipm.control_plane.storage.sqlite_store import SQLiteLeaseRepository
+
+        return SQLiteLeaseRepository(self._db).get(row["lease_id"])
+
     def acquire_lease(self, action_id: str, expected_version: int, *, now, audit_drafts=()):
         """Grant the one active lease for a snapshot-captured action.
 
