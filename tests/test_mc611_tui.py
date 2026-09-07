@@ -134,7 +134,7 @@ def console_buffer(width=100):
 
 
 def test_cli_registers_observation_only_tui_group():
-    runner = CliRunner()
+    runner = CliRunner(env={"_TYPER_FORCE_DISABLE_TERMINAL": "1"})
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "tui" in result.stdout
