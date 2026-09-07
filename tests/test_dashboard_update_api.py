@@ -133,7 +133,12 @@ def test_registered_project_returns_valid_update_plan_payload():
     assert plan["estimated_restart"] is True
     assert plan["stash_required"] is False
     assert plan["pull_required"] is False
-    assert recording.calls == [{"project_name": "demo", "dry_run": True}]
+    # Two read-only planning passes: presentation (dry_run=True) plus the
+    # execution-variant pass (dry_run=False) whose canonical digest is shown.
+    assert recording.calls == [
+        {"project_name": "demo", "dry_run": True},
+        {"project_name": "demo", "dry_run": False},
+    ]
 
 
 def test_unknown_project_returns_error_convention():

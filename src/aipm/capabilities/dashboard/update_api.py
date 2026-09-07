@@ -64,12 +64,23 @@ class DashboardUpdateApi:
             return self._error("PROJECT_NOT_FOUND", "Project is unavailable")
         except Exception:
             return self._error("UPDATE_PLAN_UNAVAILABLE", "Update plan is unavailable")
-        # Canonical digest of the exact plan the operator is shown. It is
-        # derived by the canonical UpdatePlanIdentity only (never
-        # reimplemented here): the plan shown, the identity hashed, and the
-        # digest returned are the same canonical content. C4 will bind this
-        # same digest into the control-plane ActionRequest metadata.
-        plan_digest = UpdatePlanIdentity.from_plan(plan).digest()
+        # Canonical digest of the plan variant execution validates. The
+        # control plane and the engine both speak the dry_run=False
+        # UpdatePlanIdentity space, so the digest is derived (still by the
+        # canonical UpdatePlanIdentity only, never reimplemented here) from
+        # the dry_run=False plan of the same read-only planner: planning is
+        # read-only in both modes — the flag only marks the plan — and this
+        # call performs no mutation. The operator is shown the digest that
+        # the control plane will verify at approval and the engine will
+        # recompute at execution. Identity/observation fields
+        # (dry_run, approval_required) are excluded from the digest space.
+        try:
+            execution_plan = self.planner.plan(application.local_project_name, dry_run=False)
+        except (LookupError, ProviderError):
+            return self._error("PROJECT_NOT_FOUND", "Project is unavailable")
+        except Exception:
+            return self._error("UPDATE_PLAN_UNAVAILABLE", "Update plan is unavailable")
+        plan_digest = UpdatePlanIdentity.from_plan(execution_plan).digest()
         payload = {
             "update_plan": {
                 "project": plan.project,

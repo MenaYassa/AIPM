@@ -10,11 +10,19 @@ Single canonical composition path for the durable operator transport:
   enumeration failure refuses startup — no retry loop, no partial start);
 * the existing C2 operator transport (``create_operator_app`` /
   ``run_operator_transport``) serves the composed service on loopback only;
-* the update-plane ports are bound narrowly: ``current_plan_digest`` reads
-  the authoritative ``ProjectPlan.canonical_digest`` from the durable plan
-  store; ``update_runtime`` is deliberately NOT composed here (fail-closed
-  ``UNAVAILABLE_EVIDENCE`` at the execution boundary is the required C6.1
-  behavior — runtime binding is C6.2 scope).
+* the update-plane ports are bound narrowly: when an update engine is
+  provided, ``current_plan_digest`` reads the authoritative execution-plan
+  identity — ``UpdatePlanIdentity.from_plan(engine.plan_update(target,
+  dry_run=False)).digest()`` — through the composition-root port
+  (``aipm.composition.update_digest``; the control plane itself never
+  names engine types), and ``update_runtime`` is the C6.2 adapter
+  (``compose_update_runtime(engine)``) driving the same engine instance;
+  both ports therefore share one planning semantics. Without an engine
+  (the default), the digest port reads the durable
+  ``ProjectPlan.canonical_digest`` and ``update_runtime`` is deliberately
+  NOT composed (fail-closed ``UNAVAILABLE_EVIDENCE`` at the execution
+  boundary is the required behavior until the executor IPC exists —
+  runtime binding is fail-closed, never a silent fallback).
 
 This module composes only canonical authorities; it defines no parallel
 approval, confirmation, session, auth, audit, gate, lease, or action
@@ -77,6 +85,14 @@ def project_plan_digest_port(plans: SQLiteProjectPlanStore) -> Callable[[str], s
     target and returns its ``canonical_digest``. A missing or unreadable
     plan raises a typed error; the control plane maps it to canonical
     fail-closed codes (no fabricated digest, no default).
+
+    NOTE (C6.3): ``ProjectPlan.canonical_digest`` is the identity of the
+    durable plan-of-record (a distinct, legitimate digest space). It is
+    NOT the update execution-plan identity. When an update engine is
+    composed, use :func:`update_plan_digest_port` (via
+    ``aipm.composition.update_digest``) so approval verification speaks
+    the canonical ``UpdatePlanIdentity`` digest space of the
+    ``dry_run=False`` execution plan.
     """
 
     def _read_digest(target_id: str) -> str:
@@ -145,6 +161,7 @@ def compose_operator_service(
     allowed_targets: frozenset[str] | set[str] | None = None,
     with_kill_switch: bool = True,
     run_sweep: bool = True,
+    update_engine: object | None = None,
 ) -> dict:
     """Compose the canonical OwnerControlPlaneService on durable stores.
 
@@ -157,8 +174,14 @@ def compose_operator_service(
        repository, plans, durable sessions, kill-switch persistence);
     4. run the C6.0 startup sweep when ``run_sweep`` is true — enumeration
        failure propagates and refuses startup;
-    5. compose the canonical service with ``execution_mode="ipc"``, the
-       durable plan-digest port, and NO update runtime (fail-closed port).
+    5. compose the canonical service with ``execution_mode="ipc"`` and the
+       update-plane ports: with an injected ``update_engine``, the digest
+       port is the canonical execution-plan identity
+       (``UpdatePlanIdentity`` over the engine's ``dry_run=False`` plan)
+       and the runtime is the C6.2 adapter over the SAME engine instance;
+       without one, the digest port reads the durable
+       ``ProjectPlan.canonical_digest`` and the runtime stays fail-closed
+       (no engine injected → no execution capability — never a fallback).
 
     Returns a bounded composition record dict; the caller owns lifecycle.
     """
@@ -194,6 +217,20 @@ def compose_operator_service(
     if run_sweep:
         sweep_result = run_startup_recovery_sweep(actions=actions, plans=plans, clock=clock)
 
+    if update_engine is not None:
+        # C6.3 digest alignment + C6.2 runtime wiring (composition root
+        # only; the control plane never names engine types). Both ports
+        # bind the SAME engine instance so approval verification and
+        # execution share one planning semantics — one canonical
+        # UpdatePlanIdentity digest space end to end.
+        from aipm.composition import compose_update_runtime, update_plan_digest_port
+
+        current_plan_digest = update_plan_digest_port(update_engine)
+        update_runtime = compose_update_runtime(update_engine)
+    else:
+        current_plan_digest = project_plan_digest_port(plans)
+        update_runtime = None
+
     service = OwnerControlPlaneService(
         authenticator=authenticator,
         sessions=sessions,
@@ -206,8 +243,8 @@ def compose_operator_service(
         kill_switches=kill_switches,
         clock=clock,
         execution_mode="ipc",
-        current_plan_digest=project_plan_digest_port(plans),
-        update_runtime=None,
+        current_plan_digest=current_plan_digest,
+        update_runtime=update_runtime,
     )
     return {
         "database": db,

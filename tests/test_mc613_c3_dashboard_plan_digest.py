@@ -264,8 +264,14 @@ def test_no_mutation_occurs_and_no_state_is_created():
     response = make_client(api).get(f"/api/projects/{VALID_ID}/update-plan")
     assert response.status_code == 200
     assert response.request.method == "GET"
-    # The planner was invoked exactly once, read-only (dry_run=True).
-    assert recording.calls == [{"project_name": "demo", "dry_run": True}]
+    # The planner is invoked read-only, exactly twice: once for the
+    # presentation plan (dry_run=True) and once for the execution-variant
+    # plan (dry_run=False) whose canonical digest the operator is shown.
+    # Planning is read-only in both modes; no state is created either way.
+    assert recording.calls == [
+        {"project_name": "demo", "dry_run": True},
+        {"project_name": "demo", "dry_run": False},
+    ]
     # The exposed object graph gained nothing.
     public = [name for name in vars(api) if not name.startswith("_")]
     assert public == ["intelligence", "planner", "clock"]
@@ -314,7 +320,13 @@ def test_dashboard_update_api_does_not_import_execution_machinery():
         assert forbidden not in source, forbidden
 
 
-def test_planner_sees_only_read_only_plan_call():
+def test_planner_sees_only_read_only_plan_calls():
     api, recording = make_update_api(sample_plan())
     make_client(api).get(f"/api/projects/{VALID_ID}/update-plan")
-    assert recording.calls == [{"project_name": "demo", "dry_run": True}]
+    # Both planner invocations are read-only planning calls (the
+    # presentation pass and the execution-variant pass that supplies the
+    # canonical digest); no execution entry point is ever touched.
+    assert recording.calls == [
+        {"project_name": "demo", "dry_run": True},
+        {"project_name": "demo", "dry_run": False},
+    ]
