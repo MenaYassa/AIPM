@@ -92,8 +92,9 @@ def _init_synthetic_repo(tmp_path: Path) -> Path:
 
     docs = repo / "docs"
     docs.mkdir(exist_ok=True)
-    for doc in (REPO_ROOT / "docs").glob("MC-6.12_*.md"):
-        shutil.copy2(doc, docs / doc.name)
+    for pattern in ("MC-6.12_*.md", "MC-6.13_*.md"):
+        for doc in (REPO_ROOT / "docs").glob(pattern):
+            shutil.copy2(doc, docs / doc.name)
 
     (repo / ".gitignore").write_text("build_meta.json\nrelease-manifest.json\nlogs/\nstate/\nreports/\n")
 

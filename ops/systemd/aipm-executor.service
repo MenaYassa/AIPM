@@ -14,7 +14,10 @@ RuntimeDirectoryMode=0750
 # The executor reads immutable application code via the aipm-runtime group
 # (granted by ops/setup-aipm-identity.sh). It never joins the aipm group.
 SupplementaryGroups=aipm-runtime
-ExecStart=/home/ubuntu/aipm/.venv/bin/aipm executor run
+# C6.4 published CLI contract: the caller UID allow-list is REQUIRED and the
+# service refuses to start without it. 997 = aipm, the canonical control-plane
+# principal permitted to connect to /run/aipm/executor.sock (SO_PEERCRED).
+ExecStart=/home/ubuntu/aipm/.venv/bin/aipm executor run --allowed-caller-uids 997
 Restart=on-failure
 RestartSec=5
 # NoNewPrivileges intentionally absent: the executor needs the setuid
@@ -32,6 +35,12 @@ LockPersonality=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
+# Base unit is capability-OFF and network-isolated: AF_UNIX only (IPC socket,
+# Docker is NOT reachable, no outbound Git). The engine-backed update
+# capability must NEVER be enabled here; it belongs only in an explicitly
+# authorized drop-in. See docs/MC-6.13_EXECUTOR_UPDATE_DEPLOYMENT.md for the
+# audited drop-in template and the full least-privilege deployment contract
+# (C6.6-B).
 RestrictAddressFamilies=AF_UNIX
 UMask=0077
 
