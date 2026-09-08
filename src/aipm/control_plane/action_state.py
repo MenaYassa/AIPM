@@ -141,6 +141,19 @@ class InMemoryActionRepository:
         )
         return [lifecycle.action_id for lifecycle in ordered[:limit]]
 
+    def latest_action_for_target(self, target_id: str) -> ActionLifecycle | None:
+        """Read-only view of the newest action registered for one target.
+
+        Deterministic ordering (created_at DESC, action_id DESC); no write,
+        no transition, no outcome fabrication. Any operation kind participates
+        because both canonical update operations are part of the update flow.
+        """
+
+        candidates = [lifecycle for lifecycle in self._actions.values() if lifecycle.scope.target_id == target_id]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda lifecycle: (lifecycle.created_at, lifecycle.action_id))
+
     def advance_action(self, action_id: str, *, expected_version: int, next_state, approver_subject: str, now: Any, audit_drafts=()) -> ActionLifecycle:
         lifecycle = self._actions.get(action_id)
         if lifecycle is None:

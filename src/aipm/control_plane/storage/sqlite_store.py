@@ -688,6 +688,24 @@ class SQLiteActionRepository:
         ).fetchall()
         return [row["action_id"] for row in rows]
 
+    def latest_action_for_target(self, target_id: str) -> ActionLifecycle | None:
+        """Read-only view of the newest action registered for one target.
+
+        Deterministic ordering (created_at DESC, action_id DESC); a plain
+        SELECT with no write, transition, or outcome fabrication. Any
+        operation kind participates because both canonical update operations
+        are part of the update flow and the projection surfaces ``operation``.
+        """
+
+        row = self._db.connection.execute(
+            "SELECT * FROM actions WHERE target_id = ?"
+            " ORDER BY created_at DESC, action_id DESC LIMIT 1",
+            (target_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _lifecycle_from_row(row)
+
     def advance_action(self, action_id: str, *, expected_version: int, next_state, approver_subject: str, now, audit_drafts=()) -> ActionLifecycle:
         row = self._db.connection.execute(
             "SELECT * FROM actions WHERE action_id = ?",

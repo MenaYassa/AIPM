@@ -489,6 +489,11 @@ def create_operator_app(
             "project_id": project_id,
             "plan": _plan_payload(plan_view),
             "execution": {"available": False},
+            # Additive read-only projection of the newest recorded action for
+            # this project (None when no action exists). Existing consumers
+            # that ignore this key are unaffected; no lifecycle state is
+            # invented here and no receipt or contract material is exposed.
+            "latest_update_action": _run(lambda: service.latest_update_action_view(project_id)),
         }
 
     # ------------------------------------------------------------------

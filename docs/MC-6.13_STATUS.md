@@ -213,6 +213,12 @@ Authentication is an injected private dependency and fails closed when unavailab
 | Runtime/authority scan and protected-state checks | PASS |
 | Generated-artifact cleanup | PASS |
 
+## C6.5-C-B — dashboard update-status surface (observation only)
+
+C6.5-C-B Phase 1 lands a read-only control-plane update-status projection in the operator dashboard without making the dashboard an authority. The canonical transport status route (`GET /updates/{project_id}/status`) now carries an additive `latest_update_action` field: `null` when no action exists, otherwise exactly `action_id`, `operation`, `state`, `outcome`, `plan_revision`, and `expires_at`, selected deterministically (`created_at DESC, action_id DESC`) by a SELECT-only repository read over already-recorded state. Both canonical update operations participate and `operation` is surfaced, so a rollback action can never be misattributed. No lifecycle state is invented, no outcome is fabricated, and no schema changes are made.
+
+The dashboard proxy relays the field through a closed allow-list (`_STATUS_ACTION_FIELDS`): receipt, fencing-token, contract-digest, idempotency, snapshot, requester, and audit material can never cross the boundary, malformed shapes collapse to null, and values stay within the existing relay bounds. The project-detail view renders a "Control-plane update status" section using the existing scheduler polling and badge vocabulary: verified success, failure, reconciliation-required, unknown, and not-registered states are distinguished, every interpolation is escaped, and the section is observation only — it offers no approve, confirm, execute, retry, reconcile, or rollback affordance, and updates remain approved through the canonical operator transport. Receipt evidence is informational only and can never promote an unknown outcome to success; receipt-annotation durability remains deferred (Phase 2, separately authorized).
+
 ## Related documentation
 
 - [`MC-6_STATUS.md`](MC-6_STATUS.md) — current Mission Control ledger.

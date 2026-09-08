@@ -79,6 +79,12 @@ _RELAYABLE_STATUS = frozenset({200, 401, 403, 404, 409, 410, 422, 423, 429, 500,
 _APPROVAL_FIELDS = ("allowed", "code", "decision_id", "action_id", "confirmation_required", "confirmation_id", "approval")
 _EXECUTION_FIELDS = ("action_id", "executed", "outcome", "lifecycle_state")
 _PLAN_FIELDS = ("target_id", "environment", "revision", "enabled", "canonical_digest")
+#: The only canonical latest-action fields the dashboard may relay. Lifecycle
+#: state and durable outcome only: no receipt, fencing token, contract digest,
+#: idempotency key, snapshot reference, requester identity, or audit material
+#: can ever cross this boundary, because everything outside this tuple is
+#: dropped before it reaches a browser.
+_STATUS_ACTION_FIELDS = ("action_id", "operation", "state", "outcome", "plan_revision", "expires_at")
 
 
 class _ProxyRejection(Exception):
@@ -263,11 +269,23 @@ class DashboardUpdateProxyApi:
     def _status_body(self, payload: dict[str, Any]) -> dict[str, Any]:
         plan = payload.get("plan")
         execution = payload.get("execution")
+        latest = payload.get("latest_update_action")
         return {
             "project_id": self._scalar(payload.get("project_id")),
             "plan": self._whitelist(plan if isinstance(plan, dict) else {}, _PLAN_FIELDS),
             "execution": {"available": bool(execution.get("available")) if isinstance(execution, dict) else False},
+            # Closed allow-list projection: only the approved latest-action
+            # fields survive; anything else the canonical transport emits is
+            # dropped here, and a malformed shape collapses to null.
+            "latest_update_action": self._status_action(latest),
         }
+
+    def _status_action(self, latest: Any) -> dict[str, Any] | None:
+        if latest is None:
+            return None
+        if not isinstance(latest, dict):
+            return None
+        return self._whitelist(latest, _STATUS_ACTION_FIELDS)
 
     def _whitelist(self, payload: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
         source = payload if isinstance(payload, dict) else {}

@@ -29,6 +29,26 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     return counts.total ? `${counts.running}/${counts.total} running · ${counts.healthy}/${counts.total} healthy · ${counts.missing}/${counts.total} missing health checks · ${counts.unknown} unknown` : 'No runtime health evidence available';
   };
 
+  // Canonical control-plane lifecycle vocabulary -> existing badge classes.
+  // Never invents states: unknown-shaped values collapse to 'unknown'.
+  const updateStateClass = state => {
+    if (state === 'verified_success') return 'healthy';
+    if (['execution_failed', 'verification_failed', 'rollback_failed'].includes(state)) return 'critical';
+    if (['reconciliation_required', 'interrupted', 'timed_out', 'rollback_unavailable'].includes(state)) return 'warning';
+    return 'unknown';
+  };
+  const updateStatusSection = data => {
+    if (!data || data.available !== true || !data.update_status) {
+      const message = data && data.error === 'not_found' ? 'No registered canonical plan for this project.' : 'Control-plane update status unavailable.';
+      return `<section class="health-evidence" id="projectUpdateStatus"><h4>Control-plane update status</h4><div class="empty">${escapeHtml(message)}</div><div class="subtle">Observation only — updates are approved through the canonical operator transport.</div></section>`;
+    }
+    const action = data.update_status.latest_update_action;
+    const rows = action
+      ? `<div class="evidence-row"><span class="badge ${stateClass(updateStateClass(action.state))}">${escapeHtml(stateLabel(action.state))}</span><span>outcome ${escapeHtml(action.outcome ? stateLabel(action.outcome) : 'not recorded')} · operation ${escapeHtml(stateLabel(action.operation))} · plan revision ${escapeHtml(action.plan_revision ?? '—')} · action ${escapeHtml(action.action_id)}</span></div>`
+      : '<div class="empty">No update action recorded.</div>';
+    return `<section class="health-evidence" id="projectUpdateStatus"><h4>Control-plane update status</h4>${rows}<div class="subtle">Observation only — updates are approved through the canonical operator transport.</div></section>`;
+  };
+
   function projectCard(project, local = false) {
     const health = project.health || {};
     const freshness = project.freshness || {};
@@ -77,7 +97,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectDetail').innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
   }
 
-  function renderDetail(data, healthData, containersData) {
+  function renderDetail(data, healthData, containersData, updateData) {
     const project = data.project;
     if (!project) return clearDetail(data.error || 'Project detail unavailable.');
     const health = healthData.health || project.health || {};
@@ -86,7 +106,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectDetailState').className = `badge ${stateClass(health.status || 'unknown')}`;
     const evidence = (health.evidence || project.evidence || []).map(item => `<div class="evidence-row"><span class="badge ${stateClass(item.severity === 'warning' ? 'warning' : 'unknown')}">${escapeHtml(item.code)}</span><span>${escapeHtml(item.message)}</span></div>`).join('');
     const tree = components.length ? `<div class="component-tree">${components.map(item => `<div class="component-row"><div><strong>${escapeHtml(item.service_name || item.name)}</strong><span>${escapeHtml(item.name)} · ${escapeHtml(item.image || 'image unavailable')}</span></div><div>${badge(item.state || 'unknown', item.state === 'running' ? 'healthy' : item.state === 'exited' ? 'critical' : 'warning')} ${item.health ? badge(item.health, item.health === 'healthy' ? 'healthy' : 'critical') : '<span class="subtle">health check missing</span>'}</div></div>`).join('')}</div>` : '<div class="empty">No runtime components are associated with this project.</div>';
-    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div><div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>`;
+    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div><div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>${updateStatusSection(updateData)}`;
   }
 
   async function selectProject(projectId) {
@@ -100,7 +120,13 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
         fetch(`/api/projects/${encodeURIComponent(projectId)}/containers`, {cache: 'no-store'})
       ]);
       if (responses.some(response => !response.ok)) throw new Error('Project detail unavailable');
-      renderDetail(await responses[0].json(), await responses[1].json(), await responses[2].json());
+      // Read-only observation surface: an unavailable or unregistered
+      // control-plane projection degrades to a neutral panel, never breaks
+      // the project detail render.
+      const updateData = await fetch(`/api/projects/${encodeURIComponent(projectId)}/update/status`, {cache: 'no-store'})
+        .then(response => (response.ok ? response.json() : {available: false, error: response.status === 404 ? 'not_found' : 'unavailable'}))
+        .catch(() => ({available: false, error: 'unavailable'}));
+      renderDetail(await responses[0].json(), await responses[1].json(), await responses[2].json(), updateData);
     } catch (error) {
       clearDetail('Project detail is unavailable; unaffected inventory observations remain visible.');
     }

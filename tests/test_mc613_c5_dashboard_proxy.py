@@ -546,9 +546,12 @@ def test_25_status_is_bounded_and_sanitized(tmp_path: Path):
     _login(operator, dashboard)
     payload = dashboard.get(_status_url()).json()
     assert set(payload) == {"available", "status", "error", "update_status"}
-    assert set(payload["update_status"]) == {"project_id", "plan", "execution"}
+    assert set(payload["update_status"]) == {"project_id", "plan", "execution", "latest_update_action"}
     assert set(payload["update_status"]["plan"]) == {"target_id", "environment", "revision", "enabled", "canonical_digest"}
     assert set(payload["update_status"]["execution"]) == {"available"}
+    # No action exists on the fresh stack: the newest-action projection is an
+    # explicit null, never a fabricated lifecycle record.
+    assert payload["update_status"]["latest_update_action"] is None
     assert_safe_payload(payload)
 
 

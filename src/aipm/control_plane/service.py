@@ -1167,6 +1167,29 @@ class OwnerControlPlaneService:
             "expires_at": action.expires_at.isoformat(),
         }
 
+    def latest_update_action_view(self, target_id: str) -> dict | None:
+        """Bounded read view of the newest action registered for a project.
+
+        SELECT-only projection over already-recorded control-plane state for
+        the read-only update-status surface: no transition, no outcome
+        fabrication, no receipt or contract material. Both canonical update
+        operations participate (a rollback action is part of the update flow)
+        and ``operation`` is surfaced so the dashboard can never misattribute
+        the lifecycle. Exactly the approved dashboard fields, nothing else.
+        """
+
+        action = self._actions.latest_action_for_target(target_id)
+        if action is None:
+            return None
+        return {
+            "action_id": action.action_id,
+            "operation": action.operation.value,
+            "state": action.state.value,
+            "outcome": self._actions.outcome_for_action(action.action_id),
+            "plan_revision": action.plan_revision,
+            "expires_at": action.expires_at.isoformat(),
+        }
+
     def audit_for_action(self, action_id: str, *, limit: int = 100) -> tuple:
         """Bounded audit events referencing one action, oldest last."""
 
