@@ -27,10 +27,18 @@ from __future__ import annotations
 
 from aipm.control_plane.executor_ipc import (
     CAPABILITY_EXECUTE_UPDATE_PLAN,
+    PROTOCOL_VERSION,
     ExecutionRequest,
     ExecutionResponse,
+    ReceiptQueryRequest,
+    ReceiptQueryResponse,
 )
-from aipm.control_plane.mutation_receipt import MutationReceiptError, MutationStatus
+from aipm.control_plane.mutation_receipt import (
+    MutationReceiptError,
+    MutationStatus,
+    RECEIPT_EVIDENCE_NOT_FOUND,
+    RECEIPT_EVIDENCE_UNAVAILABLE,
+)
 from aipm.core.exceptions import UpdateError
 from aipm.services.update.engine import UpdateEngine
 from aipm.services.update.execution_contract import ExecutionContract
@@ -38,6 +46,7 @@ from aipm.services.update.execution_contract import ExecutionContract
 __all__ = [
     "compose_executor_update_handler",
     "compose_ipc_update_runtime",
+    "compose_receipt_query_handler",
 ]
 
 
@@ -235,5 +244,48 @@ def compose_executor_update_handler(
             pass           # misreport a verified success as failed
         audit_path = str(getattr(audit, "audit_path", "") or "")
         return ExecutionResponse(outcome="succeeded", provider_code="update_ok", action_id=request.action_id, evidence_reference=f"update-audit:{audit_path}")
+
+    return handler
+
+
+def compose_receipt_query_handler(*, receipts):
+    """Return the executor-side read-only receipt evidence handler.
+
+    The handler is SELECT-only observation: it never claims, completes, or
+    mutates a receipt, never touches the engine, confirmations, leases, or
+    any other store, and never raises past the IPC accept loop. For one
+    structurally valid :class:`ReceiptQueryRequest` it returns the receipt's
+    ``safe_dict()`` evidence (bounded scalar map) plus the protocol version
+    and an empty ``evidence_reference``; a missing receipt yields
+    ``not_found``; any store failure yields ``evidence_unavailable``.
+    """
+
+    if receipts is None or not hasattr(receipts, "get"):
+        raise TypeError("receipts must provide the MutationReceiptStore contract")
+
+    def handler(request: ReceiptQueryRequest) -> ReceiptQueryResponse:
+        try:
+            receipt = receipts.get(action_id=request.action_id, fencing_token=request.fencing_token)
+        except Exception:  # noqa: BLE001 - fail closed as unavailable, never raise
+            return ReceiptQueryResponse(
+                mutation_status=RECEIPT_EVIDENCE_UNAVAILABLE,
+                provider_code="receipt_store_failure",
+                evidence={},
+            )
+        if receipt is None:
+            return ReceiptQueryResponse(
+                mutation_status=RECEIPT_EVIDENCE_NOT_FOUND,
+                provider_code="",
+                evidence={},
+            )
+        return ReceiptQueryResponse(
+            mutation_status=str(receipt.safe_dict()["mutation_status"]),
+            provider_code=str(receipt.safe_dict().get("provider_code", "")),
+            evidence={
+                **receipt.safe_dict(),
+                "protocol_version": PROTOCOL_VERSION,
+                "evidence_reference": "",
+            },
+        )
 
     return handler

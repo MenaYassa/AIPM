@@ -619,7 +619,37 @@ class OwnerControlPlaneService:
             kill_switches=self._kill_switches,
             audit=self._audit,
             snapshots=self._snapshot_repo,
+            receipt_query=self._receipt_query_port(),
         )
+
+    def _receipt_query_port(self):
+        """Read-only receipt evidence port, or None when unavailable.
+
+        Adapts the executor IPC client (when composed and query-capable) to
+        the executor's optional ``receipt_query(action_id, fencing_token)``
+        callable. The call is observation only: any failure, including a
+        transport error, yields None (evidence unavailable) and never
+        propagates. It never issues an execution request.
+        """
+
+        client = getattr(self, "_executor_ipc_client", None)
+        if client is None or not hasattr(client, "query_receipt"):
+            return None
+
+        def query(action_id: str, fencing_token: int):
+            try:
+                response = client.query_receipt(action_id, fencing_token)
+            except Exception:  # noqa: BLE001 - evidence is optional, never fatal
+                return None
+            if response is None:
+                return None
+            return {
+                "mutation_status": response.mutation_status,
+                "provider_code": response.provider_code,
+                "evidence": response.evidence,
+            }
+
+        return query
 
     def execute_action(self, session_id: str, action_id: str, *, now: datetime | None = None):
         """Run the bounded execution vertical slice for one confirmed action.

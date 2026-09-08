@@ -176,6 +176,14 @@ def run(
     provider = SystemdRestartProvider(policies=[policy])
     receipts = MutationReceiptStore(receipt_db)
 
+    # C6.5-B: read-only receipt evidence is always served. This is
+    # observation over the executor's own receipts database (SELECT-only),
+    # not the update capability: capability gating is unchanged and the
+    # engine-backed handler remains opt-in via --enable-update-plan.
+    from aipm.composition.executor_update import compose_receipt_query_handler
+
+    query_handler = compose_receipt_query_handler(receipts=receipts)
+
     update_handler = None
     if enable_update_plan:
         from pathlib import Path as _Path
@@ -235,7 +243,7 @@ def run(
             evidence_reference=result.evidence_reference,
         )
 
-    server = ExecutorIPCServer(socket_path=socket_path, handler=handler, allowed_caller_uids=uids)
+    server = ExecutorIPCServer(socket_path=socket_path, handler=handler, allowed_caller_uids=uids, query_handler=query_handler)
     stop_event = threading.Event()
 
     def _signal_handler(signum, frame):

@@ -31,6 +31,13 @@ from aipm.control_plane.audit.sanitize import AuditEventError, bounded_reference
 
 MUTATION_RECEIPT_VERSION = "mc612-mutation-receipt-v1"
 
+# C6.5-B read-only evidence markers. These are query-response statuses for
+# the receipt evidence channel, NOT receipt lifecycle states: "not_found"
+# means no receipt exists for the queried identity, "evidence_unavailable"
+# means the evidence could not be produced. Neither ever authorizes a retry.
+RECEIPT_EVIDENCE_NOT_FOUND = "not_found"
+RECEIPT_EVIDENCE_UNAVAILABLE = "evidence_unavailable"
+
 
 class MutationStatus(str, Enum):
     RECEIPT_CREATED = "receipt_created"

@@ -185,6 +185,13 @@ class ExecutionResult:
     verification_success: bool | None = None
     verification_id: str | None = None
     refusal_reason: str | None = None
+    # C6.5-B receipt evidence annotation. Only ever attached to an
+    # UNKNOWN_OUTCOME result from reconciliation: it records what the
+    # executor's receipt said (a MutationStatus value, "not_found", or
+    # "evidence_unavailable") WITHOUT changing the outcome — success still
+    # requires post-state observation, failure still requires pre-state
+    # corroboration, and UNKNOWN never becomes retryable.
+    receipt_status: str | None = None
 
 
 def _utc(now: datetime | None) -> datetime:
@@ -200,9 +207,9 @@ class Executor:
     audit ledger) — never generic providers or callables.
     """
 
-    __slots__ = ("_plans", "_actions", "_confirmations", "_kill_switches", "_audit", "_snapshots", "_gate", "_initialized")
+    __slots__ = ("_plans", "_actions", "_confirmations", "_kill_switches", "_audit", "_snapshots", "_gate", "_receipt_query", "_initialized")
 
-    def __init__(self, *, plans, actions, confirmations, kill_switches=None, audit, snapshots=None) -> None:
+    def __init__(self, *, plans, actions, confirmations, kill_switches=None, audit, snapshots=None, receipt_query=None) -> None:
         if plans is None or not hasattr(plans, "read") or not hasattr(plans, "update"):
             raise TypeError("executor requires the CAS plan store")
         if actions is None or not hasattr(actions, "get_action"):
@@ -211,6 +218,8 @@ class Executor:
             raise TypeError("executor requires the confirmation service")
         if audit is None or not hasattr(audit, "append_in_transaction"):
             raise TypeError("executor requires the audit ledger")
+        if receipt_query is not None and not callable(receipt_query):
+            raise TypeError("receipt_query must be callable or None")
         object.__setattr__(self, "_plans", plans)
         object.__setattr__(self, "_actions", actions)
         object.__setattr__(self, "_confirmations", confirmations)
@@ -218,6 +227,7 @@ class Executor:
         object.__setattr__(self, "_audit", audit)
         object.__setattr__(self, "_snapshots", snapshots)
         object.__setattr__(self, "_gate", None)
+        object.__setattr__(self, "_receipt_query", receipt_query)
         object.__setattr__(self, "_initialized", True)
 
     def __setattr__(self, name, value):
@@ -450,7 +460,65 @@ class Executor:
                 now=moment,
             )
             return ExecutionResult(action_id=contract.action_id, outcome=ExecutionOutcome.MUTATION_NOT_STARTED, lifecycle_state=LifecycleState.RECONCILIATION_REQUIRED)
-        return ExecutionResult(action_id=contract.action_id, outcome=ExecutionOutcome.UNKNOWN_OUTCOME, lifecycle_state=action.state)
+        # Inconclusive plan-store observation (branch 3): the outcome stays
+        # UNKNOWN. Optional receipt evidence is consulted read-only and only
+        # ever annotates the result — it can never promote UNKNOWN to
+        # success or failure, so no lifecycle/outcome mutation happens here.
+        return ExecutionResult(
+            action_id=contract.action_id,
+            outcome=ExecutionOutcome.UNKNOWN_OUTCOME,
+            lifecycle_state=action.state,
+            receipt_status=self._receipt_evidence_status(contract),
+        )
+
+    def _receipt_evidence_status(self, contract: ExecutionContract) -> str | None:
+        """Best-effort receipt evidence for an inconclusive reconciliation.
+
+        Returns the receipt's mutation status only when the evidence is
+        structurally valid AND correlates with this attempt: same action_id,
+        same fencing_token, and a contract_digest equal to the durably bound
+        execution-time digest. Any mismatch, malformed evidence, missing
+        port, or failure yields None (evidence absent), never a guess.
+        """
+
+        query = getattr(self, "_receipt_query", None)
+        if query is None:
+            return None
+        bound = self._actions.get_contract_evidence(contract.action_id)
+        digest = bound.get("contract_digest") if isinstance(bound, dict) else None
+        if not isinstance(digest, str) or not digest:
+            return None
+        try:
+            response = query(contract.action_id, contract.fencing_token)
+        except Exception:  # noqa: BLE001 - evidence is optional, never fatal
+            return None
+        if response is None:
+            return None
+        if not isinstance(response, dict):
+            return None
+        status = response.get("mutation_status")
+        if not isinstance(status, str) or not status or len(status) > 32:
+            return None
+        evidence = response.get("evidence")
+        if not isinstance(evidence, dict):
+            return None
+        if evidence.get("action_id") != contract.action_id:
+            return None
+        token = evidence.get("fencing_token")
+        if not isinstance(token, int) or isinstance(token, bool) or token != contract.fencing_token:
+            return None
+        if evidence.get("contract_digest") != digest:
+            return None
+        from aipm.control_plane.mutation_receipt import (
+            MutationStatus,
+            RECEIPT_EVIDENCE_NOT_FOUND,
+            RECEIPT_EVIDENCE_UNAVAILABLE,
+        )
+
+        allowed = {member.value for member in MutationStatus} | {RECEIPT_EVIDENCE_NOT_FOUND, RECEIPT_EVIDENCE_UNAVAILABLE}
+        if status not in allowed:
+            return None
+        return status
 
     # ------------------------------------------------------------------
     # Rollback execution

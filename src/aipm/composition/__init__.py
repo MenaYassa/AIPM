@@ -13,11 +13,13 @@ from aipm.composition.update_runtime import compose_update_runtime
 from aipm.composition.executor_update import (
     compose_executor_update_handler,
     compose_ipc_update_runtime,
+    compose_receipt_query_handler,
 )
 
 __all__ = [
     "compose_executor_update_handler",
     "compose_ipc_update_runtime",
+    "compose_receipt_query_handler",
     "compose_update_runtime",
     "update_plan_digest_port",
 ]

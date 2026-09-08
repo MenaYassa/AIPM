@@ -42,6 +42,10 @@ CALLER_UID = None  # set at service construction; None = accept any uid in allow
 # capability requires the engine binding fields below.
 CAPABILITY_LEGACY_RESTART = "update_project_plan"
 CAPABILITY_EXECUTE_UPDATE_PLAN = "execute_update_plan"
+# C6.5-B read-only evidence marker. This is a message type, not an execution
+# capability: it selects SELECT-only receipt lookup and can never drive the
+# engine, consume confirmations, or mutate any state.
+QUERY_MESSAGE_TYPE = "query_mutation_receipt"
 
 _HEX = set("0123456789abcdef")
 
@@ -148,6 +152,113 @@ class ExecutionResponse:
         }, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
+@dataclass(frozen=True, slots=True)
+class ReceiptQueryRequest:
+    """C6.5-B read-only receipt lookup request.
+
+    Bounded to the authoritative attempt identity
+    ``(action_id, fencing_token)``. No paths, SQL, filenames, commands,
+    argv, environment, or filesystem selectors are accepted. Structural
+    validation only: this is NOT business authorization.
+    """
+
+    action_id: str
+    fencing_token: int
+
+    @classmethod
+    def from_json(cls, data: bytes) -> "ReceiptQueryRequest":
+        try:
+            payload = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ExecutorIPCError("Malformed JSON request") from exc
+        if not isinstance(payload, dict):
+            raise ExecutorIPCError("Request must be a JSON object")
+        if set(payload) != {"message_type", "action_id", "fencing_token"}:
+            raise ExecutorIPCError("Unexpected fields for query_mutation_receipt")
+        if payload["message_type"] != QUERY_MESSAGE_TYPE:
+            raise ExecutorIPCError("Unknown message type")
+        action_id = payload["action_id"]
+        if not isinstance(action_id, str) or len(action_id) != 64 or not set(action_id) <= _HEX:
+            raise ExecutorIPCError("Invalid action_id")
+        token = payload["fencing_token"]
+        if not isinstance(token, int) or isinstance(token, bool) or token < 1:
+            raise ExecutorIPCError("Invalid fencing_token")
+        return cls(action_id=action_id, fencing_token=token)
+
+    def to_json(self) -> bytes:
+        payload = {
+            "message_type": QUERY_MESSAGE_TYPE,
+            "action_id": self.action_id,
+            "fencing_token": self.fencing_token,
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptQueryResponse:
+    """Bounded read-only receipt evidence response.
+
+    ``mutation_status`` is one of the existing MutationReceiptStore status
+    values, ``not_found``, or ``evidence_unavailable``. The evidence map is
+    the existing receipt representation (``MutationReceipt.safe_dict``
+    equivalent fields); it is empty for non-found outcomes. No audit-file
+    contents, no filesystem data.
+    """
+
+    mutation_status: str
+    provider_code: str
+    evidence: dict
+
+    def to_json(self) -> bytes:
+        return json.dumps({
+            "mutation_status": self.mutation_status,
+            "provider_code": self.provider_code,
+            "evidence": self.evidence,
+        }, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+    @classmethod
+    def from_json(cls, data: bytes) -> "ReceiptQueryResponse":
+        try:
+            payload = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ExecutorIPCError("Malformed JSON response") from exc
+        if not isinstance(payload, dict):
+            raise ExecutorIPCError("Response must be a JSON object")
+        if set(payload) != {"mutation_status", "provider_code", "evidence"}:
+            raise ExecutorIPCError("Unexpected fields in receipt response")
+        mutation_status = payload["mutation_status"]
+        provider_code = payload["provider_code"]
+        if not isinstance(mutation_status, str) or not mutation_status or len(mutation_status) > 32:
+            raise ExecutorIPCError("Invalid mutation_status")
+        if not isinstance(provider_code, str) or len(provider_code) > 128:
+            raise ExecutorIPCError("Invalid provider_code")
+        evidence = payload["evidence"]
+        if not isinstance(evidence, dict) or len(evidence) > 16:
+            raise ExecutorIPCError("Invalid evidence map")
+        # Mirrors MutationReceipt.safe_dict() plus the two marker keys the
+        # query handler appends. Every value must be a bounded scalar: str
+        # <= 160, a real int, or None. No nested structures, no lists.
+        allowed = {
+            "receipt_id", "action_id", "fencing_token", "capability_id",
+            "target_id", "contract_digest", "mutation_status", "provider_code",
+            "created_at", "completed_at", "version", "protocol_version",
+            "evidence_reference",
+        }
+        for key, value in evidence.items():
+            if key not in allowed:
+                raise ExecutorIPCError("Invalid receipt response fields")
+            if value is None:
+                continue
+            if isinstance(value, str):
+                if len(value) > 160:
+                    raise ExecutorIPCError("Invalid evidence value")
+            elif isinstance(value, int) and not isinstance(value, bool):
+                continue
+            else:
+                raise ExecutorIPCError("Invalid evidence value")
+        return cls(mutation_status=mutation_status, provider_code=provider_code, evidence=evidence)
+
+
 def encode_frame(data: bytes) -> bytes:
     """Length-prefixed frame: 4-byte big-endian length + payload."""
     if len(data) > MAX_REQUEST_SIZE:
@@ -186,17 +297,41 @@ def get_peer_uid(conn: socket.socket) -> int:
     return uid
 
 
+def _is_query_frame(payload: bytes) -> bool:
+    """Best-effort sniff for the query message type.
+
+    Never raises: any parse failure means the frame is not a well-formed
+    query, and it will be handled by the legacy ExecutionRequest parse
+    (which produces the bounded refusal response).
+    """
+    try:
+        parsed = json.loads(payload)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(parsed, dict) and parsed.get("message_type") == QUERY_MESSAGE_TYPE
+
+
 class ExecutorIPCServer:
     """Unix domain socket server for the executor service."""
 
-    __slots__ = ("_socket_path", "_allowed_caller_uids", "_handler", "_sock", "_initialized")
+    __slots__ = ("_socket_path", "_allowed_caller_uids", "_handler", "_query_handler", "_sock", "_initialized")
 
-    def __init__(self, *, socket_path: str = EXECUTOR_SOCKET_PATH, allowed_caller_uids: set[int] | None = None, handler: Callable[[ExecutionRequest], ExecutionResponse]) -> None:
+    def __init__(
+        self,
+        *,
+        socket_path: str = EXECUTOR_SOCKET_PATH,
+        allowed_caller_uids: set[int] | None = None,
+        handler: Callable[[ExecutionRequest], ExecutionResponse],
+        query_handler: Callable[[ReceiptQueryRequest], ReceiptQueryResponse] | None = None,
+    ) -> None:
         if handler is None:
             raise TypeError("handler is required")
+        if query_handler is not None and not callable(query_handler):
+            raise TypeError("query_handler must be callable or None")
         object.__setattr__(self, "_socket_path", socket_path)
         object.__setattr__(self, "_allowed_caller_uids", allowed_caller_uids)
         object.__setattr__(self, "_handler", handler)
+        object.__setattr__(self, "_query_handler", query_handler)
         object.__setattr__(self, "_sock", None)
         object.__setattr__(self, "_initialized", True)
 
@@ -217,7 +352,7 @@ class ExecutorIPCServer:
         sock.listen(1)
         object.__setattr__(self, "_sock", sock)
 
-    def serve_one(self) -> ExecutionResponse:
+    def serve_one(self) -> ExecutionResponse | ReceiptQueryResponse:
         """Accept one connection, validate, execute, and return the response."""
         conn, _addr = self._sock.accept()
         try:
@@ -235,6 +370,32 @@ class ExecutorIPCServer:
 
             # Read and parse request
             payload = decode_frame(conn)
+            if self._query_handler is not None and _is_query_frame(payload):
+                # C6.5-B read-only evidence channel. The query handler is
+                # observation, not the update capability: it never touches
+                # the engine, confirmations, or leases. Without a composed
+                # query handler the frame falls through to the legacy
+                # ExecutionRequest parse below — byte-identical to the
+                # pre-C6.5-B executor (forward/backward compatible). A
+                # handler crash is classified as evidence_unavailable; the
+                # accept loop must survive any single-connection failure.
+                try:
+                    query = ReceiptQueryRequest.from_json(payload)
+                    response = self._query_handler(query)
+                    conn.sendall(encode_frame(response.to_json()))
+                    return response
+                except Exception:  # noqa: BLE001 - never kill the accept loop
+                    response = ReceiptQueryResponse(
+                        mutation_status="evidence_unavailable",
+                        provider_code="query_handler_failure",
+                        evidence={},
+                    )
+                    try:
+                        conn.sendall(encode_frame(response.to_json()))
+                    except OSError:
+                        pass
+                    return response
+
             request = ExecutionRequest.from_json(payload)
 
             # Structural validation (NOT business authorization)
@@ -354,5 +515,27 @@ class ExecutorIPCClient:
             # Connection refused/reset, frame cap breach on the reply, or a
             # malformed reply: the mutation may already have happened.
             return ExecutionResponse(outcome="unknown_outcome", provider_code="transport_failure", action_id=request.action_id, evidence_reference="")
+        finally:
+            sock.close()
+
+    def query_receipt(self, action_id: str, fencing_token: int, *, timeout: float = 30.0) -> ReceiptQueryResponse | None:
+        """Read-only receipt evidence lookup; any failure maps to None.
+
+        This query performs no mutation, so unlike :meth:`send` there is no
+        unknown-outcome ambiguity: a transport failure, refusal, oversized
+        reply, or malformed evidence simply yields ``None`` (evidence
+        unavailable). Exceptions never propagate to the caller.
+        """
+
+        request = ReceiptQueryRequest(action_id=action_id, fencing_token=fencing_token)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        try:
+            sock.connect(self._socket_path)
+            sock.sendall(encode_frame(request.to_json()))
+            payload = decode_frame(sock)
+            return ReceiptQueryResponse.from_json(payload)
+        except Exception:  # noqa: BLE001 - observation never raises
+            return None
         finally:
             sock.close()
