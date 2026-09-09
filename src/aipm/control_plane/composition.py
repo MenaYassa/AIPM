@@ -309,16 +309,22 @@ def serve_operator_transport(
     clock: Callable[[], object] | None = None,
     allowed_targets: frozenset[str] | set[str] | None = None,
     with_kill_switch: bool = True,
+    update_engine: object | None = None,
     executor_ipc_client: object | None = None,
 ) -> dict:
     """Compose, sweep, then serve the operator transport on loopback only.
 
     The sweep runs BEFORE the listener binds; any failure in composition or
     sweep propagates and the process exits without ever accepting traffic.
-    ``executor_ipc_client`` is optional and fail-closed: without it the
-    composed service runs the canonical execution path but refuses any
-    action whose post-verification runtime would be needed (the pre-flight
-    composition check in the service fires before any state change).
+    The update-plane ports are optional and fail-closed: without an
+    ``update_engine`` the composed service runs the canonical execution
+    path but refuses any action whose post-verification runtime would be
+    needed (the pre-flight composition check in the service fires before
+    any state change). With an ``update_engine`` the digest port binds the
+    canonical ``UpdatePlanIdentity`` space over that engine and the
+    post-verification runtime crosses to ``executor_ipc_client`` when one
+    is provided (driving the engine in-process otherwise) — both ports
+    bound to the SAME engine instance.
     """
 
     from aipm.control_plane.transport import run_operator_transport
@@ -330,6 +336,7 @@ def serve_operator_transport(
         allowed_targets=allowed_targets,
         with_kill_switch=with_kill_switch,
         run_sweep=True,
+        update_engine=update_engine,
         executor_ipc_client=executor_ipc_client,
     )
     raw_port = port if port is not None else os.environ.get(OPERATOR_TRANSPORT_PORT_ENV, DEFAULT_OPERATOR_TRANSPORT_PORT)

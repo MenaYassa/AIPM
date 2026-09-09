@@ -160,10 +160,16 @@ def test_14_path_contract_is_versioned():
 
 
 def test_15_config_template_uses_root_owned_read_only_contract():
+    # D4-A P2 model: the canonical executor config is the uid-995 home
+    # fallback, pre-created by the operator and only ever READ; the dead
+    # /etc/aipm path is documented solely as a removed artifact.
     text = _doc_text()
-    assert "/etc/aipm/executor/config.yaml" in text
-    assert "0440" in text
-    assert "root:aipm-executor" in text
+    assert "/var/lib/aipm-executor/.config/aipm/config.yaml" in text
+    assert "0640" in text
+    assert "aipm-executor:aipm-executor" in text
+    assert "NO `AIPM_CONFIG`" in text or "NO AIPM_CONFIG" in text
+    # Removal-by-elimination language, never a permission widening.
+    assert "do NOT chmod" in text
     assert "refuses to start" in text or "refuses to start" in text.lower()
 
 

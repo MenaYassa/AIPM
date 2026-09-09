@@ -29,7 +29,7 @@ Ground rules baked into the contract:
 | Update backups (tar.gz snapshots) | `/var/lib/aipm-executor/state/backups` | `Environment=AIPM_BACKUP_DIR=…` |
 | Executor log | `/var/lib/aipm-executor/logs/executor.log` | `Environment=AIPM_LOG_FILE=…` (REQUIRED: the config default `$HOME/.local/state/aipm/logs/…` sits outside `ReadWritePaths` and would fail engine composition at startup) |
 | Temporary data | per-unit private `/tmp` | `PrivateTmp=true` |
-| Executor config | `/etc/aipm/executor/config.yaml` | `Environment=AIPM_CONFIG=…` |
+| Executor config | `/var/lib/aipm-executor/.config/aipm/config.yaml` | Pre-created by the operator (aipm-executor:aipm-executor 0640); NO `AIPM_CONFIG` override — canonical `$HOME/.config/aipm` fallback (P2 decision) |
 
 `BackupEngine` honors `AIPM_BACKUP_DIR`, `AuditService` honors
 `AIPM_AUDIT_DIR` (the CLI passes the explicit audit dir), and
@@ -70,13 +70,30 @@ UMask=0002
 SupplementaryGroups=aipm-runtime docker
 ReadWritePaths=/var/lib/aipm-executor/state /var/lib/aipm-executor/logs
 # Enumerated registered project roots ONLY — never /home/ubuntu or /home/ubuntu/*.
+# NOTE (systemd 255, verified): path-namespace options such as ReadWritePaths
+# ACCUMULATE across assignments and across main+drop-in files; an empty-string
+# assignment resets the list. Both lines below therefore APPLY (the second
+# adds the project roots to the base state/logs carve-out).
 ReadWritePaths=/home/ubuntu/aipm /home/ubuntu/invoicing /home/ubuntu/local-ai-packaged /home/ubuntu/EAG
-Environment=AIPM_CONFIG=/etc/aipm/executor/config.yaml
+# NO AIPM_CONFIG — the canonical executor config is
+# /var/lib/aipm-executor/.config/aipm/config.yaml, pre-created by the
+# operator (0640 aipm-executor:aipm-executor). It is only ever READ:
+# under ProtectSystem=strict reads never need ReadWritePaths, and
+# ConfigManager writes a default ONLY when the file is missing — a
+# pre-created file makes startup write-free. (P2 decision; the former
+# Environment=AIPM_CONFIG=/etc/aipm/executor/config.yaml line is removed:
+# uid 995 cannot traverse /etc/aipm, so that path fail-closed at startup
+# — resolved by elimination, not by any /etc/aipm permission change.)
 Environment=AIPM_BACKUP_DIR=/var/lib/aipm-executor/state/backups
 Environment=AIPM_LOG_FILE=/var/lib/aipm-executor/logs/executor.log
 # AF_UNIX: executor IPC socket + Docker unix socket + journald.
 # AF_INET/AF_INET6: Git fetch/pull over https + resolver ONLY. No TCP Docker API.
+# Drill phase keeps AF_UNIX ONLY (file:// origin needs no AF_INET); the
+# production drop-in later ADDS AF_INET AF_INET6 for GitHub HTTPS.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# ExecStart= is single-valued: in a drop-in it REPLACES the base command
+# line — the FULL command (base flags + the appended update-plane flags)
+# must be restated here. Complete restatement is mandatory, not additive.
 ExecStart=/home/ubuntu/aipm/.venv/bin/aipm executor run --allowed-caller-uids 997 --enable-update-plan --update-audit-dir /var/lib/aipm-executor/state/audit
 ```
 
@@ -87,26 +104,47 @@ accepting the Docker authority analysis; operator transport
 (`ops/systemd/aipm-operator-transport.service`, runs as `aipm`) deployed —
 it is the canonical uid-997 IPC caller and is currently NOT installed.
 
-## 4. Executor config — TEMPLATE (create on host only during deployment)
+## 4. Executor config — TEMPLATE (pre-create on host only during deployment)
 
-`/etc/aipm/executor/config.yaml` — owner `root`, group `aipm-executor`,
-mode `0440` (directory `root:aipm-executor 0750`). Deliberately outside
-every executor-writable path: if it is missing, config loading fails on
-write (`/etc` is read-only under `ProtectSystem=strict`) and the executor
-refuses to start — never a silently-created default config pointing at the
-wrong search paths. Content carries ONLY the registered project roots;
-every other configuration block takes the validated defaults. Never copy
-the operator's `~/.config/aipm/config.yaml`.
+Canonical location (P2 decision):
+`/var/lib/aipm-executor/.config/aipm/config.yaml` — the executor's
+`$HOME/.config/aipm` fallback (passwd home of uid 995 is
+`/var/lib/aipm-executor`), owner `aipm-executor:aipm-executor`, mode
+`0640` (parent `.config` dir `aipm-executor:aipm-runtime 0750`). The
+operator PRE-CREATES the file once and the executor only ever reads it:
+under `ProtectSystem=strict` reads never need `ReadWritePaths`, and
+`ConfigManager` writes a self-healing default ONLY when the file is
+missing — a pre-created file makes startup write-free. NO `AIPM_CONFIG`
+override is set anywhere. The former `/etc/aipm/executor/config.yaml`
+artifact (documented-but-never-consumed: no live process sets
+`AIPM_CONFIG` to that path, and uid 995 cannot traverse
+`/etc/aipm 750 root:aipm-provenance` — the template's old
+`Environment=AIPM_CONFIG` line would have failed startup) must be REMOVED
+during deployment (D4-B); do NOT chmod `/etc/aipm` and do NOT add o+x —
+F-D3-3 is resolved by ELIMINATION of the dead path, never by widening.
 
 ```yaml
-# TEMPLATE — /etc/aipm/executor/config.yaml (root:aipm-executor 0440)
+# TEMPLATE — /var/lib/aipm-executor/.config/aipm/config.yaml
+# (pre-created by operator: aipm-executor:aipm-executor 0640)
+#
+# DRILL phase content: search_paths lists the drill root ONLY, so the
+# four production roots are undiscoverable by the executor during the
+# drill. The control-plane project_plans allow-list is a separate,
+# independent mechanism (composition refuses to start on an empty or
+# non-matching registered set) — with both planes scoped to the drill
+# root, accidental execution against production targets is impossible
+# by construction.
 discovery:
   search_paths:
-    - /home/ubuntu/aipm
-    - /home/ubuntu/invoicing
-    - /home/ubuntu/local-ai-packaged
-    - /home/ubuntu/EAG
+    - /home/ubuntu/aipm-drill
 ```
+
+Production phase (later, separate authorization): replace the file
+content so `search_paths` enumerates exactly the four production roots
+(`/home/ubuntu/aipm`, `/home/ubuntu/invoicing`,
+`/home/ubuntu/local-ai-packaged`, `/home/ubuntu/EAG`) and register those
+targets in the control plane accordingly. Never copy the operator's own
+`~/.config/aipm/config.yaml` wholesale.
 
 ## 5. Per-project Git sharing + registration runbook (uid 995)
 
@@ -136,16 +174,20 @@ find <root>/.git -type d -exec chmod g+rwX {} +   # one-time normalize
 
 New project registration (static ReadWritePaths cannot support runtime
 dynamic registration — registration is an operator procedure, restart-coupled):
-1. add root to `/etc/aipm/executor/config.yaml` search_paths;
+1. add root to `/var/lib/aipm-executor/.config/aipm/config.yaml`
+   search_paths (pre-created file; edit as operator);
 2. add root to the drop-in `ReadWritePaths`;
 3. apply §5 preparation to the root;
 4. add the `safe.directory` entry to `/var/lib/aipm-executor/.gitconfig`;
 5. `systemctl daemon-reload && systemctl restart aipm-executor.service`;
 6. run the validation probes below.
 
-Stale-project removal: reverse each step (remove root from both files,
-remove gitconfig entry; leave repository permissions as recorded in the
-rollback input), then reload + restart.
+Stale-project removal: reverse each step (remove root from both the
+executor config and the drop-in, remove the gitconfig entry; leave
+repository permissions as recorded in the rollback input), then reload +
+restart. The dead `/etc/aipm/executor/config.yaml` artifact is never
+referenced: remove it during deployment and keep `/etc/aipm` permissions
+unchanged (no chmod, no o+x).
 
 Validation (no mutation):
 
@@ -167,7 +209,9 @@ alone restores git's fail-closed dubious-ownership refusal.
 2. Correct base unit `ExecStart` on host → `daemon-reload` → verify clean
    start, socket `0660 aipm-executor:aipm-executor`, uid≠997 refused,
    `execute_update_plan` → `capability_not_enabled`.
-3. Create executor config + state dirs (backup/audit) with correct ownership.
+3. Create the executor config (§4, pre-created at
+   `/var/lib/aipm-executor/.config/aipm/config.yaml` — drill-only
+   search_paths) + state dirs (backup/audit) with correct ownership.
 4. Verify CP-DB denial, project write boundary, backup/audit probes.
 5. Per-project preparation (§5) + executor gitconfig.
 6. Install drop-in (§3) → `daemon-reload` → restart.

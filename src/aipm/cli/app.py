@@ -279,20 +279,92 @@ def version():
 def serve_operator_transport(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address. Loopback-only; non-loopback binds are refused."),
     port: int = typer.Option(8789, "--port", min=1, max=65535, help="HTTP port for the operator transport."),
+    enable_update_plane: bool = typer.Option(False, "--enable-update-plane", help="Compose the update plane (engine-backed digest port + executor IPC runtime). Default off: fail-closed execution boundary."),
+    executor_socket_path: str = typer.Option(None, "--executor-socket-path", help="Executor Unix socket path (default /run/aipm/executor.sock). Requires --enable-update-plane."),
+    update_audit_dir: str = typer.Option(None, "--update-audit-dir", help="Writable audit directory for the update engine. Requires --enable-update-plane."),
+    update_backup_dir: str = typer.Option(None, "--update-backup-dir", help="Writable backup directory for the update engine. Requires --enable-update-plane."),
 ):
     """Compose the durable control plane and serve the operator transport.
 
     Startup order is fail closed: open the dedicated control-plane SQLite
     store, compose the durable stores, run the startup recovery sweep, and
     only then bind the loopback listener. Any composition or sweep failure
-    exits before the listener accepts traffic. The update runtime is
-    deliberately not composed (fail-closed execution boundary).
+    exits before the listener accepts traffic.
+
+    By default the update runtime is deliberately not composed (fail-closed
+    execution boundary). With ``--enable-update-plane`` the transport
+    composes the update engine (audit + backup directories must be passed
+    and are probed for writability BEFORE binding — no permission is
+    widened to make the probe pass) and the executor IPC client, so the
+    digest port speaks the canonical UpdatePlanIdentity space and the
+    post-verification runtime crosses to the executor socket. The flags
+    are all-or-nothing: partial flag sets are refused.
     """
+
+    if not enable_update_plane:
+        if (
+            update_audit_dir is not None
+            or update_backup_dir is not None
+            or executor_socket_path is not None
+        ):
+            typer.echo(
+                "--update-audit-dir/--update-backup-dir/--executor-socket-path require --enable-update-plane",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+
+    update_engine = None
+    executor_ipc_client = None
+    if enable_update_plane:
+        if update_audit_dir is None or update_backup_dir is None:
+            typer.echo(
+                "--enable-update-plane requires both --update-audit-dir and --update-backup-dir",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        from pathlib import Path as _Path
+
+        from aipm.services.backup.engine import BackupEngine
+        from aipm.services.update.engine import UpdateEngine
+
+        for label, dir_path, probe_name in (
+            ("audit", update_audit_dir, ".aipm-audit-probe"),
+            ("backup", update_backup_dir, ".aipm-backup-probe"),
+        ):
+            # Writability probe BEFORE composing: the engine's audit and
+            # backup services must be able to persist evidence there, or
+            # startup refuses. No permission is widened to make it pass.
+            try:
+                probe_dir = _Path(dir_path)
+                probe_dir.mkdir(parents=True, exist_ok=True)
+                probe = probe_dir / probe_name
+                probe.write_text("probe", encoding="utf-8")
+                probe.unlink()
+            except OSError as exc:
+                typer.echo(f"Update {label} directory is not writable: {dir_path} ({exc})", err=True)
+                raise typer.Exit(code=2) from exc
+
+        update_engine = UpdateEngine(
+            audit_service=_make_audit_service(update_audit_dir),
+            backup_engine=BackupEngine(update_backup_dir),
+        )
+        if executor_socket_path is None:
+            from aipm.control_plane.executor_ipc import EXECUTOR_SOCKET_PATH
+
+            executor_socket_path = EXECUTOR_SOCKET_PATH
+        from aipm.control_plane.executor_ipc import ExecutorIPCClient
+
+        executor_ipc_client = ExecutorIPCClient(socket_path=executor_socket_path)
 
     from aipm.control_plane.composition import serve_operator_transport
 
     try:
-        serve_operator_transport(host=host, port=port)
+        serve_operator_transport(
+            host=host,
+            port=port,
+            update_engine=update_engine,
+            executor_ipc_client=executor_ipc_client,
+        )
     except Exception as exc:
         typer.echo(f"Operator transport refused to start: {exc}", err=True)
         raise typer.Exit(code=1)
