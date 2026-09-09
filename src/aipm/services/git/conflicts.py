@@ -12,6 +12,9 @@ class ConflictAnalyzer:
         "requirements.txt",
         "pyproject.toml",
         "package.json",
+        ".env",
+        ".env.local",
+        ".env.local.backup",
     }
 
     def classify(self, files: list[str]) -> dict:
