@@ -91,9 +91,12 @@ Environment=AIPM_LOG_FILE=/var/lib/aipm-executor/logs/executor.log
 # Drill phase keeps AF_UNIX ONLY (file:// origin needs no AF_INET); the
 # production drop-in later ADDS AF_INET AF_INET6 for GitHub HTTPS.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-# ExecStart= is single-valued: in a drop-in it REPLACES the base command
-# line — the FULL command (base flags + the appended update-plane flags)
-# must be restated here. Complete restatement is mandatory, not additive.
+# ExecStart= is a LIST setting: a drop-in APPENDS to the base entry unless
+# the list is first cleared with an empty `ExecStart=` line (systemd 255
+# rejects two entries for non-oneshot services). The FULL command (base
+# flags + the appended update-plane flags) must then be restated as the
+# single new entry. Empty-reset + complete restatement is mandatory.
+ExecStart=
 ExecStart=/home/ubuntu/aipm/.venv/bin/aipm executor run --allowed-caller-uids 997 --enable-update-plan --update-audit-dir /var/lib/aipm-executor/state/audit
 ```
 
