@@ -93,37 +93,44 @@ class GitProvider:
         except (InvalidGitRepositoryError, NoSuchPathError, GitCommandError):
             return self._empty_repository()
 
-        current = self._current_commit(repo)
-        detached = bool(repo.head.is_detached)
         try:
-            branch = None if detached else repo.active_branch.name
-        except (TypeError, ValueError, GitCommandError):
-            branch = None
+            current = self._current_commit(repo)
+            detached = bool(repo.head.is_detached)
+            try:
+                branch = None if detached else repo.active_branch.name
+            except (TypeError, ValueError, GitCommandError):
+                branch = None
 
-        remote = self._remote_commit(repo, branch)
-        ahead, behind = self._ahead_behind(repo, branch, remote)
-        origin = self._origin(repo)
-        remote_url = next(iter(origin.urls), None) if origin is not None else None
-        untracked_files = sorted(repo.untracked_files)
+            remote = self._remote_commit(repo, branch)
+            ahead, behind = self._ahead_behind(repo, branch, remote)
+            origin = self._origin(repo)
+            remote_url = next(iter(origin.urls), None) if origin is not None else None
+            untracked_files = sorted(repo.untracked_files)
 
-        return GitRepository(
-            exists=True,
-            branch=branch,
-            current_sha=current.hexsha if current else None,
-            remote_sha=remote.hexsha if remote else None,
-            remote_url=remote_url,
-            dirty=repo.is_dirty(untracked_files=True),
-            detached=detached,
-            ahead=ahead,
-            behind=behind,
-            modified_files=self._changed_files(repo),
-            untracked_files=untracked_files,
-            conflicted_files=sorted(repo.index.unmerged_blobs().keys()),
-            stashes=self._stash_list(repo),
-            last_fetch=None,
-            last_commit_message=current.message.strip() if current else None,
-            last_commit_author=current.author.name if current else None,
-        )
+            return GitRepository(
+                exists=True,
+                branch=branch,
+                current_sha=current.hexsha if current else None,
+                remote_sha=remote.hexsha if remote else None,
+                remote_url=remote_url,
+                dirty=repo.is_dirty(untracked_files=True),
+                detached=detached,
+                ahead=ahead,
+                behind=behind,
+                modified_files=self._changed_files(repo),
+                untracked_files=untracked_files,
+                conflicted_files=sorted(repo.index.unmerged_blobs().keys()),
+                stashes=self._stash_list(repo),
+                last_fetch=None,
+                last_commit_message=current.message.strip() if current else None,
+                last_commit_author=current.author.name if current else None,
+            )
+        except BrokenPipeError:
+            # A dead persistent cat-file subprocess (for example after a
+            # dubious-ownership refusal) surfaces here as EPIPE, which no
+            # helper tuple catches: degrade to the empty snapshot so
+            # discovery continues and planning fails closed downstream.
+            return self._empty_repository()
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen[bytes]) -> None:
