@@ -128,4 +128,8 @@ class HttpOperatorTransportClient:
         if not isinstance(payload, dict):
             raise OperatorTransportUnavailable()
 
-        return OperatorResponse(status=int(response.status_code), payload=payload)
+        return OperatorResponse(
+            status=int(response.status_code),
+            payload=payload,
+            headers=dict(response.headers),
+        )

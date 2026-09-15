@@ -27,11 +27,12 @@ _PROJECT_SEGMENT = r"[0-9a-f]{24}"
 _ID_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}"
 
 #: The only canonical paths the dashboard proxy may ever reach. Each entry is
-#: an exact (method, path) pair: the update approval/execute verbs and the
-#: read-only status/action projections. Rollback, confirm, snapshot,
-#: kill-switch, login, plan authorize, and audit verbs are absent by
-#: construction, not by convention.
+#: an exact (method, path) pair: the session bootstrap (login), update
+#: approval/execute verbs, and read-only status/action projections. Rollback,
+#: confirm, snapshot, kill-switch, plan authorize, and audit verbs are absent
+#: by construction, not by convention.
 _ALLOWED_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("POST", re.compile(r"^/login$")),
     ("POST", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/approval$")),
     ("POST", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/execute$")),
     ("GET", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/status$")),
@@ -53,10 +54,11 @@ class OperatorTransportUnavailable(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class OperatorResponse:
-    """Canonical status code plus the parsed canonical JSON object."""
+    """Canonical status code, headers, and parsed JSON payload."""
 
     status: int
     payload: dict[str, Any]
+    headers: dict[str, str]  # Response headers (for Set-Cookie in login)
 
 
 class OperatorTransportClient(Protocol):
@@ -157,4 +159,8 @@ class AsgiOperatorTransportClient:
             raise OperatorTransportUnavailable() from exc
         if not isinstance(payload, dict):
             raise OperatorTransportUnavailable()
-        return OperatorResponse(status=int(response.status_code), payload=payload)
+        return OperatorResponse(
+            status=int(response.status_code),
+            payload=payload,
+            headers=dict(response.headers),
+        )

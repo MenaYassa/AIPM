@@ -97,7 +97,18 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     controls.innerHTML = '<button disabled>Processing...</button>';
     const token = await getCsrfToken();
     if (!token) {
-      result.innerHTML = '<div style="color:#e74c3c">CSRF token unavailable. Ensure authenticated session.</div>';
+      // Unauthenticated: prompt for owner secret to bootstrap session
+      result.innerHTML = `
+        <div style="border:1px solid #3498db;padding:12px;margin-top:8px;background:#ebf5fb;border-radius:4px">
+          <div style="font-weight:bold;margin-bottom:6px">Authentication Required</div>
+          <div class="subtle" style="margin-bottom:8px">Enter owner secret to authorize update:</div>
+          <div style="display:flex;gap:8px">
+            <input type="password" id="ownerSecretInput-${projectId}" placeholder="Owner secret" style="flex:1;padding:6px;border:1px solid #ccc;border-radius:3px" autocomplete="off" />
+            <button onclick="window.handleLogin('${projectId}', '${digest}')" style="background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:3px;cursor:pointer">Authenticate</button>
+          </div>
+          <div id="loginError-${projectId}" style="color:#e74c3c;margin-top:6px;font-size:0.9em"></div>
+        </div>`;
+      controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Cancel</button>`;
       return;
     }
     try {
@@ -123,6 +134,46 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     } catch {
       result.innerHTML = '<div style="color:#e74c3c">Request failed</div>';
       controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Retry</button>`;
+    }
+  };
+
+  window.handleLogin = async function(projectId, digest) {
+    const input = document.getElementById(`ownerSecretInput-${projectId}`);
+    const errorDiv = document.getElementById(`loginError-${projectId}`);
+    if (!input || !errorDiv) return;
+
+    const secret = input.value;
+    if (!secret) {
+      errorDiv.textContent = 'Secret is required';
+      return;
+    }
+
+    errorDiv.textContent = 'Authenticating...';
+    try {
+      // Submit secret ONLY to same-origin dashboard endpoint
+      // Never store in localStorage/sessionStorage; clear input immediately
+      const response = await fetch('/api/session/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'include',
+        body: JSON.stringify({secret: secret}),
+      });
+
+      // Clear input immediately (never persist or log)
+      input.value = '';
+
+      if (response.ok) {
+        // Reset cached CSRF token so next call reacquires it
+        csrfToken = null;
+        // Resume authorization workflow now that session is established
+        window.handleApprove(projectId, digest);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        errorDiv.textContent = data.error === 'unauthenticated' ? 'Invalid secret' : 'Authentication failed';
+      }
+    } catch {
+      input.value = '';
+      errorDiv.textContent = 'Connection error';
     }
   };
 

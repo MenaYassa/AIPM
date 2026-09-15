@@ -234,8 +234,97 @@ def create_app(
         )
 
     # ------------------------------------------------------------------
-    # Session: authenticated endpoint to obtain CSRF token server-side
+    # Session: public-origin authentication bootstrap and CSRF acquisition
     # ------------------------------------------------------------------
+
+    @app.post("/api/session/login")
+    async def session_login(request: Request) -> JSONResponse:
+        """Relay owner login to operator transport (public-origin bootstrap).
+
+        Dashboard remains a thin relay: the operator transport is the sole
+        authentication authority. The dashboard does not validate the owner
+        secret, does not mint session IDs, does not store sessions, and does
+        not become a second authentication authority.
+
+        Browser submits owner secret to same-origin dashboard endpoint;
+        dashboard forwards to loopback operator transport; operator validates
+        secret and mints canonical session; dashboard relays Set-Cookie to
+        browser with secure attributes appropriate for the public HTTPS origin.
+
+        Returns:
+            200 {authenticated: true} with Set-Cookie header for authenticated session
+            401 {error: "unauthenticated"} for invalid credentials
+            422 {error: "invalid_request"} for malformed input
+            503 {error: "control_plane_unavailable"} when operator unavailable
+        """
+        if update_proxy.client is None:
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
+        # Parse and validate login body (bounded, expected shape only)
+        try:
+            body = await request.body()
+            if len(body) > 2048:  # Bounded: owner secret + JSON overhead
+                return JSONResponse({"error": "invalid_request"}, status_code=422)
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                return JSONResponse({"error": "invalid_request"}, status_code=422)
+            secret = payload.get("secret")
+            if not isinstance(secret, str) or not secret or len(secret) > 1024:
+                return JSONResponse({"error": "invalid_request"}, status_code=422)
+        except Exception:
+            return JSONResponse({"error": "invalid_request"}, status_code=422)
+
+        # Forward login request to operator transport (sole authentication authority)
+        try:
+            response = await update_proxy.client.request(
+                "POST",
+                "/login",
+                session_cookie=None,
+                csrf_token=None,
+                json_body={"secret": secret},
+            )
+        except Exception:
+            # Operator transport unreachable
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
+        # Relay operator response with bounded error projection
+        if response.status == 401:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        elif response.status == 422:
+            return JSONResponse({"error": "invalid_request"}, status_code=422)
+        elif response.status != 200:
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
+        # Extract Set-Cookie from operator response and rewrite for public HTTPS origin
+        operator_set_cookie = response.headers.get("set-cookie")
+        if not operator_set_cookie or "aipm_cp_session=" not in operator_set_cookie:
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
+        # Rewrite cookie attributes for public HTTPS origin while preserving canonical session ID
+        # Operator transport issues: aipm_cp_session=<id>; HttpOnly; SameSite=Strict; Secure=False; Path=/; Max-Age=1800
+        # Browser requires: Secure=True for HTTPS origin; no Domain (host-only to vpanel.03092017.xyz)
+        import re
+        cookie_match = re.search(r"aipm_cp_session=([^;]+)", operator_set_cookie)
+        if not cookie_match:
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
+        session_id = cookie_match.group(1)
+        max_age_match = re.search(r"Max-Age=(\d+)", operator_set_cookie)
+        max_age = int(max_age_match.group(1)) if max_age_match else 1800
+
+        # Build browser-facing response with canonical session cookie
+        json_response = JSONResponse({"authenticated": True}, status_code=200)
+        json_response.set_cookie(
+            "aipm_cp_session",
+            session_id,
+            httponly=True,
+            secure=True,  # Required for HTTPS origin
+            samesite="strict",
+            max_age=max_age,
+            path="/",
+            # Domain NOT SET: host-only to vpanel.03092017.xyz
+        )
+        return json_response
 
     @app.get("/api/session/csrf")
     async def session_csrf(request: Request) -> JSONResponse:
