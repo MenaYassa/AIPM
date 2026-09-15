@@ -237,6 +237,44 @@ def create_app(
     # Session: public-origin authentication bootstrap and CSRF acquisition
     # ------------------------------------------------------------------
 
+    @app.get("/api/session/csrf")
+    async def session_csrf(request: Request) -> JSONResponse:
+        """Return CSRF token for authenticated session (server-side acquisition).
+
+        The browser session cookie is forwarded to the operator transport to
+        obtain the CSRF token server-side. The browser never directly accesses
+        the operator transport (port 8789); all cross-service communication is
+        server-side over loopback.
+
+        Returns:
+            {csrf_token: "..."} for authenticated sessions
+            {error: "unauthenticated"} if no session cookie
+        """
+        session_cookie = _operator_session_cookie(request, update_proxy)
+        if not session_cookie:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+
+        # Forward authenticated session to operator transport to retrieve CSRF token
+        if update_proxy.client is None:
+            # Operator transport not composed; cannot obtain CSRF token
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
+        try:
+            response = await update_proxy.client.request(
+                "GET",
+                "/session",
+                session_cookie=session_cookie,
+            )
+            if response.status == 200 and isinstance(response.payload, dict):
+                csrf_token = response.payload.get("csrf_token")
+                if isinstance(csrf_token, str):
+                    return JSONResponse({"csrf_token": csrf_token}, status_code=200)
+            # Operator returned error or malformed response
+            return JSONResponse({"error": "session_unavailable"}, status_code=503)
+        except Exception:
+            # Operator transport unreachable
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
     @app.post("/api/session/login")
     async def session_login(request: Request) -> JSONResponse:
         """Relay owner login to operator transport (public-origin bootstrap).
@@ -325,44 +363,6 @@ def create_app(
             # Domain NOT SET: host-only to vpanel.03092017.xyz
         )
         return json_response
-
-    @app.get("/api/session/csrf")
-    async def session_csrf(request: Request) -> JSONResponse:
-        """Return CSRF token for authenticated session (server-side acquisition).
-
-        The browser session cookie is forwarded to the operator transport to
-        obtain the CSRF token server-side. The browser never directly accesses
-        the operator transport (port 8789); all cross-service communication is
-        server-side over loopback.
-
-        Returns:
-            {csrf_token: "..."} for authenticated sessions
-            {error: "unauthenticated"} if no session cookie
-        """
-        session_cookie = _operator_session_cookie(request, update_proxy)
-        if not session_cookie:
-            return JSONResponse({"error": "unauthenticated"}, status_code=401)
-
-        # Forward authenticated session to operator transport to retrieve CSRF token
-        if update_proxy.client is None:
-            # Operator transport not composed; cannot obtain CSRF token
-            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
-
-        try:
-            response = await update_proxy.client.request(
-                "GET",
-                "/session",
-                session_cookie=session_cookie,
-            )
-            if response.status == 200 and isinstance(response.payload, dict):
-                csrf_token = response.payload.get("csrf_token")
-                if isinstance(csrf_token, str):
-                    return JSONResponse({"csrf_token": csrf_token}, status_code=200)
-            # Operator returned error or malformed response
-            return JSONResponse({"error": "session_unavailable"}, status_code=503)
-        except Exception:
-            # Operator transport unreachable
-            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
 
     @app.get("/api/systemd/units")
     def systemd_units(limit: int = Query(20, ge=1, le=20)):

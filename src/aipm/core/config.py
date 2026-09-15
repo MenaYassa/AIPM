@@ -13,10 +13,12 @@ from aipm.models.config import (
     AIPMConfig,
     DiscoveryConfig,
     EventConfig,
+    HostProjectConfig,
     LoggingConfig,
     NotificationChannelConfig,
     NotificationConfig,
     NotificationPolicyConfig,
+    SystemdProjectConfig,
     TelemetryConfig,
 )
 
@@ -68,12 +70,23 @@ class ConfigManager:
                 channels=[NotificationChannelConfig(**item) for item in channel_data],
                 policies=[NotificationPolicyConfig(**item) for item in policy_data],
             )
+            projects_data = data.get("projects")
+            projects_map: dict[str, HostProjectConfig] = {}
+            if isinstance(projects_data, dict):
+                for p_name, p_data in projects_data.items():
+                    if isinstance(p_data, dict):
+                        sys_data = dict(p_data.get("systemd", {}) or {})
+                        sys_cfg = SystemdProjectConfig(**sys_data) if isinstance(sys_data, dict) else SystemdProjectConfig()
+                        projects_map[str(p_name)] = HostProjectConfig(
+                            runtime_mode=p_data.get("runtime_mode", "custom"),
+                            systemd=sys_cfg,
+                        )
             logging_config = LoggingConfig(**logging_data)
             discovery_config = DiscoveryConfig(**discovery_data)
             telemetry_config = TelemetryConfig(**telemetry_data)
             event_config = EventConfig(**events_data)
             self._validate(logging_config, discovery_config, telemetry_config, event_config, notification_config)
-            return AIPMConfig(logging=logging_config, discovery=discovery_config, telemetry=telemetry_config, events=event_config, notifications=notification_config, host_id=host_id)
+            return AIPMConfig(logging=logging_config, discovery=discovery_config, telemetry=telemetry_config, events=event_config, notifications=notification_config, host_id=host_id, projects=projects_map)
         except (TypeError, ValueError, yaml.YAMLError) as exc:
             raise AIPMError(f"Failed to load configuration from {self.config_path}: {exc}") from exc
         except OSError as exc:

@@ -14,7 +14,7 @@ login, plan-mutation, or any other canonical verb through this client.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from aipm.control_plane.transport import SESSION_COOKIE
@@ -58,7 +58,7 @@ class OperatorResponse:
 
     status: int
     payload: dict[str, Any]
-    headers: dict[str, str]  # Response headers (for Set-Cookie in login)
+    headers: dict[str, str] = field(default_factory=dict)  # Response headers (for Set-Cookie in login)
 
 
 class OperatorTransportClient(Protocol):

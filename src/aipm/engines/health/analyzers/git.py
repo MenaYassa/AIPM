@@ -3,6 +3,7 @@ from __future__ import annotations
 from aipm.models.finding import Finding, Severity
 from aipm.models.project import Project
 from aipm.engines.health.analyzers.base import Analyzer
+from aipm.services.git.posture import classify_git_posture
 
 
 class GitAnalyzer(Analyzer):
@@ -11,40 +12,9 @@ class GitAnalyzer(Analyzer):
             return []
 
         repository = project.git
-        findings: list[Finding] = []
-        if repository.detached:
-            findings.append(
-                Finding(
-                    code="GIT_DETACHED_HEAD",
-                    component="Git",
-                    severity=Severity.WARNING,
-                    title="Repository is in detached HEAD state",
-                    description="The project is not currently checked out on a named branch.",
-                    recommendation="Check out the intended deployment branch before updating.",
-                )
-            )
-        if repository.conflicted_files:
-            findings.append(
-                Finding(
-                    code="GIT_CONFLICTS",
-                    component="Git",
-                    severity=Severity.CRITICAL,
-                    title="Unresolved merge conflicts detected",
-                    description=f"{len(repository.conflicted_files)} file(s) contain unresolved conflicts.",
-                    recommendation="Resolve all conflicts before running AIPM update operations.",
-                )
-            )
-        elif repository.dirty:
-            findings.append(
-                Finding(
-                    code="GIT_DIRTY",
-                    component="Git",
-                    severity=Severity.HIGH,
-                    title="Uncommitted changes detected",
-                    description="The working tree contains local changes or untracked files.",
-                    recommendation="Commit or intentionally stash local changes before updating.",
-                )
-            )
+        assessment = classify_git_posture(repository)
+        findings: list[Finding] = list(assessment.findings)
+
         if repository.behind:
             findings.append(
                 Finding(

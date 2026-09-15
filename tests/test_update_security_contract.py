@@ -1096,10 +1096,13 @@ class TestSourceBoundary:
         # dashboard may proxy approval and execution to the canonical operator
         # transport, but must never grow a rollback surface or call an
         # execution primitive itself.
+        # C6.6 adds /api/session/login as the public-origin session bootstrap
+        # relay; it owns no mutation authority and proxies only to /login.
         mutation_routes = sorted(re.findall(r"@app\.(?:post|put|patch|delete)\(\"([^\"]+)\"\)", source))
         assert mutation_routes == [
             "/api/projects/{project_id}/update/approve",
             "/api/projects/{project_id}/update/execute",
+            "/api/session/login",
         ]
         for forbidden in ("execute_update", "update/rollback", "rollback", "subprocess", "Popen"):
             assert forbidden not in source

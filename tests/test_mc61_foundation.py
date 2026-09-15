@@ -158,6 +158,7 @@ def test_mc5_routes_remain_get_only_and_acknowledgement_is_not_exposed() -> None
     assert sorted(re.findall(r"@app\.post\(\"([^\"]+)\"\)", source)) == [
         "/api/projects/{project_id}/update/approve",
         "/api/projects/{project_id}/update/execute",
+        "/api/session/login",
     ]
     assert "@app.put" not in source
     assert "@app.patch" not in source

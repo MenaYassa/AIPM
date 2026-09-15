@@ -4,6 +4,7 @@ from aipm.models.git_transaction import GitTransactionResult
 from aipm.models.git_update_plan import GitUpdatePlan
 from aipm.providers.git.provider import GitProvider
 from aipm.services.git.conflicts import ConflictAnalyzer
+from aipm.services.git.posture import classify_git_posture
 
 
 class GitService:
@@ -95,6 +96,7 @@ class GitService:
             )
 
         # Detached HEAD
+        posture = classify_git_posture(repo)
         if repo.detached:
             reasons.append("Repository is in detached HEAD state.")
             review_required = True
@@ -133,23 +135,13 @@ class GitService:
         if repo.behind:
             reasons.append(f"{repo.behind} commits available.")
 
-        # Dirty state - classify modified files
-        if repo.conflicted_files:
-            review_required = True
-            reasons.append(f"Unresolved merge conflicts in {len(repo.conflicted_files)} file(s).")
-        elif repo.dirty:
-            modified = list(dict.fromkeys(repo.modified_files + repo.untracked_files))
-            classification = self.conflicts.classify(modified)
-            if classification["critical"]:
+        # Dirty state - driven by canonical posture classification
+        if repo.conflicted_files or repo.dirty:
+            if posture.review_required:
                 review_required = True
-                reasons.append(
-                    "Critical infrastructure files modified: "
-                    + ", ".join(classification["critical"])
-                    + "."
-                )
-            else:
+            if posture.stash_required:
                 stash_required = True
-                reasons.append("Uncommitted changes detected in non-critical files; AIPM can preserve them in a safety stash.")
+            reasons.extend(r for r in posture.reasons if "detached" not in r)
 
         # Existing stashes (warn but don't block)
         if repo.stashes:

@@ -129,7 +129,12 @@ class ProjectService:
                 compose_files.append(str(compose_path))
 
         capabilities.has_git = (path / ".git").is_dir()
-        if not capabilities.has_compose and not capabilities.has_git:
+        project_config = getattr(self.app.config, "projects", {}).get(path.name)
+        if project_config and project_config.runtime_mode == "systemd" and project_config.systemd.allowed_units:
+            capabilities.has_systemd = True
+            capabilities.systemd_units = list(project_config.systemd.allowed_units)
+
+        if not capabilities.has_compose and not capabilities.has_git and not capabilities.has_systemd:
             return None
 
         return Project(
@@ -137,6 +142,8 @@ class ProjectService:
             path=str(path),
             capabilities=capabilities,
             compose_files=compose_files,
+            systemd_units=list(capabilities.systemd_units),
+            runtime_mode=project_config.runtime_mode if project_config else "custom",
         )
 
     def get_project(self, name: str) -> Project:

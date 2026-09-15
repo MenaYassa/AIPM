@@ -116,6 +116,22 @@ class NotificationConfig:
     policies: list[NotificationPolicyConfig] = field(default_factory=list)
 
 
+@dataclass
+class SystemdProjectConfig:
+    allowed_units: list[str] = field(default_factory=list)
+    restart_verb: str = "try-restart"
+    health_probe_type: str = "http"
+    health_probe_url: str | None = None
+    health_probe_timeout_seconds: float = 15.0
+    health_probe_expected_status: int = 200
+
+
+@dataclass
+class HostProjectConfig:
+    runtime_mode: str = "custom"
+    systemd: SystemdProjectConfig = field(default_factory=SystemdProjectConfig)
+
+
 _HOST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,63}$")
 
 
@@ -127,6 +143,7 @@ class AIPMConfig:
     events: EventConfig = field(default_factory=EventConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
     host_id: str = "agent"
+    projects: dict[str, HostProjectConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.host_id, str) or _HOST_ID_RE.fullmatch(self.host_id) is None:

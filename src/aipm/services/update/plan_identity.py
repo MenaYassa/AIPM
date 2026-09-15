@@ -81,6 +81,10 @@ class UpdatePlanIdentity:
     health_high: int | None = None
     health_warning: int | None = None
     health_info: int | None = None
+    runtime_mode: str | None = None
+    systemd_units: tuple[str, ...] | None = None
+    systemd_action: str | None = None
+    health_probe_contract: str | None = None
     version: str = PLAN_IDENTITY_VERSION
 
     def __post_init__(self) -> None:
@@ -94,6 +98,14 @@ class UpdatePlanIdentity:
             raise ValueError("Invalid risk")
         _validate_text_tuple(self.reasons, "reasons")
         _validate_text_tuple(self.actions, "actions")
+        if self.runtime_mode is not None:
+            _validate_text(self.runtime_mode, "runtime_mode")
+        if self.systemd_action is not None:
+            _validate_text(self.systemd_action, "systemd_action")
+        if self.health_probe_contract is not None:
+            _validate_text(self.health_probe_contract, "health_probe_contract")
+        if self.systemd_units is not None:
+            _validate_text_tuple(self.systemd_units, "systemd_units")
         for name in ("git_modified_files", "git_untracked_files", "git_conflicted_files"):
             value = getattr(self, name)
             if value is not None:
@@ -154,6 +166,10 @@ class UpdatePlanIdentity:
             "health_score": self.health_score,
             "health_state": self.health_state,
             "health_warning": self.health_warning,
+            "health_probe_contract": self.health_probe_contract,
+            "runtime_mode": self.runtime_mode,
+            "systemd_action": self.systemd_action,
+            "systemd_units": list(self.systemd_units) if self.systemd_units is not None else None,
         }
         payload.update({key: value for key, value in optional.items() if value is not None})
         return payload
@@ -175,6 +191,8 @@ class UpdatePlanIdentity:
             raise ValueError("Invalid plan")
         git = plan.git
         health = plan.health_before
+        raw_units = getattr(plan, "systemd_units", None)
+        systemd_units = tuple(sorted(raw_units)) if raw_units else None
         return cls(
             project=plan.project,
             dry_run=plan.dry_run,
@@ -205,6 +223,10 @@ class UpdatePlanIdentity:
             health_high=None if health is None else int(health.high),
             health_warning=None if health is None else int(health.warning),
             health_info=None if health is None else int(health.info),
+            runtime_mode=getattr(plan, "runtime_mode", None),
+            systemd_units=systemd_units,
+            systemd_action=getattr(plan, "systemd_action", None),
+            health_probe_contract=getattr(plan, "health_probe_contract", None),
         )
 
 

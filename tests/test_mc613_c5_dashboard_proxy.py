@@ -945,7 +945,6 @@ def test_p_no_secret_session_or_csrf_material_is_logged_or_returned(tmp_path: Pa
 
 def test_allow_list_rejects_every_non_update_canonical_route():
     for method, path in (
-        ("POST", "/login"),
         ("POST", "/logout"),
         ("GET", "/session"),
         ("POST", f"/actions/{'a' * 32}/confirm"),
@@ -967,6 +966,7 @@ def test_allow_list_rejects_every_non_update_canonical_route():
 
 
 def test_allow_list_admits_only_the_three_update_verbs_and_action_read():
+    assert_allowed_route("POST", "/login")
     assert_allowed_route("POST", f"/updates/{PROJECT_ID}/approval")
     assert_allowed_route("POST", f"/updates/{PROJECT_ID}/execute")
     assert_allowed_route("GET", f"/updates/{PROJECT_ID}/status")

@@ -35,6 +35,10 @@ class UpdatePlan:
     pull_required: bool = False
     git: GitRepository | None = None
     health_before: HealthReport | None = None
+    runtime_mode: str = "custom"
+    systemd_units: list[str] = field(default_factory=list)
+    systemd_action: str | None = None
+    health_probe_contract: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

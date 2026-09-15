@@ -21,6 +21,8 @@ class ComposeService:
 class ProjectCapabilities:
     has_compose: bool = False
     has_git: bool = False
+    has_systemd: bool = False
+    systemd_units: list[str] = field(default_factory=list)
 
 @dataclass
 class Project:
@@ -31,6 +33,8 @@ class Project:
     services: list[ComposeService] = field(default_factory=list)
     git: GitRepository | None = None
     health: HealthStatus = HealthStatus.UNKNOWN
+    systemd_units: list[str] = field(default_factory=list)
+    runtime_mode: str = "custom"
 
     @property
     def git_branch(self) -> str | None:

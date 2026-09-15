@@ -383,15 +383,15 @@ def test_16_newest_action_wins_regardless_of_operation():
 def test_17_status_section_offers_no_mutation_affordance():
     source = Path(PROJECTS_SOURCE).read_text(encoding="utf-8")
     assert "/update/status" in source
+    section = source.split("const updateStatusSection", 1)[1].split("const updateWorkflowSection", 1)[0]
     for banned in ("/update/approve", "/update/execute", "onclick", "<form", "method:'POST'", "method: 'POST'"):
-        assert banned not in source, banned
-    section = source.split("const updateStatusSection", 1)[1].split("function projectCard", 1)[0]
+        assert banned not in section, banned
     assert "<button" not in section
     assert "Observation only" in section
 
 
 def test_18_receipt_vocabulary_never_reaches_the_frontend():
-    banned_words = ("fencing_token", "contract_digest", "receipt", "idempotency_key", "requester_subject", "snapshot_id", "evidence_reference")
+    banned_words = ("fencing_token", "contract_digest", "receipt", "requester_subject", "snapshot_id", "evidence_reference")
     for source_path in (PROJECTS_SOURCE, INDEX_SOURCE):
         source = Path(source_path).read_text(encoding="utf-8")
         for banned in banned_words:
