@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+from pathlib import Path
 import selectors
 import signal
 import subprocess
 import time
 from threading import Event
+from typing import Any
 
 import git
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
@@ -29,10 +31,50 @@ class GitProvider:
     def _empty_repository() -> GitRepository:
         return GitRepository()
 
+    @classmethod
+    def _configure_safe_repo(cls, repo: Any, exact_path: str) -> None:
+        git_cmd = getattr(repo, "git", None)
+        if git_cmd is None or not hasattr(git_cmd, "set_persistent_git_options") or not hasattr(git_cmd, "update_environment"):
+            raise GitError(f"Cannot establish exact-path Git trust for '{exact_path}': Git command wrapper unavailable")
+
+        real_path = os.path.realpath(exact_path)
+        safe_paths = [exact_path]
+        if real_path != exact_path:
+            safe_paths.append(real_path)
+
+        if len(safe_paths) == 1:
+            git_cmd.set_persistent_git_options(c=f"safe.directory={safe_paths[0]}")
+        else:
+            git_cmd.set_persistent_git_options(c=[f"safe.directory={p}" for p in safe_paths])
+
+        env_updates: dict[str, str] = {
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_CONFIG_COUNT": str(len(safe_paths)),
+        }
+        for i, p in enumerate(safe_paths):
+            env_updates[f"GIT_CONFIG_KEY_{i}"] = "safe.directory"
+            env_updates[f"GIT_CONFIG_VALUE_{i}"] = p
+        git_cmd.update_environment(**env_updates)
+
+    @classmethod
+    def _open_repo(cls, path: str | Path | os.PathLike[str]) -> git.Repo:
+        exact_path = os.path.abspath(os.path.normpath(str(path)))
+        if "*" in exact_path:
+            raise GitError(f"Wildcard safe.directory is forbidden: {exact_path}")
+        repo = git.Repo(exact_path)
+        cls._configure_safe_repo(repo, exact_path)
+        return repo
+
     def _repo(self, project: Project):
         try:
-            return git.Repo(project.path)
-        except (InvalidGitRepositoryError, NoSuchPathError, GitCommandError) as exc:
+            return self._open_repo(project.path)
+        except (
+            InvalidGitRepositoryError,
+            NoSuchPathError,
+            GitCommandError,
+            GitError,
+            BrokenPipeError,
+        ) as exc:
             raise GitError(f"'{project.name}' is not a valid Git repository: {exc}") from exc
 
     @staticmethod
@@ -54,7 +96,7 @@ class GitProvider:
             return None
         try:
             return repo.refs[f"origin/{branch}"].commit
-        except (IndexError, AttributeError, ValueError, TypeError):
+        except (IndexError, AttributeError, ValueError, TypeError, GitCommandError):
             return None
 
     def _ahead_behind(self, repo, branch: str | None, remote_commit) -> tuple[int, int]:
@@ -89,8 +131,8 @@ class GitProvider:
     def repository(self, project: Project) -> GitRepository:
         """Return a read-only repository snapshot without contacting a remote."""
         try:
-            repo = git.Repo(project.path)
-        except (InvalidGitRepositoryError, NoSuchPathError, GitCommandError):
+            repo = self._open_repo(project.path)
+        except (InvalidGitRepositoryError, NoSuchPathError, GitCommandError, GitError, BrokenPipeError):
             return self._empty_repository()
 
         try:
@@ -125,10 +167,10 @@ class GitProvider:
                 last_commit_message=current.message.strip() if current else None,
                 last_commit_author=current.author.name if current else None,
             )
-        except BrokenPipeError:
+        except (BrokenPipeError, GitCommandError):
             # A dead persistent cat-file subprocess (for example after a
-            # dubious-ownership refusal) surfaces here as EPIPE, which no
-            # helper tuple catches: degrade to the empty snapshot so
+            # dubious-ownership refusal) surfaces here as EPIPE or GitCommandError,
+            # which no helper tuple catches: degrade to the empty snapshot so
             # discovery continues and planning fails closed downstream.
             return self._empty_repository()
 
@@ -151,6 +193,8 @@ class GitProvider:
     def _run_bounded_git(cls, path: str, args: tuple[str, ...], *, timeout_seconds: float, output_limit: int, cancel_event: Event | None = None, deadline: float | None = None) -> str:
         if timeout_seconds <= 0 or output_limit <= 0:
             raise GitError("invalid Git bounds")
+        if "*" in path:
+            raise GitError(f"Wildcard safe.directory is forbidden: {path}")
         environment = os.environ.copy()
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         process = subprocess.Popen(
@@ -343,7 +387,7 @@ class GitProvider:
         instead of assuming there is nothing incoming.
         """
         try:
-            repo = git.Repo(project.path)
+            repo = self._open_repo(project.path)
         except (InvalidGitRepositoryError, NoSuchPathError, GitCommandError):
             return None
         try:
