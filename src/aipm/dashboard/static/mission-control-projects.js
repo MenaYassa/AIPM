@@ -2,6 +2,22 @@
 
 const escDefault = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
+// CSRF token cache for update mutations
+let csrfToken = null;
+
+async function getCsrfToken() {
+  if (csrfToken) return csrfToken;
+  try {
+    // Fetch CSRF token from same-origin dashboard endpoint (server obtains it
+    // from operator transport over loopback; browser never accesses port 8789)
+    const response = await fetch('/api/session/csrf', {credentials: 'include', cache: 'no-store'});
+    if (!response.ok) return null;
+    const data = await response.json();
+    csrfToken = data.csrf_token || null;
+    return csrfToken;
+  } catch { return null; }
+}
+
 export function createProjectController({scheduler, stateClass, escapeHtml = escDefault}) {
   const $ = id => document.getElementById(id);
   let selectedId = null;
@@ -48,6 +64,117 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
       : '<div class="empty">No update action recorded.</div>';
     return `<section class="health-evidence" id="projectUpdateStatus"><h4>Control-plane update status</h4>${rows}<div class="subtle">Observation only — updates are approved through the canonical operator transport.</div></section>`;
   };
+
+  // Update workflow section
+  const updateWorkflowSection = projectId => `<section class="update-workflow" id="updateWorkflow-${projectId}"><h4>Update Workflow</h4><div id="updatePlanPanel-${projectId}" class="subtle">Loading plan...</div><div id="updateControls-${projectId}"></div><div id="updateResult-${projectId}"></div></section>`;
+
+  async function loadUpdatePlan(projectId) {
+    const panel = document.getElementById(`updatePlanPanel-${projectId}`);
+    const controls = document.getElementById(`updateControls-${projectId}`);
+    if (!panel || !controls) return;
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/update-plan`, {cache: 'no-store'});
+      const data = await response.json();
+      if (!data.available || !data.update_plan) {
+        panel.innerHTML = '<div class="empty">Update plan unavailable</div>';
+        return;
+      }
+      const plan = data.update_plan;
+      const canProceed = plan.proceed === true;
+      const riskClass = plan.risk === 'blocked' ? 'critical' : plan.risk === 'reversible' ? 'healthy' : 'warning';
+      panel.innerHTML = `<div class="detail-grid"><div><span class="metric-label">Risk</span><span class="badge ${riskClass}">${escapeHtml(plan.risk)}</span></div><div><span class="metric-label">Snapshot</span><strong>${plan.snapshot_required ? 'Required' : 'Not required'}</strong></div><div><span class="metric-label">Pull</span><strong>${plan.pull_required ? 'Required' : 'Not required'}</strong></div><div><span class="metric-label">Restart</span><strong>${plan.estimated_restart ? 'Expected' : 'Not expected'}</strong></div></div>${plan.reasons.length ? `<div class="update-reasons">${plan.reasons.slice(0, 5).map(r => `<div>${escapeHtml(r)}</div>`).join('')}</div>` : ''}${plan.actions.length ? `<div class="update-actions"><strong>Actions:</strong>${plan.actions.slice(0, 5).map(a => `<div>${escapeHtml(a)}</div>`).join('')}</div>` : ''}<div class="subtle" style="margin-top:8px">Digest: ${escapeHtml(plan.plan_digest.slice(0, 16))}...</div>`;
+      controls.innerHTML = `<button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}')">${canProceed ? 'Authorize Update' : 'Cannot Proceed'}</button>`;
+    } catch {
+      panel.innerHTML = '<div class="empty">Plan unavailable</div>';
+    }
+  }
+
+  window.handleApprove = async function(projectId, digest) {
+    const result = document.getElementById(`updateResult-${projectId}`);
+    const controls = document.getElementById(`updateControls-${projectId}`);
+    if (!result) return;
+    result.innerHTML = '<div class="subtle">Requesting authorization...</div>';
+    controls.innerHTML = '<button disabled>Processing...</button>';
+    const token = await getCsrfToken();
+    if (!token) {
+      result.innerHTML = '<div style="color:#e74c3c">CSRF token unavailable. Ensure authenticated session.</div>';
+      return;
+    }
+    try {
+      const response = await fetch(`/api/projects/${projectId}/update/approve`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
+        credentials: 'include',
+        body: JSON.stringify({update_plan_digest: digest, idempotency_key: `dashboard-${projectId}-${Date.now()}`})
+      });
+      const data = await response.json();
+      if (data.status === 'ok' && data.update_approval) {
+        const approval = data.update_approval;
+        if (approval.confirmation_required) {
+          result.innerHTML = `<div style="border:1px solid #f39c12;padding:8px;margin-top:8px;background:#fef5e7"><div><strong>Confirmation Required</strong></div><div class="subtle">Action: ${escapeHtml(approval.action_id)}</div></div>`;
+          controls.innerHTML = `<button onclick="window.handleExecute('${projectId}', '${approval.action_id}')">Execute Update</button>`;
+        } else {
+          result.innerHTML = `<div style="color:#27ae60">Authorized: ${escapeHtml(approval.action_id)}</div>`;
+        }
+      } else {
+        result.innerHTML = `<div style="color:#e74c3c">Failed: ${escapeHtml(data.error || 'unknown')}</div>`;
+        controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Retry</button>`;
+      }
+    } catch {
+      result.innerHTML = '<div style="color:#e74c3c">Request failed</div>';
+      controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Retry</button>`;
+    }
+  };
+
+  window.handleExecute = async function(projectId, actionId) {
+    const result = document.getElementById(`updateResult-${projectId}`);
+    const controls = document.getElementById(`updateControls-${projectId}`);
+    if (!result) return;
+    result.innerHTML = '<div class="subtle">Executing update...</div>';
+    controls.innerHTML = '<button disabled>Executing...</button>';
+    const token = await getCsrfToken();
+    if (!token) {
+      result.innerHTML = '<div style="color:#e74c3c">CSRF token unavailable</div>';
+      return;
+    }
+    try {
+      const response = await fetch(`/api/projects/${projectId}/update/execute`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
+        credentials: 'include',
+        body: JSON.stringify({action_id: actionId})
+      });
+      const data = await response.json();
+      if (data.status === 'ok' && data.update_execution) {
+        const exec = data.update_execution;
+        const stateClass = exec.outcome === 'success' ? 'healthy' : 'warning';
+        result.innerHTML = `<div style="margin-top:8px"><span class="badge ${stateClass}">${escapeHtml(exec.lifecycle_state || exec.outcome || 'executed')}</span><div class="subtle">Action: ${escapeHtml(exec.action_id)}</div></div>`;
+        controls.innerHTML = `<button onclick="window.pollUpdateStatus('${projectId}')">Refresh Status</button>`;
+        setTimeout(() => window.pollUpdateStatus(projectId), 2000);
+      } else {
+        result.innerHTML = `<div style="color:#e74c3c">Execution failed: ${escapeHtml(data.error || 'unknown')}</div>`;
+      }
+    } catch {
+      result.innerHTML = '<div style="color:#e74c3c">Request failed</div>';
+    }
+  };
+
+  window.pollUpdateStatus = async function(projectId) {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/update/status`, {credentials: 'include', cache: 'no-store'});
+      const data = await response.json();
+      if (data.status === 'ok' && data.update_status?.latest_update_action) {
+        const latest = data.update_status.latest_update_action;
+        const result = document.getElementById(`updateResult-${projectId}`);
+        if (result) {
+          const stClass = latest.state === 'verified_success' ? 'healthy' : latest.state?.includes('failed') ? 'critical' : 'warning';
+          result.innerHTML = `<div style="margin-top:8px"><span class="badge ${stClass}">${escapeHtml(latest.state || 'unknown')}</span><div class="subtle">Outcome: ${escapeHtml(latest.outcome || 'pending')}</div></div>`;
+        }
+      }
+    } catch {}
+  };
+
+  window.loadUpdatePlan = loadUpdatePlan;
 
   function projectCard(project, local = false) {
     const health = project.health || {};
@@ -106,7 +233,9 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectDetailState').className = `badge ${stateClass(health.status || 'unknown')}`;
     const evidence = (health.evidence || project.evidence || []).map(item => `<div class="evidence-row"><span class="badge ${stateClass(item.severity === 'warning' ? 'warning' : 'unknown')}">${escapeHtml(item.code)}</span><span>${escapeHtml(item.message)}</span></div>`).join('');
     const tree = components.length ? `<div class="component-tree">${components.map(item => `<div class="component-row"><div><strong>${escapeHtml(item.service_name || item.name)}</strong><span>${escapeHtml(item.name)} · ${escapeHtml(item.image || 'image unavailable')}</span></div><div>${badge(item.state || 'unknown', item.state === 'running' ? 'healthy' : item.state === 'exited' ? 'critical' : 'warning')} ${item.health ? badge(item.health, item.health === 'healthy' ? 'healthy' : 'critical') : '<span class="subtle">health check missing</span>'}</div></div>`).join('')}</div>` : '<div class="empty">No runtime components are associated with this project.</div>';
-    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div><div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>${updateStatusSection(updateData)}`;
+    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div><div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>${updateStatusSection(updateData)}${updateWorkflowSection(project.id)}`;
+    // Load update plan after rendering
+    setTimeout(() => loadUpdatePlan(project.id), 100);
   }
 
   async function selectProject(projectId) {

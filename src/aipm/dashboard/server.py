@@ -76,6 +76,28 @@ def create_app(
     advisor_orchestrator: AdvisorOrchestrator | None = None,
 ) -> FastAPI:
     """Create the HTTP adapter without owning infrastructure business logic."""
+
+    # Compose update proxy with HTTP operator client if not explicitly provided
+    if update_proxy_api is None:
+        import os
+        from aipm.composition.http_operator_client import HttpOperatorTransportClient
+
+        # Check if operator transport integration is explicitly disabled
+        enable_mutations = os.environ.get("AIPM_DASHBOARD_MUTATIONS", "true").lower() in ("true", "1", "yes")
+
+        if enable_mutations:
+            # Production: HTTP client to running operator transport
+            operator_url = os.environ.get("AIPM_OPERATOR_TRANSPORT_URL", "http://127.0.0.1:8789")
+            try:
+                client = HttpOperatorTransportClient(base_url=operator_url)
+                update_proxy_api = DashboardUpdateProxyApi(client=client)
+            except ValueError:
+                # Invalid URL: fail closed
+                update_proxy_api = DashboardUpdateProxyApi(client=None)
+        else:
+            # Explicitly disabled: fail closed
+            update_proxy_api = DashboardUpdateProxyApi(client=None)
+
     app_context = application or Application.create()
     context = MissionControlContext.from_application(
         app_context,
@@ -210,6 +232,48 @@ def create_app(
                 session_cookie=_operator_session_cookie(request, update_proxy),
             )
         )
+
+    # ------------------------------------------------------------------
+    # Session: authenticated endpoint to obtain CSRF token server-side
+    # ------------------------------------------------------------------
+
+    @app.get("/api/session/csrf")
+    async def session_csrf(request: Request) -> JSONResponse:
+        """Return CSRF token for authenticated session (server-side acquisition).
+
+        The browser session cookie is forwarded to the operator transport to
+        obtain the CSRF token server-side. The browser never directly accesses
+        the operator transport (port 8789); all cross-service communication is
+        server-side over loopback.
+
+        Returns:
+            {csrf_token: "..."} for authenticated sessions
+            {error: "unauthenticated"} if no session cookie
+        """
+        session_cookie = _operator_session_cookie(request, update_proxy)
+        if not session_cookie:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+
+        # Forward authenticated session to operator transport to retrieve CSRF token
+        if update_proxy.client is None:
+            # Operator transport not composed; cannot obtain CSRF token
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
+
+        try:
+            response = await update_proxy.client.request(
+                "GET",
+                "/session",
+                session_cookie=session_cookie,
+            )
+            if response.status == 200 and isinstance(response.payload, dict):
+                csrf_token = response.payload.get("csrf_token")
+                if isinstance(csrf_token, str):
+                    return JSONResponse({"csrf_token": csrf_token}, status_code=200)
+            # Operator returned error or malformed response
+            return JSONResponse({"error": "session_unavailable"}, status_code=503)
+        except Exception:
+            # Operator transport unreachable
+            return JSONResponse({"error": "control_plane_unavailable"}, status_code=503)
 
     @app.get("/api/systemd/units")
     def systemd_units(limit: int = Query(20, ge=1, le=20)):
@@ -356,6 +420,12 @@ def _history_response(api: DashboardApi, kind: str, range_name: str, limit: int,
 
 
 def run(host: str = "127.0.0.1", port: int = 8787, reload: bool = False) -> None:
+    """Run the Mission Control dashboard with operator transport integration.
+
+    In production, composes the dashboard with an HTTP client to the canonical
+    operator transport service (127.0.0.1:8789), enabling mutation workflows
+    (approve/execute) while preserving all existing security boundaries.
+    """
     import uvicorn
 
     uvicorn.run("aipm.dashboard.server:create_app", host=host, port=port, reload=reload, factory=True)
