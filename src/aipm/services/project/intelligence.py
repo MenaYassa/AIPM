@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from aipm.mappers.docker_detail import DockerDetailMapper
+from aipm.providers.compose.identity import resolve_compose_project_name
 from aipm.services.compose.service import ComposeService
 from aipm.models.mission_control import ObservationError
 from aipm.models.project import Project
@@ -341,23 +342,7 @@ class ProjectIntelligenceService:
 
     @staticmethod
     def _compose_identity(project: Project) -> str | None:
-        compose_files = list(getattr(project, "compose_files", []) or [])[:4]
-        if not compose_files:
-            return None
-        for filename in compose_files:
-            try:
-                with Path(filename).open("r", encoding="utf-8", errors="replace") as handle:
-                    for raw_line in handle.read(16384).splitlines():
-                        line = raw_line.strip()
-                        if not line or line.startswith("#") or raw_line[:1].isspace() or not line.startswith("name:"):
-                            continue
-                        value = line.split(":", 1)[1].strip().strip("'\"").lower()
-                        if value and len(value) <= 128 and all(char.isalnum() or char in "-_." for char in value):
-                            return value
-            except (OSError, UnicodeError):
-                continue
-        project_name = str(getattr(project, "name", "")).strip().lower()
-        return project_name if project_name and len(project_name) <= 128 else None
+        return resolve_compose_project_name(project)
 
     def _freshness(self, observed_at: datetime | None, *, available: bool, error: str | None) -> dict[str, Any]:
         if error:

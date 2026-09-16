@@ -10,6 +10,10 @@ from aipm.core.exceptions import ProviderError
 from aipm.mappers.docker import DockerMapper
 from aipm.models.container import Container
 from aipm.models.project import Project
+from aipm.providers.compose.identity import (
+    resolve_compose_project_name,
+    verify_container_provenance,
+)
 
 
 class ComposeError(ProviderError):
@@ -51,13 +55,22 @@ class ComposeProvider:
 
     def ps(self, project: Project) -> list[Container]:
         """Return containers labeled as belonging to the Compose project."""
+        project_name = resolve_compose_project_name(project)
+        if not project_name:
+            return []
+
         try:
             client = docker.from_env()
             containers = client.containers.list(
                 all=True,
-                filters={"label": f"com.docker.compose.project={project.name}"},
+                filters={"label": f"com.docker.compose.project={project_name}"},
             )
-            return [DockerMapper.container(container) for container in containers]
+            matched = [
+                container
+                for container in containers
+                if verify_container_provenance(getattr(container, "labels", None), project)
+            ]
+            return [DockerMapper.container(container) for container in matched]
         except docker.errors.DockerException as exc:
             raise ComposeError(f"Unable to query Compose services for '{project.name}': {exc}") from exc
 
