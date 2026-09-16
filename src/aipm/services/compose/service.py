@@ -1,4 +1,5 @@
 from aipm.models.compose import ComposeStatus
+from aipm.models.compose_intelligence import ComposeProjectObservation
 from aipm.models.project import Project
 from aipm.providers.compose.provider import ComposeProvider
 
@@ -38,19 +39,18 @@ class ComposeService:
         )
 
         return ComposeStatus(
-
             project_name=project.name,
-
             compose_files=project.compose_files,
-
             containers=containers,
-
             running=running,
-
             stopped=stopped,
-
             restarting=restarting,
-
             unhealthy=unhealthy,
-
         )
+
+    def observe(self, project: Project, *, query_registries: bool = False) -> ComposeProjectObservation:
+        """Perform a complete, read-only service and image observation."""
+        from aipm.services.compose.intelligence import ComposeIntelligenceService
+
+        intelligence = ComposeIntelligenceService(compose_provider=self.provider)
+        return intelligence.observe(project, query_registries=query_registries)

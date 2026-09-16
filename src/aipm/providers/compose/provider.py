@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import Iterable
+from typing import Any, Iterable
 
 import docker
 
@@ -53,8 +53,8 @@ class ComposeProvider:
             raise ComposeError(f"Compose command failed for '{project.name}': {detail}")
         return result.stdout.strip()
 
-    def ps(self, project: Project) -> list[Container]:
-        """Return containers labeled as belonging to the Compose project."""
+    def ps_raw(self, project: Project) -> list[Any]:
+        """Return raw Docker SDK container objects labeled and verified for the project."""
         project_name = resolve_compose_project_name(project)
         if not project_name:
             return []
@@ -65,14 +65,17 @@ class ComposeProvider:
                 all=True,
                 filters={"label": f"com.docker.compose.project={project_name}"},
             )
-            matched = [
+            return [
                 container
                 for container in containers
                 if verify_container_provenance(getattr(container, "labels", None), project)
             ]
-            return [DockerMapper.container(container) for container in matched]
         except docker.errors.DockerException as exc:
             raise ComposeError(f"Unable to query Compose services for '{project.name}': {exc}") from exc
+
+    def ps(self, project: Project) -> list[Container]:
+        """Return containers labeled as belonging to the Compose project."""
+        return [DockerMapper.container(container) for container in self.ps_raw(project)]
 
     def up(
         self,
