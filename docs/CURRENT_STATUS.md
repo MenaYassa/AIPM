@@ -1,10 +1,10 @@
 # AIPM Current Status
 
-**Status date:** 2026-09-05 (supersedes the 2026-09-03 status date; see the final sections)
+**Status date:** 2026-09-16 (supersedes earlier status dates)
 
-**Canonical repository checkpoint:** `875edc743426f2db74472dd27cad0d8e8f378188` (published `origin/main`; carries the MC-6.12 transport rate-limit regression tests, the telemetry remediation lineage, and the C1–C5 update-security lineage — security contract, canonical operator transport, dashboard plan digest, canonical approval→confirmation→execution composition, authenticated dashboard proxy — on top of the Mission Control read-only cockpit lineage). The running dashboard does not yet run this code; see the deployment-lag reconciliation below.
+**Canonical repository checkpoint:** `6ba853d27ce92e908b3c4dc35c24419af8452dcb` (published `origin/main`; carries the MC-6.12 bounded systemd update runtime, the privilege broker client, and the C1–C5 update-security lineage).
 
-**Repository parity:** `HEAD` is `origin/main` at `875edc743426f2db74472dd27cad0d8e8f378188`.
+**Repository parity:** `HEAD` matches `origin/main` at `6ba853d27ce92e908b3c4dc35c24419af8452dcb`. Production update execution via the canonical `UpdateEngine` and compiled privilege broker was executed, verified, and reconciled in production (Steps 8B & 9).
 
 ## Purpose of this documentThis is the canonical current-state reconciliation for the AIPM repository and Mission Control. Historical design and completion documents remain preserved as audit records, but their older checkpoint and “planned/future” wording must be interpreted through this document. The detailed read-only public inspection is preserved in [`LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md).
 
@@ -14,7 +14,7 @@ The read-only Mission Control cockpit is substantially landed and live. The publ
 
 The repository is fully committed and published at the checkpoint above. The preservation stash that earlier revisions of this document described as retained **no longer exists**; the incident-reopen workstream it held was subsequently committed and is published in main, but the untracked design note `docs/MC-6.9_DESIGN.md` was lost with the stash and is unrecoverable from this repository. See the stash-loss reconciliation below.
 
-MC-6.12 is **not operationally complete**. Current main contains Stage 2 pure control-plane models, the Stage 3 staging-only process-local owner authentication/session/project-plan foundation, and the MC-6.12 execution-plane release (`a8559b4d600fff456f84200cec81a93e60f848d6`, 2026-08-31): a durable SQLite control-plane store, bounded authorization/lifecycle/audit/verification/rollback behavior, the localhost-only operator transport (session cookies, CSRF, bounded 429 rate limiting on authorize/confirm, loopback bind validation), and a durable staging kill switch seeded engaged. The executor path remains unimplemented and denied: production actions are refused (`execution_mode` must be explicitly `"ipc"` for production and no production IPC executor is deployed), the production kill switch is permanently engaged, plans are hard-restricted to staging with the bounded `{title, objective}` field allow-list, and no action API/UI is exposed to the public vpanel. Production authorization remains denied.
+MC-6.12 is **operationally validated** for bounded systemd update execution. Current main contains Stage 2 pure control-plane models, Stage 3 owner authentication/session/project-plan foundation, the MC-6.12 execution-plane release, and the MC-6.13 compiled privilege broker. In Steps 8B and 9, the canonical `UpdateEngine` executed the authorized update plan for `aipm` (`runtime_mode: systemd`), bounded to `aipm-dashboard.service` via `/usr/local/libexec/aipm/aipm-systemd-restart` under `aipm-executor`. The update transitioned the service InvocationID, passed two-layer supervisor and HTTP health verification, and reached terminal state `VERIFIED_SUCCESS` with cryptographic audit ledger chain integrity (25 events).
 
 ## Public exposure contract — development vs production
 
@@ -47,8 +47,9 @@ This section is the authority on the dashboard's authentication perimeter. It su
 | MC-6.9 | PASS_EXISTING | Existing evidence/history implementation conforms; its design note (`docs/MC-6.9_DESIGN.md`) was never published and was lost with the preservation stash — see the stash-loss reconciliation |
 | MC-6.10 | Complete under safe posture contract | Settings posture and notification safety are published; `commit=null`/`Unknown` and `not_observed` deployment fields are intentional where no authoritative source exists |
 | MC-6.11 | Landed | Read-only Typer/Rich TUI is committed and published; terminal behavior is not verifiable from the public web surface |
-| MC-6.12 | Staging control plane landed; operational action plane still blocked; service-runtime scopes remediated | Stage 2 and Stage 3 foundations are published; the staging-only execution-plane release (`a8559b4d600fff456f84200cec81a93e60f848d6`) is published — durable control-plane store, verification/rollback contracts, localhost operator transport, staging kill switch — while executor/production paths remain unimplemented and denied. The service-runtime/telemetry scopes (systemd runtime scopes, project telemetry refresh, dashboard freshness, Git enrichment hardening) are remediated and validated — see [`MC-6.12_TELEMETRY_REMEDIATION.md`](MC-6.12_TELEMETRY_REMEDIATION.md) |
+| MC-6.12 | Complete & operational in production | Durable control-plane store, verification/rollback contracts, localhost operator transport, and bounded systemd update runtime landed. Production update execution against `aipm-dashboard.service` proven with terminal state `VERIFIED_SUCCESS` (Steps 8B & 9) |
 | MC-6.13 Phase 2/3/4A/4B/4C/4C.1/4C.2/4C.3/4D/4E | Complete through bounded read-only Phase 4E | Published advisor domain, transport, fixture/live orchestration, telemetry-owned export/adapter, boundary alignment, complete-evidence validation, and additive resource-history summary |
+| MC-6.13 Privilege Broker | Complete & operational in production | Compiled root-owned helper (`aipm-systemd-restart`), exact sudoers binding (`--unit=aipm-dashboard.service --verb=try-restart`), unprivileged `PrivilegeBrokerClient`, and two-layer `SystemdVerifier` proven in production |
 
 ## Current Git and preservation state
 

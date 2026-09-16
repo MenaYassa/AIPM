@@ -78,3 +78,14 @@ notifications:
     max_notifications: 3
     channels:
     - ops-telegram
+
+projects:
+  aipm:
+    runtime_mode: systemd
+    systemd:
+      allowed_units:
+        - aipm-dashboard.service
+      health_probe_type: http
+      health_probe_url: http://127.0.0.1:8787/healthz
+      health_probe_timeout_seconds: 15
+      health_probe_expected_status: 200
