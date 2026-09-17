@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from aipm.models.compose_intelligence import (
     CandidateCacheFreshness,
     CandidateLookupKey,
+    ServiceCandidateReason,
 )
 
 if TYPE_CHECKING:
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
 DEFAULT_CACHE_CAPACITY = 256
 DEFAULT_POSITIVE_TTL_SECONDS = 900.0  # 15 minutes
-DEFAULT_NEGATIVE_TTL_SECONDS = 60.0   # 1 minute
+DEFAULT_NEGATIVE_TTL_SECONDS = 60.0  # 1 minute
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +65,9 @@ class CandidateCache:
         self.max_capacity = max(1, max_capacity)
         self.positive_ttl_seconds = positive_ttl_seconds
         self.negative_ttl_seconds = negative_ttl_seconds
-        self._entries: OrderedDict[CandidateLookupKey, CachedCandidateEntry] = OrderedDict()
+        self._entries: OrderedDict[CandidateLookupKey, CachedCandidateEntry] = (
+            OrderedDict()
+        )
         self._lock = threading.Lock()
         self._hits = 0
         self._misses = 0
@@ -113,9 +116,17 @@ class CandidateCache:
         now: float | None = None,
     ) -> None:
         """Store a candidate result, evicting oldest entry if at capacity."""
+        if getattr(result, "reason", None) in (
+            ServiceCandidateReason.BUDGET_EXHAUSTED,
+            ServiceCandidateReason.NETWORK_BUDGET_EXHAUSTED,
+        ):
+            return
+
         current_time = time.monotonic() if now is None else now
         if ttl_seconds is None:
-            ttl_seconds = self.negative_ttl_seconds if is_negative else self.positive_ttl_seconds
+            ttl_seconds = (
+                self.negative_ttl_seconds if is_negative else self.positive_ttl_seconds
+            )
 
         entry = CachedCandidateEntry(
             key=key,

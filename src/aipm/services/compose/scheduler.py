@@ -358,11 +358,15 @@ class CandidateQueryScheduler:
             if self.query_fn:
                 try:
                     res = self.query_fn(ref, budget)
-                    is_neg = res.status == ServiceCandidateStatus.UNKNOWN and res.reason in (
-                        ServiceCandidateReason.REGISTRY_UNAVAILABLE,
-                        ServiceCandidateReason.REGISTRY_TIMEOUT,
-                    )
-                    self.cache.put(key, res, is_negative=is_neg)
+                    if res.reason not in (
+                        ServiceCandidateReason.BUDGET_EXHAUSTED,
+                        ServiceCandidateReason.NETWORK_BUDGET_EXHAUSTED,
+                    ):
+                        is_neg = res.status == ServiceCandidateStatus.UNKNOWN and res.reason in (
+                            ServiceCandidateReason.REGISTRY_UNAVAILABLE,
+                            ServiceCandidateReason.REGISTRY_TIMEOUT,
+                        )
+                        self.cache.put(key, res, is_negative=is_neg)
                     key_results[key] = (res, "queried")
                 except Exception as exc:
                     res = RegistryCandidateResult(
