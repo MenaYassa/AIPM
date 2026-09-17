@@ -134,6 +134,18 @@ class ProjectIntelligenceService:
 
         return application, observation, None
 
+    def compose_service_plan(
+        self, project_id: str, service_name: str, *, query_registries: bool = True
+    ) -> tuple[ProjectApplication | None, Any | None, str | None]:
+        app, observation, error = self.compose_intelligence(project_id, query_registries=query_registries)
+        if error or observation is None:
+            return app, None, error
+        from aipm.services.compose.planner import ComposeServiceUpdatePlanner
+
+        planner = ComposeServiceUpdatePlanner()
+        plan = planner.plan_service(observation, service_name, project_id=project_id)
+        return app, plan, None
+
     def _discover_projects(self) -> tuple[list[Project], str | None]:
         try:
             return list(self.project_service.discover()), None

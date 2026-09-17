@@ -240,17 +240,16 @@ class ComposeProjectObservation:
         }
 
 
-@dataclass(frozen=True, slots=True)
-class ServiceUpdatePlanDesign:
-    """Design-only representation for future selective service update planning (MC-6.15-A.3/A.4).
+# Re-export service update plan domain models (MC-6.15-B.1/B.2)
+from aipm.models.compose_plan import (  # noqa: E402
+    DependencyScopeItem,
+    ServiceHealthContract,
+    ServiceMutationShape,
+    ServicePlanBlockingReason,
+    ServiceRollbackDesign,
+    ServiceUpdateAtomicity,
+    ServiceUpdatePlan,
+)
 
-    Strictly read-only architecture model; owns NO execution authority or mutation capability.
-    """
-
-    project_name: str
-    service_name: str
-    current_runtime_digest: str | None
-    declared_image_ref: ImageReference | None
-    target_candidate_digest: str
-    dependency_scope: tuple[str, ...]
-    health_contract: str | None
+# Backward-compatible alias for existing references
+ServiceUpdatePlanDesign = ServiceUpdatePlan

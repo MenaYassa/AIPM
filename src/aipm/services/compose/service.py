@@ -2,6 +2,7 @@ from typing import Any
 
 from aipm.models.compose import ComposeStatus
 from aipm.models.compose_intelligence import ComposeProjectObservation
+from aipm.models.compose_plan import ServiceUpdatePlan
 from aipm.models.project import Project
 from aipm.providers.compose.provider import ComposeProvider
 
@@ -58,3 +59,17 @@ class ComposeService:
 
         intelligence = ComposeIntelligenceService(compose_provider=self.provider)
         return intelligence.observe(project, query_registries=query_registries)
+
+    def plan_service_update(
+        self,
+        project: Project,
+        service_name: str,
+        *,
+        query_registries: bool = True,
+    ) -> ServiceUpdatePlan:
+        """Derive a deterministic, read-only service update plan."""
+        observation = self.observe(project, query_registries=query_registries)
+        from aipm.services.compose.planner import ComposeServiceUpdatePlanner
+
+        planner = ComposeServiceUpdatePlanner()
+        return planner.plan_service(observation, service_name, project_id=project.id)

@@ -85,6 +85,13 @@ class UpdatePlanIdentity:
     systemd_units: tuple[str, ...] | None = None
     systemd_action: str | None = None
     health_probe_contract: str | None = None
+    service_name: str | None = None
+    target_digest: str | None = None
+    current_digest: str | None = None
+    candidate_lookup_key: str | None = None
+    dependency_scope: tuple[str, ...] | None = None
+    atomicity: str | None = None
+    observation_freshness: str | None = None
     version: str = PLAN_IDENTITY_VERSION
 
     def __post_init__(self) -> None:
@@ -129,6 +136,20 @@ class UpdatePlanIdentity:
                 raise ValueError(f"Invalid {name}")
         if self.health_state is not None:
             _validate_text(self.health_state, "health_state")
+        if self.service_name is not None:
+            _validate_text(self.service_name, "service_name")
+        if self.target_digest is not None:
+            _validate_text(self.target_digest, "target_digest")
+        if self.current_digest is not None:
+            _validate_text(self.current_digest, "current_digest")
+        if self.candidate_lookup_key is not None:
+            _validate_text(self.candidate_lookup_key, "candidate_lookup_key")
+        if self.dependency_scope is not None:
+            _validate_text_tuple(self.dependency_scope, "dependency_scope")
+        if self.atomicity is not None:
+            _validate_text(self.atomicity, "atomicity")
+        if self.observation_freshness is not None:
+            _validate_text(self.observation_freshness, "observation_freshness")
 
     def canonical_payload(self) -> dict[str, Any]:
         """Return the canonical payload; absent (None) fields are omitted."""
@@ -170,6 +191,13 @@ class UpdatePlanIdentity:
             "runtime_mode": self.runtime_mode,
             "systemd_action": self.systemd_action,
             "systemd_units": list(self.systemd_units) if self.systemd_units is not None else None,
+            "service_name": self.service_name,
+            "target_digest": self.target_digest,
+            "current_digest": self.current_digest,
+            "candidate_lookup_key": self.candidate_lookup_key,
+            "dependency_scope": list(self.dependency_scope) if self.dependency_scope is not None else None,
+            "atomicity": self.atomicity,
+            "observation_freshness": self.observation_freshness,
         }
         payload.update({key: value for key, value in optional.items() if value is not None})
         return payload
@@ -227,6 +255,62 @@ class UpdatePlanIdentity:
             systemd_units=systemd_units,
             systemd_action=getattr(plan, "systemd_action", None),
             health_probe_contract=getattr(plan, "health_probe_contract", None),
+        )
+
+    @classmethod
+    def from_service_plan(cls, plan: Any) -> "UpdatePlanIdentity":
+        """Extract the canonical identity from a ServiceUpdatePlan."""
+        actions = getattr(plan, "actions", None) or (
+            (
+                f"Update service {plan.service_name} to {plan.target_candidate_digest}",
+                f"Verify health contract for {plan.service_name}",
+            )
+            if getattr(plan, "eligible", False)
+            else ()
+        )
+        blocking_str = ""
+        if hasattr(plan, "blocking_reason") and plan.blocking_reason:
+            blocking_str = plan.blocking_reason.value if hasattr(plan.blocking_reason, "value") else str(plan.blocking_reason)
+        reasons = getattr(plan, "reasons", None) or (
+            (f"Candidate digest differs from running image for {plan.service_name}",)
+            if getattr(plan, "eligible", False)
+            else ((f"Service update blocked: {blocking_str}",) if blocking_str else ("Service update blocked",))
+        )
+        atomicity_val = plan.atomicity.value if hasattr(getattr(plan, "atomicity", None), "value") else str(getattr(plan, "atomicity", "leaf_independent"))
+        rollback_design = getattr(plan, "rollback_design", None)
+        snapshot_req = getattr(rollback_design, "snapshot_required", True) if rollback_design else True
+        candidate_key = getattr(plan, "candidate_key", None)
+        candidate_key_str = candidate_key.canonical_str() if hasattr(candidate_key, "canonical_str") else (str(candidate_key) if candidate_key else None)
+
+        raw_deps = getattr(plan, "dependency_scope", ()) or ()
+        dep_names = tuple(sorted(d.service_name if hasattr(d, "service_name") else str(d) for d in raw_deps))
+
+        health_contract = getattr(plan, "health_contract", None)
+        health_summary = health_contract.canonical_summary() if hasattr(health_contract, "canonical_summary") else None
+
+        eligible = bool(getattr(plan, "eligible", False))
+        risk = "low" if eligible and atomicity_val == "leaf_independent" else ("medium" if eligible else "blocked")
+
+        return cls(
+            project=getattr(plan, "project_name", "unknown"),
+            dry_run=True,
+            proceed=eligible,
+            approval_required=True,
+            risk=risk,
+            reasons=tuple(reasons),
+            actions=tuple(actions),
+            snapshot_required=snapshot_req,
+            estimated_restart=True,
+            stash_required=False,
+            pull_required=False,
+            service_name=getattr(plan, "service_name", None),
+            target_digest=getattr(plan, "target_candidate_digest", None),
+            current_digest=getattr(plan, "current_runtime_digest", None),
+            candidate_lookup_key=candidate_key_str,
+            dependency_scope=dep_names if dep_names else None,
+            atomicity=atomicity_val,
+            observation_freshness=getattr(plan, "candidate_freshness", None),
+            health_probe_contract=health_summary,
         )
 
 

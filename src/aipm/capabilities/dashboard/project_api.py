@@ -99,6 +99,25 @@ class DashboardProjectApi:
         assert_safe_payload(response)
         return response
 
+    def compose_service_plan(self, project_id: str, service_name: str) -> dict[str, Any]:
+        identifier = self._identifier(project_id)
+        if identifier is None:
+            return self._compose_error("PROJECT_ID_INVALID", "Project identifier is invalid", status="error")
+        cleaned_service = self._service_name(service_name)
+        if cleaned_service is None:
+            return self._compose_error("SERVICE_NAME_INVALID", "Service name is invalid", status="error")
+        application, plan, error_code = self.intelligence.compose_service_plan(identifier, cleaned_service, query_registries=True)
+        if error_code in {"PROJECT_ID_INVALID", "PROJECT_NOT_FOUND"} or application is None:
+            return self._compose_error("PROJECT_NOT_FOUND", "Project is unavailable", status="error")
+        if error_code == "COMPOSE_UNAVAILABLE" or plan is None:
+            return self._compose_error("COMPOSE_UNAVAILABLE", "Compose update planning unavailable for non-Compose project", status="unavailable")
+        if error_code == "OBSERVATION_FAILED":
+            return self._compose_error("COMPOSE_OBSERVATION_FAILED", "Compose intelligence observation failed", status="error")
+
+        response = self._success({"service_plan": plan.to_dict()})
+        assert_safe_payload(response)
+        return response
+
     def _compose_error(self, code: str, message: str, *, status: str = "error") -> dict[str, Any]:
         state = ObservationState.UNAVAILABLE if status == "unavailable" else ObservationState.ERROR
         observation = Observation(
@@ -117,6 +136,7 @@ class DashboardProjectApi:
             "error": message,
             "observation": self._observation(observation),
             "project": None,
+            "service_plan": None,
         }
 
     def _success(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -157,6 +177,11 @@ class DashboardProjectApi:
     def _identifier(value: str | None) -> str | None:
         value = str(value or "").strip()
         return value if len(value) == 24 and all(char in "0123456789abcdef" for char in value) else None
+
+    @staticmethod
+    def _service_name(value: str | None) -> str | None:
+        value = str(value or "").strip()
+        return value[:64] if value and all(char.isalnum() or char in "-_." for char in value) else None
 
     @staticmethod
     def _valid_status(value: str | None) -> bool:

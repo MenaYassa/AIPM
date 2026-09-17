@@ -191,6 +191,12 @@ def create_app(
             return {"available": False, "status": "error", "error": "Compose intelligence unavailable", "project": None}
         return project_detail_api.compose_intelligence(project_id)
 
+    @app.get("/api/projects/{project_id}/compose-services/{service_name}/plan")
+    def project_compose_service_plan(project_id: str, service_name: str):
+        if not hasattr(project_detail_api, "compose_service_plan"):
+            return {"available": False, "status": "error", "error": "Compose service plan unavailable", "service_plan": None}
+        return project_detail_api.compose_service_plan(project_id, service_name)
+
     @app.get("/api/projects/{project_id}/update-plan")
     def project_update_plan(project_id: str):
         return update_plan_api.update_plan(project_id)
