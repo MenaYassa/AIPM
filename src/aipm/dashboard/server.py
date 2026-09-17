@@ -185,6 +185,12 @@ def create_app(
     def project_health(project_id: str):
         return project_detail_api.health(project_id)
 
+    @app.get("/api/projects/{project_id}/compose-intelligence")
+    def project_compose_intelligence(project_id: str):
+        if not hasattr(project_detail_api, "compose_intelligence"):
+            return {"available": False, "status": "error", "error": "Compose intelligence unavailable", "project": None}
+        return project_detail_api.compose_intelligence(project_id)
+
     @app.get("/api/projects/{project_id}/update-plan")
     def project_update_plan(project_id: str):
         return update_plan_api.update_plan(project_id)

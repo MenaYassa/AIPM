@@ -97,6 +97,43 @@ class ProjectIntelligenceService:
         detail = self.detail(project_id)
         return detail.components if detail else None
 
+    def compose_intelligence(
+        self, project_id: str, *, query_registries: bool = True
+    ) -> tuple[ProjectApplication | None, Any | None, str | None]:
+        project_id = self._identifier(project_id)
+        if project_id is None:
+            return None, None, "PROJECT_ID_INVALID"
+
+        application = self.detail(project_id)
+        if application is None:
+            return None, None, "PROJECT_NOT_FOUND"
+
+        if not application.local_project_name:
+            return application, None, "COMPOSE_UNAVAILABLE"
+
+        try:
+            project = self.project_service.get_project(application.local_project_name)
+        except Exception:
+            return application, None, "PROJECT_NOT_FOUND"
+
+        has_compose = bool(getattr(getattr(project, "capabilities", None), "has_compose", False))
+        compose_files = list(getattr(project, "compose_files", []) or [])
+        if not has_compose and not compose_files:
+            return application, None, "COMPOSE_UNAVAILABLE"
+
+        if self.compose_service is None:
+            return application, None, "COMPOSE_UNAVAILABLE"
+
+        try:
+            observation = self.compose_service.observe(project, query_registries=query_registries)
+        except Exception:
+            return application, None, "OBSERVATION_FAILED"
+
+        if getattr(observation, "compose_identity", None) == "unknown" and not getattr(observation, "services", None):
+            return application, None, "COMPOSE_UNAVAILABLE"
+
+        return application, observation, None
+
     def _discover_projects(self) -> tuple[list[Project], str | None]:
         try:
             return list(self.project_service.discover()), None

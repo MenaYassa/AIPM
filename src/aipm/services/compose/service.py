@@ -1,3 +1,5 @@
+from typing import Any
+
 from aipm.models.compose import ComposeStatus
 from aipm.models.compose_intelligence import ComposeProjectObservation
 from aipm.models.project import Project
@@ -6,9 +8,9 @@ from aipm.providers.compose.provider import ComposeProvider
 
 class ComposeService:
 
-    def __init__(self):
-
-        self.provider = ComposeProvider()
+    def __init__(self, provider: ComposeProvider | None = None, intelligence: Any | None = None):
+        self.provider = provider or ComposeProvider()
+        self.intelligence = intelligence
 
     def status(self, project: Project) -> ComposeStatus:
 
@@ -50,6 +52,8 @@ class ComposeService:
 
     def observe(self, project: Project, *, query_registries: bool = False) -> ComposeProjectObservation:
         """Perform a complete, read-only service and image observation."""
+        if self.intelligence is not None:
+            return self.intelligence.observe(project, query_registries=query_registries)
         from aipm.services.compose.intelligence import ComposeIntelligenceService
 
         intelligence = ComposeIntelligenceService(compose_provider=self.provider)

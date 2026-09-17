@@ -205,12 +205,16 @@ def test_project_api_routes_are_get_only_and_safe() -> None:
         def health(self, project_id):
             return {"available": False, "status": "error", "error": "Project is unavailable"}
 
+        def compose_intelligence(self, project_id):
+            return {"available": False, "status": "error", "error": "Project is unavailable", "project": None}
+
     app = create_app(project_api=FakeApi())
     client = TestClient(app)
     assert client.get("/api/projects?scope=applications&limit=200").status_code == 200
     assert client.get("/api/projects/000000000000000000000000").status_code == 200
     assert client.get("/api/projects/000000000000000000000000/containers").status_code == 200
     assert client.get("/api/projects/000000000000000000000000/health").status_code == 200
+    assert client.get("/api/projects/000000000000000000000000/compose-intelligence").status_code == 200
     assert client.post("/api/projects").status_code in {405, 404}
     assert client.get("/api/projects/000000000000000000000000").json()["error"] == "Project is unavailable"
 

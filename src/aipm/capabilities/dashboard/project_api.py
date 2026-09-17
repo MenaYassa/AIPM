@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from aipm.capabilities.dashboard.api import DashboardApi
+from aipm.capabilities.dashboard.safety import assert_safe_payload
 from aipm.mappers.project_intelligence import ProjectIntelligenceMapper
-from aipm.models.mission_control import Observation, ObservationError
+from aipm.models.mission_control import Observation, ObservationError, ObservationState
 from aipm.models.project_intelligence import InventoryScope
 from aipm.services.compose.service import ComposeService
 from aipm.services.docker.observation import DockerObservationService
@@ -40,7 +41,9 @@ class DashboardProjectApi:
             docker_telemetry = DockerTelemetryService(docker_service)
         if docker_telemetry is None:
             docker_telemetry = _UnavailableDockerTelemetry()
-        compose_service = ComposeService() if docker_service is not None else None
+        compose_service = getattr(application, "compose", None)
+        if compose_service is None and docker_service is not None:
+            compose_service = ComposeService()
         return cls(ProjectIntelligenceService(project_service, docker_observation, docker_telemetry, compose_service=compose_service))
 
     def projects(self, *, limit: int = MAX_PROJECTS, search: str | None = None, status: str | None = None, scope: str = InventoryScope.ALL.value) -> dict[str, Any]:
@@ -78,6 +81,43 @@ class DashboardProjectApi:
         if value is None:
             return self._error("PROJECT_NOT_FOUND", "Project is unavailable")
         return self._success({"health": ProjectIntelligenceMapper.health(value)})
+
+    def compose_intelligence(self, project_id: str) -> dict[str, Any]:
+        identifier = self._identifier(project_id)
+        if identifier is None:
+            return self._compose_error("PROJECT_ID_INVALID", "Project identifier is invalid", status="error")
+        application, observation, error_code = self.intelligence.compose_intelligence(identifier, query_registries=True)
+        if error_code in {"PROJECT_ID_INVALID", "PROJECT_NOT_FOUND"} or application is None:
+            return self._compose_error("PROJECT_NOT_FOUND", "Project is unavailable", status="error")
+        if error_code == "COMPOSE_UNAVAILABLE" or observation is None:
+            return self._compose_error("COMPOSE_UNAVAILABLE", "Compose intelligence unavailable for non-Compose project", status="unavailable")
+        if error_code == "OBSERVATION_FAILED":
+            return self._compose_error("COMPOSE_OBSERVATION_FAILED", "Compose intelligence observation failed", status="error")
+
+        mapped = ProjectIntelligenceMapper.compose_project(application, observation)
+        response = self._success({"project": mapped})
+        assert_safe_payload(response)
+        return response
+
+    def _compose_error(self, code: str, message: str, *, status: str = "error") -> dict[str, Any]:
+        state = ObservationState.UNAVAILABLE if status == "unavailable" else ObservationState.ERROR
+        observation = Observation(
+            transport_ok=True,
+            available=False,
+            state=state,
+            data=None,
+            observed_at=None,
+            age_seconds=None,
+            max_age_seconds=60,
+            error=ObservationError(code, message),
+        )
+        return {
+            "available": False,
+            "status": status,
+            "error": message,
+            "observation": self._observation(observation),
+            "project": None,
+        }
 
     def _success(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.clock()

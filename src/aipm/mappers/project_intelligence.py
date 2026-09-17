@@ -76,6 +76,78 @@ class ProjectIntelligenceMapper:
             "evidence": [cls.evidence(item) for item in value.evidence[:24]],
         }
 
+    @classmethod
+    def compose_project(cls, application: ProjectApplication, observation: Any) -> dict[str, Any]:
+        services = sorted(
+            [cls.compose_service(s) for s in getattr(observation, "services", ())],
+            key=lambda item: item["service_name"],
+        )
+        return {
+            "id": application.id,
+            "display_name": application.display_name,
+            "compose_identity": getattr(observation, "compose_identity", "unknown"),
+            "running_services_count": int(getattr(observation, "running_services_count", 0)),
+            "total_services_count": int(getattr(observation, "total_services_count", 0)),
+            "updates_available_count": int(getattr(observation, "updates_available_count", 0)),
+            "current_count": int(getattr(observation, "current_count", 0)),
+            "drift_count": int(getattr(observation, "drift_count", 0)),
+            "not_applicable_count": int(getattr(observation, "not_applicable_count", 0)),
+            "unknown_count": int(getattr(observation, "unknown_count", 0)),
+            "freshness": str(getattr(observation, "freshness", "never_sampled")),
+            "services": services,
+        }
+
+    @classmethod
+    def compose_service(cls, service: Any) -> dict[str, Any]:
+        candidate_status = getattr(service, "candidate_status", None)
+        status_val = candidate_status.value if hasattr(candidate_status, "value") else str(candidate_status or "unknown")
+
+        candidate_reason = getattr(service, "candidate_reason", None)
+        reason_val = candidate_reason.value if hasattr(candidate_reason, "value") else str(candidate_reason or "unknown")
+
+        candidate_key_obj = getattr(service, "candidate_key", None)
+        if candidate_key_obj is not None:
+            candidate_key = {
+                "registry": str(getattr(candidate_key_obj, "registry", ""))[:128],
+                "repository": str(getattr(candidate_key_obj, "repository", ""))[:256],
+                "tag": str(getattr(candidate_key_obj, "tag", ""))[:128],
+                "os": str(getattr(candidate_key_obj, "target_os", ""))[:32],
+                "arch": str(getattr(candidate_key_obj, "target_arch", ""))[:32],
+            }
+        else:
+            candidate_key = None
+
+        observed_at = getattr(service, "observed_at", None)
+        if hasattr(observed_at, "isoformat"):
+            observed_at_str = observed_at.isoformat()
+        else:
+            observed_at_str = str(observed_at) if observed_at else None
+
+        detail = getattr(service, "candidate_detail", None)
+
+        return {
+            "service_name": str(getattr(service, "service_name", ""))[:128],
+            "container_names": [str(name)[:128] for name in getattr(service, "container_names", ())][:64],
+            "container_ids": [str(cid)[:64] for cid in getattr(service, "container_ids", ())][:64],
+            "state": str(getattr(service, "state", "unknown"))[:32],
+            "health": str(getattr(service, "health", None))[:32] if getattr(service, "health", None) is not None else None,
+            "declared_image": str(getattr(service, "declared_image", None))[:256] if getattr(service, "declared_image", None) is not None else None,
+            "running_image": str(getattr(service, "running_image", None))[:256] if getattr(service, "running_image", None) is not None else None,
+            "running_image_id": str(getattr(service, "running_image_id", None))[:128] if getattr(service, "running_image_id", None) is not None else None,
+            "running_repo_digests": [str(d)[:256] for d in getattr(service, "running_repo_digests", ())][:16],
+            "candidate_digest": str(getattr(service, "candidate_digest", None))[:128] if getattr(service, "candidate_digest", None) is not None else None,
+            "candidate_child_digest": str(getattr(service, "candidate_child_digest", None))[:128] if getattr(service, "candidate_child_digest", None) is not None else None,
+            "candidate_status": status_val[:32],
+            "candidate_reason": reason_val[:64],
+            "candidate_detail": str(detail)[:256] if detail is not None else None,
+            "is_build": bool(getattr(service, "is_build", False)),
+            "depends_on": [str(dep)[:128] for dep in getattr(service, "depends_on", ())][:32],
+            "candidate_key": candidate_key,
+            "freshness": str(getattr(service, "freshness", "unknown"))[:32],
+            "observed_at": observed_at_str,
+            "provenance_verified": bool(getattr(service, "provenance_verified", False)),
+        }
+
     @staticmethod
     def evidence(value: ProjectEvidence) -> dict[str, Any]:
         return {
