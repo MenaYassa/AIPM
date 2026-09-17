@@ -124,6 +124,7 @@ def parse_declared_compose_services(
     service_images: dict[str, str | None] = {}
     service_builds: dict[str, Any] = {}
     service_profiles: dict[str, list[str]] = {}
+    service_depends: dict[str, list[str]] = {}
     service_sources: dict[str, list[str]] = {}
     service_errors: dict[str, str] = {}
 
@@ -161,12 +162,14 @@ def parse_declared_compose_services(
                     service_images[svc] = None
                     service_builds[svc] = None
                     service_profiles[svc] = []
+                    service_depends[svc] = []
                     continue
                 elif isinstance(inner_svc, dict):
                     # Service definition replaced without inheriting base configuration
                     service_images[svc] = None
                     service_builds[svc] = None
                     service_profiles[svc] = []
+                    service_depends[svc] = []
                     raw_cfg = inner_svc
                 else:
                     service_errors[svc] = f"Unsupported !reset type for service: {type(inner_svc).__name__}"
@@ -178,11 +181,13 @@ def parse_declared_compose_services(
                     service_images[svc] = None
                     service_builds[svc] = None
                     service_profiles[svc] = []
+                    service_depends[svc] = []
                     raw_cfg = inner_svc
                 elif inner_svc is None or inner_svc == "" or inner_svc == {}:
                     service_images[svc] = None
                     service_builds[svc] = None
                     service_profiles[svc] = []
+                    service_depends[svc] = []
                     continue
                 else:
                     service_errors[svc] = f"Unsupported !override type for service: {type(inner_svc).__name__}"
@@ -300,6 +305,55 @@ def parse_declared_compose_services(
                 else:
                     service_errors[svc] = f"Unsupported profiles specification type: {type(raw_prof).__name__}"
 
+            # 4. Merge 'depends_on'
+            if "depends_on" in raw_cfg:
+                raw_dep = raw_cfg["depends_on"]
+                if isinstance(raw_dep, _ResetNode):
+                    inner = raw_dep.value
+                    if inner is None or inner == "" or inner == [] or inner == {}:
+                        service_depends[svc] = []
+                    elif isinstance(inner, list):
+                        service_depends[svc] = [
+                            str(d.value if isinstance(d, (_ResetNode, _OverrideNode)) else d).strip()
+                            for d in inner
+                            if d
+                        ]
+                    elif isinstance(inner, dict):
+                        service_depends[svc] = [str(k).strip() for k in inner.keys() if str(k).strip()]
+                    else:
+                        service_errors[svc] = f"Unsupported !reset type for depends_on: {type(inner).__name__}"
+                elif isinstance(raw_dep, _OverrideNode):
+                    inner = raw_dep.value
+                    if inner is None or inner == "" or inner == [] or inner == {}:
+                        service_depends[svc] = []
+                    elif isinstance(inner, list):
+                        service_depends[svc] = [
+                            str(d.value if isinstance(d, (_ResetNode, _OverrideNode)) else d).strip()
+                            for d in inner
+                            if d
+                        ]
+                    elif isinstance(inner, dict):
+                        service_depends[svc] = [str(k).strip() for k in inner.keys() if str(k).strip()]
+                    else:
+                        service_errors[svc] = f"Unsupported !override type for depends_on: {type(inner).__name__}"
+                elif isinstance(raw_dep, list):
+                    cur_d = service_depends.setdefault(svc, [])
+                    for d in raw_dep:
+                        if d:
+                            d_clean = str(d.value if isinstance(d, (_ResetNode, _OverrideNode)) else d).strip()
+                            if d_clean and d_clean not in cur_d:
+                                cur_d.append(d_clean)
+                elif isinstance(raw_dep, dict):
+                    cur_d = service_depends.setdefault(svc, [])
+                    for k in raw_dep.keys():
+                        k_clean = str(k).strip()
+                        if k_clean and k_clean not in cur_d:
+                            cur_d.append(k_clean)
+                elif raw_dep is None:
+                    pass
+                else:
+                    service_errors[svc] = f"Unsupported depends_on specification type: {type(raw_dep).__name__}"
+
     result: dict[str, DeclaredServiceConfig] = {}
     all_names = sorted(set(service_sources.keys()))
 
@@ -310,6 +364,7 @@ def parse_declared_compose_services(
         image_str = service_images.get(svc)
         bld = service_builds.get(svc)
         profiles = tuple(service_profiles.get(svc, ()))
+        depends_on = tuple(service_depends.get(svc, ()))
 
         is_build = False
         build_context = None
@@ -346,6 +401,7 @@ def parse_declared_compose_services(
             build_context=build_context,
             build_dockerfile=build_dockerfile,
             profiles=profiles,
+            depends_on=depends_on,
             source_files=sources,
             parse_error=err,
         )

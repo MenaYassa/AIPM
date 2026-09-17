@@ -36,6 +36,7 @@ class ServiceCandidateReason(str, Enum):
     DISABLED_BY_PROFILE = "disabled_by_profile"
     NO_RUNNING_CONTAINER = "no_running_container"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    NETWORK_BUDGET_EXHAUSTED = "network_budget_exhausted"
     REGISTRY_UNAVAILABLE = "registry_unavailable"
     REGISTRY_TIMEOUT = "registry_timeout"
     AUTHENTICATION_REQUIRED = "authentication_required"
@@ -44,6 +45,53 @@ class ServiceCandidateReason(str, Enum):
     DIGEST_UNAVAILABLE = "digest_unavailable"
     SSRF_BLOCKED = "ssrf_blocked"
     MALFORMED_IMAGE_REFERENCE = "malformed_image_reference"
+
+
+class CandidateCacheFreshness(str, Enum):
+    """Freshness state of a cached candidate result."""
+
+    FRESH = "fresh"
+    STALE = "stale"
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateLookupKey:
+    """Canonical, deduplicated identity for a remote OCI registry candidate query.
+
+    Ensures that identical image references across multiple services coalesce
+    into a single remote lookup while maintaining strict separation of target
+    platform architecture.
+    """
+
+    registry: str
+    repository: str
+    tag: str
+    target_arch: str = "arm64"
+    target_os: str = "linux"
+
+    @classmethod
+    def from_image_ref(
+        cls,
+        image_ref: ImageReference,
+        *,
+        target_arch: str = "arm64",
+        target_os: str = "linux",
+    ) -> CandidateLookupKey:
+        registry = (image_ref.registry or "docker.io").lower().strip()
+        repo = (image_ref.repository or "").lower().strip()
+        tag = (image_ref.tag or "latest").strip()
+        if tag.lower() == "latest":
+            tag = "latest"
+        return cls(
+            registry=registry,
+            repository=repo,
+            tag=tag,
+            target_arch=target_arch.lower().strip(),
+            target_os=target_os.lower().strip(),
+        )
+
+    def canonical_str(self) -> str:
+        return f"{self.registry}/{self.repository}:{self.tag} [{self.target_os}/{self.target_arch}]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +132,7 @@ class DeclaredServiceConfig:
     build_context: str | None = None
     build_dockerfile: str | None = None
     profiles: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
     labels: dict[str, str] = field(default_factory=dict)
     source_files: tuple[str, ...] = ()
     parse_error: str | None = None
@@ -119,6 +168,8 @@ class ComposeServiceObservation:
     freshness: str
     observed_at: datetime | None
     provenance_verified: bool
+    depends_on: tuple[str, ...] = ()
+    candidate_key: CandidateLookupKey | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +219,8 @@ class ComposeProjectObservation:
                     "build_context": s.build_context,
                     "build_dockerfile": s.build_dockerfile,
                     "ports": list(s.ports),
+                    "depends_on": list(s.depends_on),
+                    "candidate_key": s.candidate_key.canonical_str() if s.candidate_key else None,
                     "freshness": s.freshness,
                     "observed_at": s.observed_at.isoformat() if s.observed_at else None,
                     "provenance_verified": s.provenance_verified,
@@ -185,3 +238,19 @@ class ComposeProjectObservation:
             "freshness": self.freshness,
             "error": self.error,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceUpdatePlanDesign:
+    """Design-only representation for future selective service update planning (MC-6.15-A.3/A.4).
+
+    Strictly read-only architecture model; owns NO execution authority or mutation capability.
+    """
+
+    project_name: str
+    service_name: str
+    current_runtime_digest: str | None
+    declared_image_ref: ImageReference | None
+    target_candidate_digest: str
+    dependency_scope: tuple[str, ...]
+    health_contract: str | None

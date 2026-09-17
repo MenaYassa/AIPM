@@ -20,17 +20,25 @@ import httpcore._backends.sync
 import httpx
 
 from aipm.models.compose_intelligence import (
+    CandidateCacheFreshness,
+    CandidateLookupKey,
     ImageReference,
     ServiceCandidateReason,
     ServiceCandidateStatus,
 )
+from aipm.services.compose.budget import (
+    DEFAULT_MAX_LOGICAL_LOOKUPS,
+    DEFAULT_MAX_NETWORK_OPS,
+    TwoLevelBudget,
+)
+from aipm.services.compose.cache import CandidateCache
 
 _MAX_RESPONSE_BYTES = 1024 * 1024  # 1 MB
 _CHUNK_SIZE = 8192  # 8 KB chunks
 _TOTAL_DEADLINE_SECONDS = 8.0
 _CONNECT_TIMEOUT = 3.0
 _READ_TIMEOUT = 5.0
-_MAX_QUERIES_PER_RUN = 10
+_MAX_QUERIES_PER_RUN = DEFAULT_MAX_LOGICAL_LOOKUPS
 _CACHE_TTL_SECONDS = 900  # 15 minutes
 
 _MANIFEST_ACCEPT_HEADERS = (
@@ -39,6 +47,10 @@ _MANIFEST_ACCEPT_HEADERS = (
     "application/vnd.oci.image.index.v1+json, "
     "application/vnd.oci.image.manifest.v1+json"
 )
+
+# Global default candidate cache instance
+_GLOBAL_CANDIDATE_CACHE = CandidateCache()
+_CANDIDATE_CACHE = _GLOBAL_CANDIDATE_CACHE
 
 
 def _remaining_timeout(deadline: float) -> httpx.Timeout:
@@ -143,10 +155,6 @@ class RegistryCandidateResult(NamedTuple):
     index_digest: str | None = None
     child_digest: str | None = None
     detail: str | None = None
-
-
-# In-memory candidate cache: (registry, repository, tag, arch) -> (RegistryCandidateResult, timestamp)
-_CANDIDATE_CACHE: dict[tuple[str, str, str, str], tuple[RegistryCandidateResult, float]] = {}
 
 
 def is_safe_ip(ip_str: str) -> tuple[bool, str | None]:
@@ -266,14 +274,26 @@ class SSRFSafeTransport(httpx.HTTPTransport):
 class RegistryCandidateClient:
     """Safe, read-only OCI distribution registry client."""
 
-    def __init__(self, *, target_arch: str = "arm64", max_queries: int = _MAX_QUERIES_PER_RUN):
+    max_queries: int = _MAX_QUERIES_PER_RUN
+
+    def __init__(
+        self,
+        *,
+        target_arch: str = "arm64",
+        target_os: str = "linux",
+        max_queries: int = _MAX_QUERIES_PER_RUN,
+        cache: CandidateCache | None = None,
+    ):
         self.target_arch = target_arch
+        self.target_os = target_os
         self.max_queries = max_queries
+        self.cache = cache if cache is not None else _GLOBAL_CANDIDATE_CACHE
         self._queries_performed = 0
 
     def query_candidate_digest(
         self,
         image_ref: ImageReference,
+        budget: TwoLevelBudget | None = None,
     ) -> RegistryCandidateResult:
         """Query the remote registry for the latest manifest digest of an image reference.
 
@@ -298,15 +318,19 @@ class RegistryCandidateClient:
                 detail=f"Pinned by immutable digest {image_ref.digest}",
             )
 
-        tag = image_ref.tag or "latest"
-        cache_key = (image_ref.registry, image_ref.repository, tag, self.target_arch)
-        now = time.monotonic()
+        cache_key = CandidateLookupKey.from_image_ref(
+            image_ref,
+            target_arch=self.target_arch,
+            target_os=self.target_os,
+        )
 
-        # Check cache before consuming query budget
-        if cache_key in _CANDIDATE_CACHE:
-            cached_res, cached_time = _CANDIDATE_CACHE[cache_key]
-            if now - cached_time <= _CACHE_TTL_SECONDS:
-                return cached_res
+        # Check cache before consuming logical or network query budget (for standalone calls)
+        if budget is None:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                cached_res, freshness = cached
+                if freshness == CandidateCacheFreshness.FRESH:
+                    return cached_res
 
         if self._queries_performed >= self.max_queries:
             return RegistryCandidateResult(
@@ -317,17 +341,40 @@ class RegistryCandidateClient:
                 detail=f"Query budget reached ({self.max_queries})",
             )
 
+        if budget is None:
+            active_budget = TwoLevelBudget(
+                max_logical_lookups=self.max_queries,
+                max_network_ops=DEFAULT_MAX_NETWORK_OPS,
+                total_deadline_seconds=_TOTAL_DEADLINE_SECONDS,
+            )
+            # Check logical lookup budget
+            allowed, reason, err_detail = active_budget.check_logical_lookup()
+            if not allowed:
+                return RegistryCandidateResult(
+                    status=ServiceCandidateStatus.UNKNOWN,
+                    reason=reason or ServiceCandidateReason.BUDGET_EXHAUSTED,
+                    index_digest=None,
+                    child_digest=None,
+                    detail=err_detail or f"Query budget reached ({self.max_queries})",
+                )
+            active_budget.record_logical_lookup()
+        else:
+            active_budget = budget
+
         # Enforce SSRF validation
         safe, ssrf_err = is_safe_registry_host(image_ref.registry)
         if not safe:
-            return RegistryCandidateResult(
+            res = RegistryCandidateResult(
                 status=ServiceCandidateStatus.UNKNOWN,
                 reason=ServiceCandidateReason.SSRF_BLOCKED,
                 index_digest=None,
                 child_digest=None,
                 detail=ssrf_err,
             )
+            self.cache.put(cache_key, res, is_negative=True)
+            return res
 
+        tag = image_ref.tag or "latest"
         reg_host = "registry-1.docker.io" if image_ref.registry == "docker.io" else image_ref.registry
         url = f"https://{reg_host}/v2/{image_ref.repository}/manifests/{tag}"
 
@@ -337,15 +384,30 @@ class RegistryCandidateClient:
         }
 
         self._queries_performed += 1
-        deadline = time.monotonic() + _TOTAL_DEADLINE_SECONDS
 
         try:
             transport = SSRFSafeTransport()
             with httpx.Client(transport=transport, follow_redirects=False) as client:
-                req_timeout = _remaining_timeout(deadline)
+                allowed_net, net_reason, net_detail = active_budget.check_network_op()
+                if not allowed_net:
+                    return RegistryCandidateResult(
+                        status=ServiceCandidateStatus.UNKNOWN,
+                        reason=net_reason or ServiceCandidateReason.NETWORK_BUDGET_EXHAUSTED,
+                        index_digest=None,
+                        child_digest=None,
+                        detail=net_detail or "Network operations budget exhausted",
+                    )
+
+                req_timeout = _remaining_timeout(active_budget.deadline_monotonic)
                 resp_status, resp_headers, resp_body = _stream_bounded_response(
-                    client, "GET", url, headers=headers, timeout=req_timeout
+                    client,
+                    "GET",
+                    url,
+                    headers=headers,
+                    timeout=req_timeout,
+                    max_bytes=min(_MAX_RESPONSE_BYTES, active_budget.max_response_bytes),
                 )
+                active_budget.record_network_op(len(resp_body))
 
                 # Handle 401 Bearer Token Challenge (standard OCI anonymous auth)
                 if resp_status == 401:
@@ -357,58 +419,97 @@ class RegistryCandidateClient:
                             parsed_realm = urlparse(realm)
                             realm_safe, realm_err = is_safe_registry_host(parsed_realm.netloc)
                             if not realm_safe:
-                                return RegistryCandidateResult(
+                                res = RegistryCandidateResult(
                                     status=ServiceCandidateStatus.UNKNOWN,
                                     reason=ServiceCandidateReason.SSRF_BLOCKED,
                                     index_digest=None,
                                     child_digest=None,
                                     detail=f"Authentication realm blocked: {realm_err}",
                                 )
+                                self.cache.put(cache_key, res, is_negative=True)
+                                return res
+
                             svc_match = re.search(r'service="([^"]+)"', auth_hdr)
                             svc_arg = f"&service={svc_match.group(1)}" if svc_match else ""
                             token_url = f"{realm}?scope=repository:{image_ref.repository}:pull{svc_arg}"
-                            token_timeout = _remaining_timeout(deadline)
+
+                            allowed_tok, tok_reason, tok_detail = active_budget.check_network_op()
+                            if not allowed_tok:
+                                return RegistryCandidateResult(
+                                    status=ServiceCandidateStatus.UNKNOWN,
+                                    reason=tok_reason or ServiceCandidateReason.NETWORK_BUDGET_EXHAUSTED,
+                                    index_digest=None,
+                                    child_digest=None,
+                                    detail=tok_detail or "Network operations budget exhausted during auth challenge",
+                                )
+
+                            token_timeout = _remaining_timeout(active_budget.deadline_monotonic)
                             tok_status, tok_headers, tok_body = _stream_bounded_response(
-                                client, "GET", token_url, headers={}, timeout=token_timeout
+                                client,
+                                "GET",
+                                token_url,
+                                headers={},
+                                timeout=token_timeout,
+                                max_bytes=min(_MAX_RESPONSE_BYTES, active_budget.max_response_bytes),
                             )
+                            active_budget.record_network_op(len(tok_body))
+
                             if tok_status == 200:
                                 t_data = json.loads(tok_body.decode("utf-8", errors="replace"))
                                 tok = t_data.get("token") or t_data.get("access_token")
                                 if tok:
-                                    auth_timeout = _remaining_timeout(deadline)
+                                    allowed_auth, auth_net_reason, auth_net_detail = active_budget.check_network_op()
+                                    if not allowed_auth:
+                                        return RegistryCandidateResult(
+                                            status=ServiceCandidateStatus.UNKNOWN,
+                                            reason=auth_net_reason or ServiceCandidateReason.NETWORK_BUDGET_EXHAUSTED,
+                                            index_digest=None,
+                                            child_digest=None,
+                                            detail=auth_net_detail or "Network operations budget exhausted during authenticated request",
+                                        )
+
+                                    auth_timeout = _remaining_timeout(active_budget.deadline_monotonic)
                                     resp_status, resp_headers, resp_body = _stream_bounded_response(
                                         client,
                                         "GET",
                                         url,
                                         headers={**headers, "Authorization": f"Bearer {tok}"},
                                         timeout=auth_timeout,
+                                        max_bytes=min(_MAX_RESPONSE_BYTES, active_budget.max_response_bytes),
                                     )
+                                    active_budget.record_network_op(len(resp_body))
                     else:
-                        return RegistryCandidateResult(
+                        res = RegistryCandidateResult(
                             status=ServiceCandidateStatus.UNKNOWN,
                             reason=ServiceCandidateReason.AUTHENTICATION_REQUIRED,
                             index_digest=None,
                             child_digest=None,
                             detail="Registry requires authentication",
                         )
+                        self.cache.put(cache_key, res, is_negative=True)
+                        return res
 
                 if resp_status in (401, 403):
-                    return RegistryCandidateResult(
+                    res = RegistryCandidateResult(
                         status=ServiceCandidateStatus.UNKNOWN,
                         reason=ServiceCandidateReason.AUTHENTICATION_REQUIRED,
                         index_digest=None,
                         child_digest=None,
                         detail=f"HTTP {resp_status}: Registry authentication required",
                     )
+                    self.cache.put(cache_key, res, is_negative=True)
+                    return res
 
                 if resp_status != 200:
-                    return RegistryCandidateResult(
+                    res = RegistryCandidateResult(
                         status=ServiceCandidateStatus.UNKNOWN,
                         reason=ServiceCandidateReason.REGISTRY_UNAVAILABLE,
                         index_digest=None,
                         child_digest=None,
                         detail=f"HTTP {resp_status} from registry",
                     )
+                    self.cache.put(cache_key, res, is_negative=True)
+                    return res
 
                 top_digest = resp_headers.get("docker-content-digest")
                 data = json.loads(resp_body.decode("utf-8", errors="replace"))
@@ -416,30 +517,32 @@ class RegistryCandidateClient:
                 # Multi-architecture manifest list / OCI index
                 if isinstance(data, dict) and "manifests" in data:
                     manifests = data.get("manifests") or []
-                    arm64_child_digest = None
+                    arch_child_digest = None
                     for m in manifests:
                         plat = m.get("platform") or {}
-                        if plat.get("architecture") == self.target_arch and plat.get("os") == "linux":
-                            arm64_child_digest = m.get("digest")
+                        if plat.get("architecture") == self.target_arch and plat.get("os") == self.target_os:
+                            arch_child_digest = m.get("digest")
                             break
 
-                    if not arm64_child_digest:
-                        return RegistryCandidateResult(
+                    if not arch_child_digest:
+                        res = RegistryCandidateResult(
                             status=ServiceCandidateStatus.UNKNOWN,
                             reason=ServiceCandidateReason.ARCHITECTURE_UNAVAILABLE,
                             index_digest=None,
                             child_digest=None,
-                            detail=f"No linux/{self.target_arch} manifest in manifest list",
+                            detail=f"No {self.target_os}/{self.target_arch} manifest in manifest list",
                         )
+                        self.cache.put(cache_key, res, is_negative=True)
+                        return res
 
                     res = RegistryCandidateResult(
                         status=ServiceCandidateStatus.CURRENT,
                         reason=ServiceCandidateReason.UP_TO_DATE,
                         index_digest=top_digest,
-                        child_digest=arm64_child_digest,
+                        child_digest=arch_child_digest,
                         detail=f"multi-arch ({self.target_arch})",
                     )
-                    _CANDIDATE_CACHE[cache_key] = (res, now)
+                    self.cache.put(cache_key, res, is_negative=False)
                     return res
 
                 # Single architecture manifest
@@ -451,46 +554,56 @@ class RegistryCandidateClient:
                         child_digest=None,
                         detail="single-manifest",
                     )
-                    _CANDIDATE_CACHE[cache_key] = (res, now)
+                    self.cache.put(cache_key, res, is_negative=False)
                     return res
 
-                return RegistryCandidateResult(
+                res = RegistryCandidateResult(
                     status=ServiceCandidateStatus.UNKNOWN,
                     reason=ServiceCandidateReason.MANIFEST_UNAVAILABLE,
                     index_digest=None,
                     child_digest=None,
                     detail="No Docker-Content-Digest header returned",
                 )
+                self.cache.put(cache_key, res, is_negative=True)
+                return res
 
         except ValueError as val_err:
-            return RegistryCandidateResult(
+            res = RegistryCandidateResult(
                 status=ServiceCandidateStatus.UNKNOWN,
                 reason=ServiceCandidateReason.MANIFEST_UNAVAILABLE,
                 index_digest=None,
                 child_digest=None,
                 detail=str(val_err),
             )
+            self.cache.put(cache_key, res, is_negative=True)
+            return res
         except PermissionError as p_err:
-            return RegistryCandidateResult(
+            res = RegistryCandidateResult(
                 status=ServiceCandidateStatus.UNKNOWN,
                 reason=ServiceCandidateReason.SSRF_BLOCKED,
                 index_digest=None,
                 child_digest=None,
                 detail=str(p_err),
             )
+            self.cache.put(cache_key, res, is_negative=True)
+            return res
         except httpx.TimeoutException:
-            return RegistryCandidateResult(
+            res = RegistryCandidateResult(
                 status=ServiceCandidateStatus.UNKNOWN,
                 reason=ServiceCandidateReason.REGISTRY_TIMEOUT,
                 index_digest=None,
                 child_digest=None,
                 detail=f"Registry request timed out: operation deadline ({_TOTAL_DEADLINE_SECONDS}s) exceeded",
             )
+            self.cache.put(cache_key, res, is_negative=True)
+            return res
         except Exception as exc:
-            return RegistryCandidateResult(
+            res = RegistryCandidateResult(
                 status=ServiceCandidateStatus.UNKNOWN,
                 reason=ServiceCandidateReason.REGISTRY_UNAVAILABLE,
                 index_digest=None,
                 child_digest=None,
                 detail=f"Registry query error: {type(exc).__name__}",
             )
+            self.cache.put(cache_key, res, is_negative=True)
+            return res
