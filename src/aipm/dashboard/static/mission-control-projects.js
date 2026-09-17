@@ -45,6 +45,173 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     return counts.total ? `${counts.running}/${counts.total} running · ${counts.healthy}/${counts.total} healthy · ${counts.missing}/${counts.total} missing health checks · ${counts.unknown} unknown` : 'No runtime health evidence available';
   };
 
+  // Candidate status vocabulary -> restrained badge styling classes.
+  // Uses the backend enum values exactly; never invents semantic names.
+  const candidateStatusBadge = status => {
+    const raw = String(status || 'unknown');
+    let cls = 'status-unknown';
+    if (raw === 'current') cls = 'status-current';
+    else if (raw === 'update_available') cls = 'status-update_available';
+    else if (raw === 'drift') cls = 'status-drift';
+    else if (raw === 'not_applicable') cls = 'status-not_applicable';
+    return `<span class="badge ${cls}">${escapeHtml(raw)}</span>`;
+  };
+
+  const formatDigest = (digest, fallback = '—') => {
+    if (!digest) return `<span class="subtle">${escapeHtml(fallback)}</span>`;
+    const str = String(digest);
+    const hashPart = str.includes('@') ? str.split('@')[1] : str;
+    const short = hashPart.startsWith('sha256:') ? `sha256:${hashPart.slice(7, 19)}…` : `${hashPart.slice(0, 16)}…`;
+    return `<span class="digest-tag" title="${escapeHtml(str)}">${escapeHtml(short)}</span>`;
+  };
+
+  const getRunningDigest = svc => {
+    if (svc.running_repo_digests && svc.running_repo_digests.length) {
+      return formatDigest(svc.running_repo_digests[0]);
+    }
+    if (svc.running_image_id) {
+      return formatDigest(svc.running_image_id);
+    }
+    return '<span class="subtle">—</span>';
+  };
+
+  const getCandidateDigest = svc => {
+    if (!svc.candidate_digest) return '<span class="subtle">—</span>';
+    let html = formatDigest(svc.candidate_digest);
+    if (svc.candidate_child_digest && svc.candidate_child_digest !== svc.candidate_digest) {
+      const shortChild = svc.candidate_child_digest.startsWith('sha256:')
+        ? `sha256:${svc.candidate_child_digest.slice(7, 15)}…`
+        : `${svc.candidate_child_digest.slice(0, 12)}…`;
+      html += `<div class="subtle" title="platform child: ${escapeHtml(svc.candidate_child_digest)}">arch: ${escapeHtml(shortChild)}</div>`;
+    }
+    return html;
+  };
+
+  const composeIntelligenceSection = (data, projectId) => {
+    const cid = `projectComposeIntelligence-${projectId}`;
+    if (!data || data.available !== true || !data.project) {
+      let message = 'Compose service intelligence unavailable.';
+      if (data?.error === 'auth_required') message = 'Authentication required to observe service intelligence.';
+      else if (data?.error === 'not_found') message = 'No Compose configuration found for this project.';
+      else if (data?.error === 'COMPOSE_UNAVAILABLE' || data?.error === 'unavailable' || data?.status === 'unavailable') message = 'Compose service intelligence is not available for this project.';
+      else if (data?.error === 'COMPOSE_OBSERVATION_FAILED') message = 'Compose service observation failed.';
+      else if (data?.error === 'network_error') message = 'Service intelligence request timed out or network is unavailable.';
+      else if (typeof data?.error === 'string' && data.error) message = data.error;
+      return `<section class="health-evidence compose-intelligence-section" id="${cid}">
+        <div class="compose-section-header">
+          <h4>Service Intelligence</h4>
+          <button type="button" class="advisor-fixture-button" data-refresh-compose="${escapeHtml(projectId)}">Refresh</button>
+        </div>
+        <div class="empty">${escapeHtml(message)}</div>
+        <div class="subtle">Observation only — candidates are queried read-only from registry manifests.</div>
+      </section>`;
+    }
+
+    const p = data.project;
+    const services = p.services || [];
+
+    const summaryHtml = `
+      <div class="compose-summary-strip">
+        <span class="pill">${escapeHtml(p.total_services_count ?? 0)} declared</span>
+        <span class="pill">${escapeHtml(p.running_services_count ?? 0)} running</span>
+        <span class="pill">${escapeHtml(p.current_count ?? 0)} current</span>
+        <span class="pill">${escapeHtml(p.updates_available_count ?? 0)} update available</span>
+        <span class="pill">${escapeHtml(p.not_applicable_count ?? 0)} not applicable</span>
+        <span class="pill">${escapeHtml(p.unknown_count ?? 0)} unknown</span>
+        <span class="pill">${escapeHtml(p.drift_count ?? 0)} drift</span>
+      </div>`;
+
+    const rows = services.length ? services.map(svc => {
+      const declaredImg = svc.declared_image
+        ? `<span class="declared-image-cell" title="${escapeHtml(svc.declared_image)}">${escapeHtml(svc.declared_image)}</span>`
+        : svc.is_build ? '<span class="subtle">(build)</span>' : '<span class="subtle">—</span>';
+      const deps = (svc.depends_on && svc.depends_on.length)
+        ? svc.depends_on.map(d => `<span class="dep-pill">${escapeHtml(d)}</span>`).join(' ')
+        : '<span class="subtle">—</span>';
+      const prov = svc.provenance_verified
+        ? '<span class="provenance-badge provenance-verified" title="Docker container provenance verified against Compose identity">✓ verified</span>'
+        : '<span class="provenance-badge provenance-unverified" title="Provenance not verified against Compose identity">— unverified</span>';
+      const reasonHtml = `<div class="reason-cell"><strong>${escapeHtml(svc.candidate_reason || 'unknown')}</strong>${svc.candidate_detail ? `<div class="subtle reason-detail">${escapeHtml(svc.candidate_detail)}</div>` : ''}</div>`;
+
+      return `<tr>
+        <td><strong>${escapeHtml(svc.service_name)}</strong></td>
+        <td>${badge(svc.state || 'unknown', svc.state === 'running' ? 'healthy' : svc.state === 'exited' ? 'critical' : 'warning')}</td>
+        <td>${svc.health ? badge(svc.health, svc.health === 'healthy' ? 'healthy' : 'critical') : '<span class="subtle">—</span>'}</td>
+        <td>${declaredImg}</td>
+        <td class="digest-cell">${getRunningDigest(svc)}</td>
+        <td class="digest-cell">${getCandidateDigest(svc)}</td>
+        <td>${candidateStatusBadge(svc.candidate_status)}</td>
+        <td>${reasonHtml}</td>
+        <td>${deps}</td>
+        <td><span class="subtle">${escapeHtml(svc.freshness || 'unknown')}</span></td>
+        <td>${prov}</td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="11"><div class="empty">No services reported in this observation.</div></td></tr>';
+
+    return `<section class="health-evidence compose-intelligence-section" id="${cid}">
+      <div class="compose-section-header">
+        <div>
+          <h4>Service Intelligence</h4>
+          <span class="subtle">Identity: ${escapeHtml(p.compose_identity || 'unknown')} · Freshness: ${escapeHtml(p.freshness || 'unknown')}</span>
+        </div>
+        <button type="button" class="advisor-fixture-button" data-refresh-compose="${escapeHtml(projectId)}">Refresh</button>
+      </div>
+      ${summaryHtml}
+      <div class="compose-table-wrap">
+        <table class="compose-table">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>State</th>
+              <th>Health</th>
+              <th>Declared Image</th>
+              <th>Running Digest</th>
+              <th>Candidate Digest</th>
+              <th>Candidate Status</th>
+              <th>Candidate Reason</th>
+              <th>Dependencies</th>
+              <th>Freshness</th>
+              <th>Provenance</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+      <div class="subtle" style="margin-top:10px">Observation only — candidates are queried read-only from registry manifests without execution authority.</div>
+    </section>`;
+  };
+
+  function bindComposeRefresh(projectId) {
+    document.querySelectorAll(`[data-refresh-compose="${projectId}"]`).forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Refreshing…';
+        try {
+          const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/compose-intelligence`, {cache: 'no-store'});
+          const data = res.ok ? await res.json() : {available: false, error: res.status === 404 ? 'not_found' : 'unavailable'};
+          const container = document.getElementById(`projectComposeIntelligence-${projectId}`);
+          if (container) {
+            container.outerHTML = composeIntelligenceSection(data, projectId);
+            bindComposeRefresh(projectId);
+          }
+        } catch {
+          const container = document.getElementById(`projectComposeIntelligence-${projectId}`);
+          if (container) {
+            container.outerHTML = composeIntelligenceSection({available: false, error: 'network_error'}, projectId);
+            bindComposeRefresh(projectId);
+          }
+        }
+      });
+    });
+  }
+
+  window.refreshComposeIntelligence = async function(projectId) {
+    const btn = document.querySelector(`[data-refresh-compose="${projectId}"]`);
+    if (btn) btn.click();
+  };
+
   // Canonical control-plane lifecycle vocabulary -> existing badge classes.
   // Never invents states: unknown-shaped values collapse to 'unknown'.
   const updateStateClass = state => {
@@ -275,7 +442,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectDetail').innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
   }
 
-  function renderDetail(data, healthData, containersData, updateData) {
+  function renderDetail(data, healthData, containersData, updateData, composeData) {
     const project = data.project;
     if (!project) return clearDetail(data.error || 'Project detail unavailable.');
     const health = healthData.health || project.health || {};
@@ -284,7 +451,8 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectDetailState').className = `badge ${stateClass(health.status || 'unknown')}`;
     const evidence = (health.evidence || project.evidence || []).map(item => `<div class="evidence-row"><span class="badge ${stateClass(item.severity === 'warning' ? 'warning' : 'unknown')}">${escapeHtml(item.code)}</span><span>${escapeHtml(item.message)}</span></div>`).join('');
     const tree = components.length ? `<div class="component-tree">${components.map(item => `<div class="component-row"><div><strong>${escapeHtml(item.service_name || item.name)}</strong><span>${escapeHtml(item.name)} · ${escapeHtml(item.image || 'image unavailable')}</span></div><div>${badge(item.state || 'unknown', item.state === 'running' ? 'healthy' : item.state === 'exited' ? 'critical' : 'warning')} ${item.health ? badge(item.health, item.health === 'healthy' ? 'healthy' : 'critical') : '<span class="subtle">health check missing</span>'}</div></div>`).join('')}</div>` : '<div class="empty">No runtime components are associated with this project.</div>';
-    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div><div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>${updateStatusSection(updateData)}${updateWorkflowSection(project.id)}`;
+    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div>${composeIntelligenceSection(composeData, project.id)}<div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>${updateStatusSection(updateData)}${updateWorkflowSection(project.id)}`;
+    bindComposeRefresh(project.id);
     // Load update plan after rendering
     setTimeout(() => loadUpdatePlan(project.id), 100);
   }
@@ -294,19 +462,26 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     selectedId = projectId;
     document.querySelectorAll('[data-project-id]').forEach(button => button.classList.toggle('selected', button.dataset.projectId === projectId));
     try {
-      const responses = await Promise.all([
-        fetch(`/api/projects/${encodeURIComponent(projectId)}`, {cache: 'no-store'}),
-        fetch(`/api/projects/${encodeURIComponent(projectId)}/health`, {cache: 'no-store'}),
-        fetch(`/api/projects/${encodeURIComponent(projectId)}/containers`, {cache: 'no-store'})
+      const [responses, updateData, composeData] = await Promise.all([
+        Promise.all([
+          fetch(`/api/projects/${encodeURIComponent(projectId)}`, {cache: 'no-store'}),
+          fetch(`/api/projects/${encodeURIComponent(projectId)}/health`, {cache: 'no-store'}),
+          fetch(`/api/projects/${encodeURIComponent(projectId)}/containers`, {cache: 'no-store'})
+        ]),
+        fetch(`/api/projects/${encodeURIComponent(projectId)}/update/status`, {cache: 'no-store'})
+          .then(response => (response.ok ? response.json() : {available: false, error: response.status === 404 ? 'not_found' : 'unavailable'}))
+          .catch(() => ({available: false, error: 'unavailable'})),
+        fetch(`/api/projects/${encodeURIComponent(projectId)}/compose-intelligence`, {cache: 'no-store'})
+          .then(response => {
+            if (response.ok) return response.json();
+            if (response.status === 401 || response.status === 403) return {available: false, error: 'auth_required'};
+            if (response.status === 404) return {available: false, error: 'not_found'};
+            return {available: false, error: 'unavailable'};
+          })
+          .catch(() => ({available: false, error: 'network_error'}))
       ]);
       if (responses.some(response => !response.ok)) throw new Error('Project detail unavailable');
-      // Read-only observation surface: an unavailable or unregistered
-      // control-plane projection degrades to a neutral panel, never breaks
-      // the project detail render.
-      const updateData = await fetch(`/api/projects/${encodeURIComponent(projectId)}/update/status`, {cache: 'no-store'})
-        .then(response => (response.ok ? response.json() : {available: false, error: response.status === 404 ? 'not_found' : 'unavailable'}))
-        .catch(() => ({available: false, error: 'unavailable'}));
-      renderDetail(await responses[0].json(), await responses[1].json(), await responses[2].json(), updateData);
+      renderDetail(await responses[0].json(), await responses[1].json(), await responses[2].json(), updateData, composeData);
     } catch (error) {
       clearDetail('Project detail is unavailable; unaffected inventory observations remain visible.');
     }
