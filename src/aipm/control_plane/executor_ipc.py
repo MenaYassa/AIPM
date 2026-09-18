@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import selectors
 import signal
 import socket
@@ -42,16 +43,56 @@ CALLER_UID = None  # set at service construction; None = accept any uid in allow
 # capability requires the engine binding fields below.
 CAPABILITY_LEGACY_RESTART = "update_project_plan"
 CAPABILITY_EXECUTE_UPDATE_PLAN = "execute_update_plan"
+CAPABILITY_EXECUTE_SERVICE_UPDATE = "execute_service_update"
 # C6.5-B read-only evidence marker. This is a message type, not an execution
 # capability: it selects SELECT-only receipt lookup and can never drive the
 # engine, consume confirmations, or mutate any state.
 QUERY_MESSAGE_TYPE = "query_mutation_receipt"
 
 _HEX = set("0123456789abcdef")
+_SERVICE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+_FORBIDDEN_CHARS = frozenset(";&|$`><\n\r\t\0'\"/\\:@ ")
 
 
 class ExecutorIPCError(ValueError):
     """Raised when an IPC request fails structural validation."""
+
+
+def validate_service_scope(scope: Any) -> tuple[str, ...]:
+    """Validate that service_scope is a strictly bounded, non-empty tuple of canonical service names.
+
+    Adversarial validation invariants (MC-6.15-C.3):
+    1. Must be list or tuple.
+    2. Cannot be empty.
+    3. Every service name must be a non-empty string <= 64 chars.
+    4. No duplicate service names.
+    5. No path separators ('/' or '\\').
+    6. No shell metacharacters (';', '&', '|', '$', '`', '>', '<', etc.).
+    7. No whitespace tricks (no whitespace, leading/trailing or embedded).
+    8. No arbitrary Docker flags (cannot start with '-').
+    9. No image references embedded (no ':', '@', or '/').
+    10. No scope expansion: converted to canonical immutable tuple exactly once.
+    """
+    if not isinstance(scope, (list, tuple)):
+        raise ExecutorIPCError("service_scope must be a list or tuple")
+    if not scope:
+        raise ExecutorIPCError("service_scope cannot be empty")
+    seen = set()
+    cleaned = []
+    for item in scope:
+        if not isinstance(item, str) or not item:
+            raise ExecutorIPCError("Invalid service name in service_scope: must be non-empty string")
+        if item.startswith("-"):
+            raise ExecutorIPCError(f"Invalid service name: cannot start with dash ({item!r})")
+        if item != item.strip() or any(c in _FORBIDDEN_CHARS for c in item) or any(c.isspace() for c in item):
+            raise ExecutorIPCError(f"Invalid service name: forbidden characters or whitespace in {item!r}")
+        if not _SERVICE_NAME_PATTERN.match(item) or len(item) > 64:
+            raise ExecutorIPCError(f"Invalid service name: does not match canonical pattern ({item!r})")
+        if item in seen:
+            raise ExecutorIPCError(f"Duplicate service name in service_scope: {item!r}")
+        seen.add(item)
+        cleaned.append(item)
+    return tuple(cleaned)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +106,9 @@ class ExecutionRequest:
     the exact plan the operator approved and the consumed confirmation
     reference; no commands, argv, paths, env, or shell content is ever
     transmitted.
+
+    MC-6.15-C.3: ``service_scope`` carries the already-authorized canonical
+    derived execution scope for Compose service updates.
     """
 
     action_id: str
@@ -75,6 +119,13 @@ class ExecutionRequest:
     fencing_token: int
     plan_digest: str | None = None
     confirmation_id: str | None = None
+    service_scope: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.service_scope is not None:
+            validated = validate_service_scope(self.service_scope)
+            if validated != self.service_scope:
+                object.__setattr__(self, "service_scope", validated)
 
     @classmethod
     def from_json(cls, data: bytes) -> "ExecutionRequest":
@@ -92,12 +143,16 @@ class ExecutionRequest:
             raise ExecutorIPCError("Too many request fields")
         plan_digest = payload.get("plan_digest")
         confirmation_id = payload.get("confirmation_id")
+        service_scope_raw = payload.get("service_scope")
         capability_id = payload["capability_id"]
-        if capability_id == CAPABILITY_EXECUTE_UPDATE_PLAN:
+        if capability_id in (CAPABILITY_EXECUTE_UPDATE_PLAN, CAPABILITY_EXECUTE_SERVICE_UPDATE):
             if not isinstance(plan_digest, str) or not plan_digest:
-                raise ExecutorIPCError("execute_update_plan requires plan_digest")
+                raise ExecutorIPCError(f"{capability_id} requires plan_digest")
             if not isinstance(confirmation_id, str) or not confirmation_id:
-                raise ExecutorIPCError("execute_update_plan requires confirmation_id")
+                raise ExecutorIPCError(f"{capability_id} requires confirmation_id")
+        if capability_id == CAPABILITY_EXECUTE_SERVICE_UPDATE:
+            if service_scope_raw is None:
+                raise ExecutorIPCError("execute_service_update requires service_scope")
         for name, value, size in (
             ("plan_digest", plan_digest, 64),
             ("confirmation_id", confirmation_id, 32),
@@ -106,15 +161,33 @@ class ExecutionRequest:
                 continue
             if not isinstance(value, str) or len(value) != size or not set(value) <= _HEX:
                 raise ExecutorIPCError(f"Invalid {name}")
+        service_scope: tuple[str, ...] | None = None
+        if service_scope_raw is not None:
+            service_scope = validate_service_scope(service_scope_raw)
+
+        action_id = payload["action_id"]
+        if not isinstance(action_id, str) or not action_id:
+            raise ExecutorIPCError("Invalid action_id")
+        contract_digest = payload["contract_digest"]
+        if not isinstance(contract_digest, str) or not contract_digest:
+            raise ExecutorIPCError("Invalid contract_digest")
+        lease_id = payload["lease_id"]
+        if not isinstance(lease_id, str) or not lease_id:
+            raise ExecutorIPCError("Invalid lease_id")
+        fencing_token = payload["fencing_token"]
+        if not isinstance(fencing_token, int) or isinstance(fencing_token, bool):
+            raise ExecutorIPCError("Invalid fencing_token")
+
         return cls(
-            action_id=payload["action_id"],
+            action_id=action_id,
             capability_id=capability_id,
             target_id=payload["target_id"],
-            contract_digest=payload["contract_digest"],
-            lease_id=payload["lease_id"],
-            fencing_token=payload["fencing_token"],
+            contract_digest=contract_digest,
+            lease_id=lease_id,
+            fencing_token=fencing_token,
             plan_digest=plan_digest if isinstance(plan_digest, str) else None,
             confirmation_id=confirmation_id if isinstance(confirmation_id, str) else None,
+            service_scope=service_scope,
         )
 
     def to_json(self) -> bytes:
@@ -131,6 +204,8 @@ class ExecutionRequest:
             payload["plan_digest"] = self.plan_digest
         if self.confirmation_id is not None:
             payload["confirmation_id"] = self.confirmation_id
+        if self.service_scope is not None:
+            payload["service_scope"] = list(self.service_scope)
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
