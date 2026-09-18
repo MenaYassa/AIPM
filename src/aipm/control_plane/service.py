@@ -913,6 +913,11 @@ class OwnerControlPlaneService:
             raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Action has no durable lease evidence")
         if self._update_runtime is None:
             raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Update runtime is not composed")
+        service_scope: tuple[str, ...] | None = None
+        if "service_scope" in pairs and pairs["service_scope"]:
+            service_scope = tuple(s.strip() for s in pairs["service_scope"].split(",") if s.strip())
+        elif "service_name" in pairs and pairs["service_name"]:
+            service_scope = (pairs["service_name"],)
         return UpdateExecutionBinding(
             project_name=action.scope.target_id,
             plan_digest=plan_digest,
@@ -921,6 +926,7 @@ class OwnerControlPlaneService:
             contract_digest=evidence["contract_digest"],
             lease_id=lease.lease_id,
             fencing_token=lease.fencing_token,
+            service_scope=service_scope,
         )
 
     def _assert_binding_digest(self, decision, presented_digest: str) -> None:

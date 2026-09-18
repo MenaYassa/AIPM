@@ -354,6 +354,7 @@ class UpdateExecutionBinding:
     contract_digest: str
     lease_id: str
     fencing_token: int
+    service_scope: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         _bounded_string(self.project_name, name="project identity", maximum=MAX_TARGET_ID, pattern=_SAFE_ID)
@@ -364,6 +365,9 @@ class UpdateExecutionBinding:
         _bounded_string(self.lease_id, name="lease identity", maximum=32, pattern=re.compile(r"^[0-9a-f]{32}$"))
         if not isinstance(self.fencing_token, int) or isinstance(self.fencing_token, bool) or self.fencing_token < 1:
             raise ValueError("Invalid execution fencing token")
+        if self.service_scope is not None:
+            if not isinstance(self.service_scope, tuple) or not all(isinstance(s, str) and s for s in self.service_scope):
+                raise ValueError("Invalid service execution scope")
 
 
 # MC-6.12 Stage 2 non-executing lifecycle foundation.

@@ -8,6 +8,10 @@ the dashboard must not import execution machinery). No parallel approval,
 confirmation, session, auth, audit, gate, lease, action, or digest
 implementation lives here.
 """
+from aipm.composition.service_evidence import (
+    ComposeServiceEvidenceVerifier,
+    compose_service_evidence_verifier,
+)
 from aipm.composition.update_digest import update_plan_digest_port
 from aipm.composition.update_runtime import compose_update_runtime
 from aipm.composition.executor_update import (
@@ -17,9 +21,11 @@ from aipm.composition.executor_update import (
 )
 
 __all__ = [
+    "ComposeServiceEvidenceVerifier",
     "compose_executor_update_handler",
     "compose_ipc_update_runtime",
     "compose_receipt_query_handler",
+    "compose_service_evidence_verifier",
     "compose_update_runtime",
     "update_plan_digest_port",
 ]

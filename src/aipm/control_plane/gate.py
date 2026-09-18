@@ -62,6 +62,87 @@ class GateCode(enum.Enum):
     KILL_SWITCH_ENGAGED = "kill_switch_engaged"
     KILL_SWITCH_EPOCH_MISMATCH = "kill_switch_epoch_mismatch"
     INTERNAL_ERROR = "internal_error"
+    # MC-6.15-C.2 service plan gate codes:
+    PLAN_IDENTITY_MISMATCH = "plan_identity_mismatch"
+    DEPENDENCY_SCOPE_MISMATCH = "dependency_scope_mismatch"
+    CURRENT_DIGEST_MISMATCH = "current_digest_mismatch"
+    CANDIDATE_DIGEST_MISMATCH = "candidate_digest_mismatch"
+    PROVENANCE_INVALID = "provenance_invalid"
+    DEPENDENCY_BLOCKED = "dependency_blocked"
+    HEALTH_CONTRACT_MISMATCH = "health_contract_mismatch"
+    LEASE_INVALID = "lease_invalid"
+    CONFIRMATION_INVALID = "confirmation_invalid"
+
+
+def verify_service_evidence(
+    authorized: Any,
+    fresh: Any,
+    expected_digest: str | None = None,
+) -> GateCode:
+    """Compare authorized service evidence against freshly re-observed evidence.
+
+    Deterministic fail-closed verification:
+    - Provenance check
+    - Project, Compose, and service identity
+    - Requested and derived execution scopes
+    - Atomicity classification
+    - Current runtime digest
+    - Target candidate digest and platform child digest
+    - Candidate lookup key (including architecture/platform)
+    - Health contract summary
+    - Dependency scope and dependency health/readiness
+    - Canonical plan digest
+    """
+    if not getattr(fresh, "provenance_verified", False):
+        return GateCode.PROVENANCE_INVALID
+
+    if (
+        getattr(authorized, "project_name", None) != getattr(fresh, "project_name", None)
+        or getattr(authorized, "compose_identity", None) != getattr(fresh, "compose_identity", None)
+        or getattr(authorized, "service_name", None) != getattr(fresh, "service_name", None)
+    ):
+        return GateCode.PLAN_IDENTITY_MISMATCH
+
+    if tuple(getattr(authorized, "requested_scope", ())) != tuple(getattr(fresh, "requested_scope", ())):
+        return GateCode.DEPENDENCY_SCOPE_MISMATCH
+
+    if tuple(getattr(authorized, "derived_execution_scope", ())) != tuple(getattr(fresh, "derived_execution_scope", ())):
+        return GateCode.DEPENDENCY_SCOPE_MISMATCH
+
+    if getattr(authorized, "atomicity", None) != getattr(fresh, "atomicity", None):
+        return GateCode.PLAN_IDENTITY_MISMATCH
+
+    if getattr(authorized, "current_runtime_digest", None) != getattr(fresh, "current_runtime_digest", None):
+        return GateCode.CURRENT_DIGEST_MISMATCH
+
+    if getattr(authorized, "target_candidate_digest", None) != getattr(fresh, "target_candidate_digest", None):
+        return GateCode.CANDIDATE_DIGEST_MISMATCH
+
+    if getattr(authorized, "target_candidate_child_digest", None) != getattr(fresh, "target_candidate_child_digest", None):
+        return GateCode.CANDIDATE_DIGEST_MISMATCH
+
+    if getattr(authorized, "candidate_lookup_key", None) != getattr(fresh, "candidate_lookup_key", None):
+        return GateCode.CANDIDATE_DIGEST_MISMATCH
+
+    if getattr(authorized, "health_contract_summary", None) != getattr(fresh, "health_contract_summary", None):
+        return GateCode.HEALTH_CONTRACT_MISMATCH
+
+    auth_deps = tuple(getattr(authorized, "dependency_scope", ()))
+    fresh_deps = tuple(getattr(fresh, "dependency_scope", ()))
+    if auth_deps != fresh_deps:
+        for item in fresh_deps:
+            if "status:missing" in item or "health:unhealthy" in item or "state:missing" in item or "state:error" in item:
+                return GateCode.DEPENDENCY_BLOCKED
+        return GateCode.DEPENDENCY_SCOPE_MISMATCH
+
+    fresh_digest = getattr(fresh, "plan_digest", None)
+    auth_digest = getattr(authorized, "plan_digest", None)
+    if expected_digest is not None and fresh_digest != expected_digest:
+        return GateCode.PLAN_IDENTITY_MISMATCH
+    if auth_digest != fresh_digest:
+        return GateCode.PLAN_IDENTITY_MISMATCH
+
+    return GateCode.ALLOWED
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +191,9 @@ class ExecutionGateDecision:
 class FinalExecutionGate:
     """Single authoritative pre-execution check; re-reads current world state."""
 
-    __slots__ = ("_actions", "_plans", "_confirmations", "_snapshots", "_kill_switches", "_capability_registry", "_initialized")
+    __slots__ = ("_actions", "_plans", "_confirmations", "_snapshots", "_kill_switches", "_capability_registry", "_service_evidence_verifier", "_initialized")
 
-    def __init__(self, *, actions, plans, confirmations, snapshots=None, kill_switches=None, capability_registry: CapabilityRegistry | None = None) -> None:
+    def __init__(self, *, actions, plans, confirmations, snapshots=None, kill_switches=None, capability_registry: CapabilityRegistry | None = None, service_evidence_verifier=None) -> None:
         if actions is None or not hasattr(actions, "get_action"):
             raise TypeError("gate requires the action repository")
         if plans is None or not hasattr(plans, "read"):
@@ -125,6 +206,7 @@ class FinalExecutionGate:
         object.__setattr__(self, "_snapshots", snapshots)
         object.__setattr__(self, "_kill_switches", kill_switches)
         object.__setattr__(self, "_capability_registry", capability_registry or __import__("aipm.control_plane.capabilities_registry", fromlist=["DEFAULT_CAPABILITY_REGISTRY"]).DEFAULT_CAPABILITY_REGISTRY)
+        object.__setattr__(self, "_service_evidence_verifier", service_evidence_verifier)
         object.__setattr__(self, "_initialized", True)
 
     def __setattr__(self, name, value):
@@ -132,7 +214,7 @@ class FinalExecutionGate:
             raise AttributeError("FinalExecutionGate configuration is immutable")
         object.__setattr__(self, name, value)
 
-    def evaluate(self, contract: "ExecutionContract", *, now: datetime | None = None) -> ExecutionGateDecision:
+    def evaluate(self, contract: "ExecutionContract", *, now: datetime | None = None, service_evidence: Any | None = None, service_scope: tuple[str, ...] | None = None) -> ExecutionGateDecision:
         """Re-read current world state and produce a typed gate decision."""
 
         moment = contract.expires_at if contract.expires_at.tzinfo is not None else contract.expires_at.replace(tzinfo=timezone.utc)
@@ -214,12 +296,60 @@ class FinalExecutionGate:
                     return deny(GateCode.SNAPSHOT_MISMATCH)
 
             # 7. Current plan re-check (TOCTOU)
-            try:
-                current_plan = self._plans.read(contract.target_id)
-            except Exception:
-                return deny(GateCode.STALE_PLAN)
-            if current_plan.revision != contract.expected_plan_revision or current_plan.digest() != contract.expected_plan_digest:
-                return deny(GateCode.STALE_PLAN)
+            effective_evidence = service_evidence or getattr(contract, "service_evidence", None)
+            if effective_evidence is not None:
+                # Security invariant: Durable metadata carries authorized data; it does NOT create authority.
+                # If metadata claims a service_scope or service_name, it must match canonical plan evidence.
+                if service_scope is not None:
+                    if tuple(service_scope) != tuple(getattr(effective_evidence, "derived_execution_scope", ())):
+                        return deny(GateCode.DEPENDENCY_SCOPE_MISMATCH)
+
+                if hasattr(self._actions, "get_decision") and getattr(action, "decision_id", None):
+                    decision = self._actions.get_decision(action.decision_id)
+                    if decision is not None and getattr(decision, "request", None) is not None:
+                        dec_metadata = dict(getattr(decision.request, "metadata", ()))
+                        if "service_scope" in dec_metadata:
+                            dec_scope = tuple(s.strip() for s in dec_metadata["service_scope"].split(",") if s.strip())
+                            if dec_scope != tuple(getattr(effective_evidence, "derived_execution_scope", ())):
+                                return deny(GateCode.DEPENDENCY_SCOPE_MISMATCH)
+                        if "service_name" in dec_metadata:
+                            dec_svc = dec_metadata["service_name"].strip()
+                            if dec_svc != getattr(effective_evidence, "service_name", None):
+                                return deny(GateCode.PLAN_IDENTITY_MISMATCH)
+
+                mutation_map = dict(contract.mutation_fields)
+                if "service_scope" in mutation_map:
+                    meta_scope = tuple(s.strip() for s in mutation_map["service_scope"].split(",") if s.strip())
+                    if meta_scope != tuple(getattr(effective_evidence, "derived_execution_scope", ())):
+                        return deny(GateCode.DEPENDENCY_SCOPE_MISMATCH)
+                if "service_name" in mutation_map:
+                    meta_svc = mutation_map["service_name"].strip()
+                    if meta_svc != getattr(effective_evidence, "service_name", None):
+                        return deny(GateCode.PLAN_IDENTITY_MISMATCH)
+
+                if self._service_evidence_verifier is not None:
+                    decision_code = (
+                        self._service_evidence_verifier.verify(contract, effective_evidence, now=evaluated_at)
+                        if hasattr(self._service_evidence_verifier, "verify")
+                        else self._service_evidence_verifier(contract, effective_evidence, now=evaluated_at)
+                    )
+                    if decision_code is not GateCode.ALLOWED:
+                        return deny(decision_code)
+                else:
+                    decision_code = verify_service_evidence(
+                        effective_evidence,
+                        effective_evidence,
+                        expected_digest=contract.expected_plan_digest,
+                    )
+                    if decision_code is not GateCode.ALLOWED:
+                        return deny(decision_code)
+            else:
+                try:
+                    current_plan = self._plans.read(contract.target_id)
+                except Exception:
+                    return deny(GateCode.STALE_PLAN)
+                if current_plan.revision != contract.expected_plan_revision or current_plan.digest() != contract.expected_plan_digest:
+                    return deny(GateCode.STALE_PLAN)
 
             # 8. Lease active, bound, current fence
             lease = self._actions.active_lease(contract.action_id, now=evaluated_at) if hasattr(self._actions, "active_lease") else None

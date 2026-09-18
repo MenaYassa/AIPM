@@ -93,9 +93,11 @@ class ExecutionContract:
     fencing_token: int
     expires_at: datetime
     capability_version: str = "1"
+    service_evidence: Any | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capability_version", bounded_reference(self.capability_version, field="capability version", maximum=64))
+        object.__setattr__(self, "service_evidence", self.service_evidence)
         if self.contract_version != EXECUTION_CONTRACT_VERSION:
             raise AuditEventError("Unsupported execution contract version")
         object.__setattr__(self, "action_id", bounded_reference(self.action_id, field="action id"))
@@ -164,6 +166,11 @@ class ExecutionContract:
             "verification_version": self.verification_version,
             "version": CONTRACT_DIGEST_VERSION,
         }
+        if self.service_evidence is not None:
+            if hasattr(self.service_evidence, "canonical_payload"):
+                payload["service_evidence"] = self.service_evidence.canonical_payload()
+            elif hasattr(self.service_evidence, "to_dict"):
+                payload["service_evidence"] = self.service_evidence.to_dict()
         canonical = _json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         return {
             "canonical": canonical,

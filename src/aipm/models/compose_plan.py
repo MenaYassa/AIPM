@@ -8,14 +8,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from aipm.models.compose_intelligence import (
-    CandidateLookupKey,
-    ImageReference,
-    ServiceCandidateReason,
-    ServiceCandidateStatus,
-)
+if TYPE_CHECKING:
+    from aipm.models.compose_intelligence import (
+        CandidateLookupKey,
+        ImageReference,
+        ServiceCandidateReason,
+        ServiceCandidateStatus,
+    )
 
 
 class ServiceUpdateAtomicity(str, Enum):
@@ -213,3 +214,115 @@ class ServiceUpdatePlan:
             "actions": list(self.actions),
             "reasons": list(self.reasons),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceEvidenceContract:
+    """Typed immutable service evidence contract for FinalExecutionGate (MC-6.15-C.2).
+
+    Binds the authoritative pre-mutation evidence required to prove that the live
+    environment still produces the exact same service update plan that was authorized.
+    Contains strictly identity and security-relevant verification metadata;
+    contains NO PIDs, container IDs, timestamps, shell commands, or arbitrary paths.
+    """
+
+    project_name: str
+    compose_identity: str
+    service_name: str
+    requested_scope: tuple[str, ...]
+    derived_execution_scope: tuple[str, ...]
+    atomicity: str
+    current_runtime_digest: str | None
+    target_candidate_digest: str | None
+    target_candidate_child_digest: str | None = None
+    candidate_lookup_key: str | None = None
+    provenance_verified: bool = True
+    dependency_scope: tuple[str, ...] = ()
+    health_contract_summary: str = ""
+    plan_digest: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.project_name, str) or not self.project_name:
+            raise ValueError("project_name must be a non-empty string")
+        if not isinstance(self.compose_identity, str) or not self.compose_identity:
+            raise ValueError("compose_identity must be a non-empty string")
+        if not isinstance(self.service_name, str) or not self.service_name:
+            raise ValueError("service_name must be a non-empty string")
+        if not isinstance(self.requested_scope, tuple) or not self.requested_scope:
+            raise ValueError("requested_scope must be a non-empty tuple of service names")
+        if not isinstance(self.derived_execution_scope, tuple) or not self.derived_execution_scope:
+            raise ValueError("derived_execution_scope must be a non-empty tuple of service names")
+        if not isinstance(self.atomicity, str) or not self.atomicity:
+            raise ValueError("atomicity must be a non-empty string")
+        if not isinstance(self.provenance_verified, bool):
+            raise ValueError("provenance_verified must be a boolean")
+        if not isinstance(self.dependency_scope, tuple):
+            raise ValueError("dependency_scope must be a tuple")
+        if not isinstance(self.health_contract_summary, str) or not self.health_contract_summary:
+            raise ValueError("health_contract_summary must be a non-empty string")
+        if not isinstance(self.plan_digest, str) or len(self.plan_digest) != 64 or any(c not in "0123456789abcdef" for c in self.plan_digest):
+            raise ValueError("plan_digest must be a 64-hex SHA-256 string")
+
+    def canonical_payload(self) -> dict[str, Any]:
+        return {
+            "atomicity": self.atomicity,
+            "candidate_lookup_key": self.candidate_lookup_key,
+            "compose_identity": self.compose_identity,
+            "current_runtime_digest": self.current_runtime_digest,
+            "dependency_scope": list(self.dependency_scope),
+            "derived_execution_scope": list(self.derived_execution_scope),
+            "health_contract_summary": self.health_contract_summary,
+            "plan_digest": self.plan_digest,
+            "project_name": self.project_name,
+            "provenance_verified": self.provenance_verified,
+            "requested_scope": list(self.requested_scope),
+            "service_name": self.service_name,
+            "target_candidate_child_digest": self.target_candidate_child_digest,
+            "target_candidate_digest": self.target_candidate_digest,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.canonical_payload()
+
+    @classmethod
+    def from_service_plan(
+        cls,
+        plan: ServiceUpdatePlan,
+        *,
+        requested_scope: tuple[str, ...] | None = None,
+    ) -> "ServiceEvidenceContract":
+        req = requested_scope or (plan.service_name,)
+        derived = (
+            plan.expected_mutation.affected_services
+            if plan.expected_mutation and plan.expected_mutation.affected_services
+            else (plan.service_name,)
+        )
+        candidate_key_str = plan.candidate_key.canonical_str() if plan.candidate_key else None
+        health_summary = (
+            plan.health_contract.canonical_summary()
+            if plan.health_contract
+            else f"svc:{plan.service_name}|state:running|health:healthy|timeout:30|deps:none"
+        )
+        dep_summaries = tuple(
+            sorted(
+                f"svc:{d.service_name}|status:{d.candidate_status}|health:{d.health or 'none'}|state:{d.state}"
+                for d in plan.dependency_scope
+            )
+        ) if plan.dependency_scope else ()
+
+        return cls(
+            project_name=plan.project_name,
+            compose_identity=plan.compose_identity,
+            service_name=plan.service_name,
+            requested_scope=tuple(req),
+            derived_execution_scope=tuple(derived),
+            atomicity=plan.atomicity.value if hasattr(plan.atomicity, "value") else str(plan.atomicity),
+            current_runtime_digest=plan.current_runtime_digest,
+            target_candidate_digest=plan.target_candidate_digest,
+            target_candidate_child_digest=plan.target_candidate_child_digest,
+            candidate_lookup_key=candidate_key_str,
+            provenance_verified=bool(plan.provenance_verified),
+            dependency_scope=dep_summaries,
+            health_contract_summary=health_summary,
+            plan_digest=plan.plan_digest,
+        )
