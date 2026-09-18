@@ -48,8 +48,10 @@ _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 # Action identifiers are canonical hex/opaque identity tokens: no slashes, no
 # path separators, no whitespace, no shell metacharacters can appear.
 _ACTION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+_SERVICE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
+_FORBIDDEN_CHARS = frozenset(";&|$`><\n\r\t\0'\"/\\:@ ")
 
-_APPROVE_KEYS = frozenset({"update_plan_digest", "idempotency_key"})
+_APPROVE_KEYS = frozenset({"update_plan_digest", "idempotency_key", "service_name"})
 _EXECUTE_KEYS = frozenset({"action_id"})
 
 #: Canonical safe error codes this proxy may relay verbatim. Codes outside
@@ -76,7 +78,7 @@ _RELAYABLE_ERROR_CODES = frozenset(
 #: proxy. Anything else is reported as a bounded fail-closed conflict.
 _RELAYABLE_STATUS = frozenset({200, 401, 403, 404, 409, 410, 422, 423, 429, 500, 503})
 
-_APPROVAL_FIELDS = ("allowed", "code", "decision_id", "action_id", "confirmation_required", "confirmation_id", "approval")
+_APPROVAL_FIELDS = ("allowed", "code", "decision_id", "action_id", "confirmation_required", "confirmation_id", "approval", "service_name", "service_scope")
 _EXECUTION_FIELDS = ("action_id", "executed", "outcome", "lifecycle_state")
 _PLAN_FIELDS = ("target_id", "environment", "revision", "enabled", "canonical_digest")
 #: The only canonical latest-action fields the dashboard may relay. Lifecycle
@@ -130,6 +132,7 @@ class DashboardUpdateProxyApi:
         body: bytes | None,
         session_cookie: str | None,
         csrf_token: str | None,
+        service_name: str | None = None,
     ) -> DashboardProxyResult:
         """Relay one approval request; the canonical service is the authority.
 
@@ -146,14 +149,20 @@ class DashboardUpdateProxyApi:
             self._closed_keys(payload, _APPROVE_KEYS)
             digest = self._digest(payload.get("update_plan_digest"))
             idempotency_key = self._idempotency_key(payload.get("idempotency_key"))
+            svc_name = service_name or payload.get("service_name")
+            if svc_name is not None:
+                svc_name = self._service_name(svc_name)
         except _ProxyRejection as rejection:
             return self._error(rejection.status, rejection.code)
+        json_body = {"update_plan_digest": digest, "idempotency_key": idempotency_key}
+        if svc_name is not None:
+            json_body["service_name"] = svc_name
         return await self._forward(
             "POST",
             f"/updates/{identifier}/approval",
             session_cookie=session_cookie,
             csrf_token=csrf_token,
-            json_body={"update_plan_digest": digest, "idempotency_key": idempotency_key},
+            json_body=json_body,
             section="update_approval",
             fields=_APPROVAL_FIELDS,
         )
@@ -368,5 +377,13 @@ class DashboardUpdateProxyApi:
         if not isinstance(value, str) or len(value) > MAX_ACTION_ID_LENGTH:
             raise _ProxyRejection(422, "invalid_request")
         if _ACTION_ID_PATTERN.fullmatch(value) is None:
+            raise _ProxyRejection(422, "invalid_request")
+        return value
+
+    @staticmethod
+    def _service_name(value: Any) -> str:
+        if not isinstance(value, str) or not value or len(value) > 64:
+            raise _ProxyRejection(422, "invalid_request")
+        if value.startswith("-") or any(c in _FORBIDDEN_CHARS for c in value) or _SERVICE_NAME_PATTERN.fullmatch(value) is None:
             raise _ProxyRejection(422, "invalid_request")
         return value

@@ -24,6 +24,7 @@ from aipm.control_plane.identity import (
 )
 from aipm.control_plane.models import (
     DECISION_TTL,
+    SERVICE_BINDING_METADATA_KEYS,
     ActionPlan,
     ActionRequest,
     ConfirmationKind,
@@ -160,7 +161,7 @@ class AuthorizationPolicy:
     require_distinct_requester_approver: bool = True
     required_role: str = OWNER_ROLE
     allowed_fields: frozenset[str] = plan_allowed_fields()
-    binding_fields: frozenset[str] = plan_binding_fields()
+    binding_fields: frozenset[str] = plan_binding_fields() | SERVICE_BINDING_METADATA_KEYS
     confirmation_kind: ConfirmationKind = ConfirmationKind.OWNER_CONFIRMATION
 
     def __post_init__(self) -> None:

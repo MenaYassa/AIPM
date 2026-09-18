@@ -28,7 +28,8 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
 # excluded from mutation metadata (models is the import-safe leaf module;
 # aipm.control_plane.project_plan re-exposes this set as binding_fields()).
 BINDING_METADATA_KEYS = frozenset({"update_plan_digest"})
-_BINDING_METADATA_KEYS = BINDING_METADATA_KEYS
+SERVICE_BINDING_METADATA_KEYS = frozenset({"service_name", "service_scope", "atomicity"})
+_BINDING_METADATA_KEYS = BINDING_METADATA_KEYS | SERVICE_BINDING_METADATA_KEYS
 SAFE_ID_PATTERN = _SAFE_ID
 _SAFE_VALUE = re.compile(r"^[^\x00-\x1f\x7f]{1,128}$")
 _SENSITIVE_MARKERS = ("/", "\\\\", "token=", "password=", "secret", "credential", "authorization", "traceback", "exception=", "provider", "destination")

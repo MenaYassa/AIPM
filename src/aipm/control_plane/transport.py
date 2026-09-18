@@ -60,6 +60,16 @@ _PROJECT_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
 # the canonical identity/confirmation/contract machinery binds the approval
 # to the exact plan content. The transport never interprets it as authority.
 _UPDATE_PLAN_DIGEST_KEY = "update_plan_digest"
+_SERVICE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
+_FORBIDDEN_CHARS = frozenset(";&|$`><\n\r\t\0'\"/\\:@ ")
+
+
+def _bounded_service_name(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > 64:
+        raise _error("invalid_request", "A bounded service_name is required", 422)
+    if value.startswith("-") or any(c in _FORBIDDEN_CHARS for c in value) or not _SERVICE_NAME_RE.fullmatch(value):
+        raise _error("invalid_request", "Invalid service_name pattern", 422)
+    return value
 
 _SAFE_ERROR_CODES = {
     PlanningErrorCode.INVALID_REQUEST: (422, "invalid_request"),
@@ -387,12 +397,81 @@ def create_operator_app(
             raise _error("conflict", "Too many update approval attempts; slow down", 429)
         project_id = _bounded_project_id(project_id)
         payload = await _json_body(request)
-        allowed_keys = {"idempotency_key", _UPDATE_PLAN_DIGEST_KEY}
+        allowed_keys = {"idempotency_key", _UPDATE_PLAN_DIGEST_KEY, "service_name"}
         if not isinstance(payload, dict) or not payload or len(payload) > _MAX_BODY_FIELDS:
             raise _error("invalid_request", "Malformed request body", 422)
         for key in payload:
             if key not in allowed_keys:
                 raise _error("invalid_request", f"Field {key!r} is not authorable", 422)
+        idempotency_key = payload.get("idempotency_key")
+        if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
+            raise _error("invalid_request", "A bounded idempotency_key is required", 422)
+        digest_pair = _update_plan_digest_pair(payload.get(_UPDATE_PLAN_DIGEST_KEY))
+        service_name = payload.get("service_name")
+        if service_name is not None:
+            service_name = _bounded_service_name(service_name)
+
+        target_view = _run(lambda: service.plan_view(project_id))
+        if target_view is None:
+            raise _error("not_found", "Project is not registered with the control plane", 404)
+
+        def _approve():
+            return service.approve_update_plan(
+                session.session_id,
+                target_id=project_id,
+                environment=target_view["environment"],
+                presented_digest=digest_pair[1],
+                idempotency_key=idempotency_key,
+                service_name=service_name,
+            )
+
+        result = _run(_approve)
+        if not result["allowed"]:
+            return {
+                "decision_id": result["decision_id"],
+                "allowed": False,
+                "code": result["code"],
+                "action_id": None,
+                "confirmation_required": False,
+                "expires_at": None,
+                "approval": "denied",
+            }
+        resp = {
+            "decision_id": result["decision_id"],
+            "allowed": True,
+            "code": result["code"],
+            "action_id": result["action_id"],
+            "confirmation_required": True,
+            "expires_at": None,
+            # The canonical confirmation is already recorded; the response
+            # exposes only its safe read-only reference.
+            "confirmation_id": result["confirmation_id"],
+            "approval": "confirmed",
+        }
+        if "service_name" in result:
+            resp["service_name"] = result["service_name"]
+        if "service_scope" in result:
+            resp["service_scope"] = result["service_scope"]
+        return resp
+
+    @app.post("/updates/{project_id}/compose-services/{service_name}/approval")
+    async def request_service_update_authorization(project_id: str, service_name: str, request: Request):
+        session = _resolve_session(request)
+        _require_csrf(request)
+        if not limiter_update_approval.allow(session.session_id):
+            raise _error("conflict", "Too many update approval attempts; slow down", 429)
+        project_id = _bounded_project_id(project_id)
+        service_name = _bounded_service_name(service_name)
+        payload = await _json_body(request)
+        allowed_keys = {"idempotency_key", _UPDATE_PLAN_DIGEST_KEY, "service_name"}
+        if not isinstance(payload, dict) or not payload or len(payload) > _MAX_BODY_FIELDS:
+            raise _error("invalid_request", "Malformed request body", 422)
+        for key in payload:
+            if key not in allowed_keys:
+                raise _error("invalid_request", f"Field {key!r} is not authorable", 422)
+        body_service_name = payload.get("service_name")
+        if body_service_name is not None and body_service_name != service_name:
+            raise _error("invalid_request", "Service name in body does not match URL path", 422)
         idempotency_key = payload.get("idempotency_key")
         if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
             raise _error("invalid_request", "A bounded idempotency_key is required", 422)
@@ -409,6 +488,7 @@ def create_operator_app(
                 environment=target_view["environment"],
                 presented_digest=digest_pair[1],
                 idempotency_key=idempotency_key,
+                service_name=service_name,
             )
 
         result = _run(_approve)
@@ -422,18 +502,21 @@ def create_operator_app(
                 "expires_at": None,
                 "approval": "denied",
             }
-        return {
+        resp = {
             "decision_id": result["decision_id"],
             "allowed": True,
             "code": result["code"],
             "action_id": result["action_id"],
             "confirmation_required": True,
             "expires_at": None,
-            # The canonical confirmation is already recorded; the response
-            # exposes only its safe read-only reference.
             "confirmation_id": result["confirmation_id"],
             "approval": "confirmed",
         }
+        if "service_name" in result:
+            resp["service_name"] = result["service_name"]
+        if "service_scope" in result:
+            resp["service_scope"] = result["service_scope"]
+        return resp
 
     @app.post("/updates/{project_id}/execute")
     async def run_update_for_project(project_id: str, request: Request):
@@ -468,12 +551,17 @@ def create_operator_app(
             return service.run_approved_update(session.session_id, action_id=action_id)
 
         result = _run(_execute)
-        return {
+        resp = {
             "action_id": result["action_id"],
             "executed": result["executed"],
             "outcome": result["outcome"],
             "lifecycle_state": result["lifecycle_state"],
         }
+        if "provider_code" in result:
+            resp["provider_code"] = result["provider_code"]
+        if "evidence_reference" in result:
+            resp["evidence_reference"] = result["evidence_reference"]
+        return resp
 
     @app.get("/updates/{project_id}/status")
     def update_status(project_id: str, request: Request):

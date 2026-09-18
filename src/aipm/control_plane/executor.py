@@ -214,9 +214,9 @@ class Executor:
     audit ledger) — never generic providers or callables.
     """
 
-    __slots__ = ("_plans", "_actions", "_confirmations", "_kill_switches", "_audit", "_snapshots", "_gate", "_receipt_query", "_initialized")
+    __slots__ = ("_plans", "_actions", "_confirmations", "_kill_switches", "_audit", "_snapshots", "_gate", "_receipt_query", "_service_evidence_verifier", "_initialized")
 
-    def __init__(self, *, plans, actions, confirmations, kill_switches=None, audit, snapshots=None, receipt_query=None) -> None:
+    def __init__(self, *, plans, actions, confirmations, kill_switches=None, audit, snapshots=None, receipt_query=None, service_evidence_verifier=None) -> None:
         if plans is None or not hasattr(plans, "read") or not hasattr(plans, "update"):
             raise TypeError("executor requires the CAS plan store")
         if actions is None or not hasattr(actions, "get_action"):
@@ -235,6 +235,7 @@ class Executor:
         object.__setattr__(self, "_snapshots", snapshots)
         object.__setattr__(self, "_gate", None)
         object.__setattr__(self, "_receipt_query", receipt_query)
+        object.__setattr__(self, "_service_evidence_verifier", service_evidence_verifier)
         object.__setattr__(self, "_initialized", True)
 
     def __setattr__(self, name, value):
@@ -292,6 +293,7 @@ class Executor:
         gate = FinalExecutionGate(
             actions=self._actions, plans=self._plans, confirmations=self._confirmations,
             snapshots=self._snapshots, kill_switches=self._kill_switches,
+            service_evidence_verifier=getattr(self, "_service_evidence_verifier", None),
         )
         decision = gate.evaluate(contract, now=now)
         if not decision.allowed:

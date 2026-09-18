@@ -336,10 +336,12 @@ class FinalExecutionGate:
                     if decision_code is not GateCode.ALLOWED:
                         return deny(decision_code)
                 else:
+                    mutation_map = dict(contract.mutation_fields)
+                    exp_digest = mutation_map.get("update_plan_digest") or contract.expected_plan_digest
                     decision_code = verify_service_evidence(
                         effective_evidence,
                         effective_evidence,
-                        expected_digest=contract.expected_plan_digest,
+                        expected_digest=exp_digest,
                     )
                     if decision_code is not GateCode.ALLOWED:
                         return deny(decision_code)

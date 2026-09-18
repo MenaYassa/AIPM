@@ -54,7 +54,8 @@ class ComposeServiceEvidenceVerifier:
             requested_scope=getattr(authorized_evidence, "requested_scope", (service_name,)),
         )
 
-        expected_digest = getattr(contract, "expected_plan_digest", None)
+        mutation_map = dict(getattr(contract, "mutation_fields", ()))
+        expected_digest = mutation_map.get("update_plan_digest") or getattr(authorized_evidence, "plan_digest", None)
         return verify_service_evidence(
             authorized=authorized_evidence,
             fresh=fresh_evidence,

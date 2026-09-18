@@ -18,6 +18,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import json as _json
+import re as _re
+
+_SERVICE_NAME_RE = _re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$")
+_FORBIDDEN_CHARS = frozenset(";&|$`><\n\r\t\0'\"/\\:@ ")
 
 from aipm.control_plane.action_state import InMemoryActionRepository
 from aipm.control_plane.audit.repository import InMemoryAuditLedger
@@ -103,6 +107,9 @@ class OwnerControlPlaneService:
         "_executor_ipc_client",
         "_snapshot_repo",
         "_verification_repo",
+        "_service_evidence_verifier",
+        "_service_plan_port",
+        "_service_evidence_store",
         "_clock",
         "_initialized",
     )
@@ -124,6 +131,8 @@ class OwnerControlPlaneService:
         update_runtime=None,
         execution_mode: str = "test",  # production MUST explicitly pass "ipc"
         executor_ipc_client=None,
+        service_evidence_verifier=None,
+        service_plan_port=None,
         clock=None,
     ) -> None:
         if not isinstance(authenticator, OwnerAuthenticator):
@@ -173,6 +182,9 @@ class OwnerControlPlaneService:
         object.__setattr__(self, "_executor_ipc_client", executor_ipc_client)
         object.__setattr__(self, "_snapshot_repo", None)
         object.__setattr__(self, "_verification_repo", None)
+        object.__setattr__(self, "_service_evidence_verifier", service_evidence_verifier)
+        object.__setattr__(self, "_service_plan_port", service_plan_port)
+        object.__setattr__(self, "_service_evidence_store", {})
         object.__setattr__(self, "_clock", clock or (lambda: datetime.now(timezone.utc)))
         object.__setattr__(self, "_initialized", True)
 
@@ -620,6 +632,7 @@ class OwnerControlPlaneService:
             audit=self._audit,
             snapshots=self._snapshot_repo,
             receipt_query=self._receipt_query_port(),
+            service_evidence_verifier=getattr(self, "_service_evidence_verifier", None),
         )
 
     def _receipt_query_port(self):
@@ -712,6 +725,22 @@ class OwnerControlPlaneService:
             # channel has no executor for the post-verification engine
             # execution (no silent in-process fallback exists in any mode).
             raise ControlPlaneError(PlanningErrorCode.SESSION_INVALID, "Executor IPC client is not configured")
+        pairs = dict(decision.request.metadata) if decision.request else {}
+        service_evidence = None
+        if "service_name" in pairs:
+            service_evidence = self._service_evidence_store.get(action.action_id)
+            if service_evidence is None and self._service_plan_port is not None:
+                svc_name = pairs["service_name"]
+                try:
+                    p = self._service_plan_port(action.scope.target_id, svc_name)
+                    if p.plan_digest == decision.action_identity.target_digest:
+                        from aipm.models.compose_plan import ServiceEvidenceContract
+
+                        service_evidence = ServiceEvidenceContract.from_service_plan(p, requested_scope=(svc_name,))
+                except Exception:
+                    pass
+            if service_evidence is None:
+                raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Authorized service evidence is unavailable")
         contract = ExecutionContract(
             contract_version=EXECUTION_CONTRACT_VERSION,
             action_id=action.action_id,
@@ -732,6 +761,7 @@ class OwnerControlPlaneService:
             lease_id=lease.lease_id,
             fencing_token=lease.fencing_token,
             expires_at=action.expires_at,
+            service_evidence=service_evidence,
         )
         if action.rollback_of_action_id is not None:
             # The service routes rollback actions to the rollback executor;
@@ -918,6 +948,11 @@ class OwnerControlPlaneService:
             service_scope = tuple(s.strip() for s in pairs["service_scope"].split(",") if s.strip())
         elif "service_name" in pairs and pairs["service_name"]:
             service_scope = (pairs["service_name"],)
+        stored_ev = self._service_evidence_store.get(action.action_id)
+        if stored_ev is not None:
+            if service_scope is not None and service_scope != stored_ev.derived_execution_scope:
+                raise ControlPlaneError(PlanningErrorCode.STATE_CONFLICT, "Service scope does not match authorized evidence")
+            service_scope = stored_ev.derived_execution_scope
         return UpdateExecutionBinding(
             project_name=action.scope.target_id,
             plan_digest=plan_digest,
@@ -957,6 +992,7 @@ class OwnerControlPlaneService:
         environment: str,
         presented_digest: str,
         idempotency_key: str,
+        service_name: str | None = None,
         now: datetime | None = None,
     ) -> dict:
         """Compose the canonical update approval: digest binding → authorize → confirm.
@@ -979,6 +1015,115 @@ class OwnerControlPlaneService:
             raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "A 64-hex update plan digest is required")
         if not isinstance(idempotency_key, str) or not idempotency_key or len(idempotency_key) > 128:
             raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "A bounded idempotency key is required")
+
+        if service_name is not None:
+            if not isinstance(service_name, str) or not service_name or len(service_name) > 64:
+                raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "A bounded service_name is required")
+            if (
+                service_name.startswith("-")
+                or any(c in _FORBIDDEN_CHARS for c in service_name)
+                or not _SERVICE_NAME_RE.fullmatch(service_name)
+            ):
+                raise ControlPlaneError(PlanningErrorCode.INVALID_REQUEST, "Invalid service_name pattern")
+
+            plan = None
+            if self._service_plan_port is not None:
+                try:
+                    plan = self._service_plan_port(target_id, service_name)
+                except ControlPlaneError:
+                    raise
+                except Exception as exc:
+                    raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, f"Authoritative service update plan is unavailable: {exc}") from exc
+            elif self._current_plan_digest is not None and hasattr(self._current_plan_digest, "plan_service"):
+                try:
+                    plan = self._current_plan_digest.plan_service(target_id, service_name)
+                except Exception as exc:
+                    raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Authoritative service update plan is unavailable") from exc
+
+            if plan is None:
+                raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Service plan resolution is not composed")
+
+            if not plan.eligible:
+                reason = plan.blocking_reason.value if getattr(plan, "blocking_reason", None) else "ineligible"
+                raise ControlPlaneError(PlanningErrorCode.STATE_CONFLICT, f"Service update plan is blocked: {reason}")
+
+            if not isinstance(plan.plan_digest, str) or len(plan.plan_digest) != 64 or any(character not in "0123456789abcdef" for character in plan.plan_digest):
+                raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Authoritative service plan digest is malformed")
+
+            if plan.plan_digest != presented_digest:
+                raise ControlPlaneError(PlanningErrorCode.STALE_EVIDENCE, "Presented plan digest does not match the authoritative service plan")
+
+            if plan.service_name != service_name:
+                raise ControlPlaneError(PlanningErrorCode.PLAN_IDENTITY_MISMATCH, "Service name mismatch")
+
+            affected = (
+                plan.expected_mutation.affected_services
+                if plan.expected_mutation and plan.expected_mutation.affected_services
+                else (service_name,)
+            )
+            service_scope = tuple(affected)
+            atomicity = plan.atomicity.value if hasattr(plan.atomicity, "value") else str(plan.atomicity)
+
+            from aipm.models.compose_plan import ServiceEvidenceContract
+
+            evidence = ServiceEvidenceContract.from_service_plan(plan, requested_scope=(service_name,))
+
+            mutation_pairs = self._mutation_pairs_for_target(target_id)
+            if not mutation_pairs:
+                raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Current plan mutation fields are unavailable")
+
+            metadata = mutation_pairs + (
+                ("update_plan_digest", presented_digest),
+                ("service_name", service_name),
+                ("service_scope", ",".join(service_scope)),
+                ("atomicity", atomicity),
+            )
+            request = ActionRequest(
+                operation=OperationKind.UPDATE_PROJECT_PLAN,
+                target_id=target_id,
+                idempotency_key=idempotency_key,
+                metadata=metadata,
+                environment=environment,
+            )
+            session = self.session(session_id, now=now)
+            decision = self.authorize(session.session_id, request, now=now)
+            if not decision.allowed:
+                return {
+                    "allowed": False,
+                    "code": decision.code.value,
+                    "decision_id": decision.decision_id,
+                    "action_id": None,
+                    "confirmation_id": None,
+                }
+            identity = decision.action_identity
+            if identity is None:
+                raise ControlPlaneError(PlanningErrorCode.STORAGE_CORRUPT, "Allowed decision carries no identity")
+            self._assert_binding_digest(decision, presented_digest)
+            self._service_evidence_store[identity.action_id] = evidence
+            existing_confirmation_id = self._confirmation_id_for(identity.action_id)
+            if existing_confirmation_id is not None:
+                return {
+                    "allowed": True,
+                    "code": decision.code.value,
+                    "decision_id": decision.decision_id,
+                    "action_id": identity.action_id,
+                    "confirmation_id": existing_confirmation_id,
+                    "plan_digest": presented_digest,
+                    "service_name": service_name,
+                    "service_scope": list(service_scope),
+                }
+            binding = self.confirm(session.session_id, decision.decision_id, now=now)
+            return {
+                "allowed": True,
+                "code": decision.code.value,
+                "decision_id": decision.decision_id,
+                "action_id": identity.action_id,
+                "confirmation_id": binding.confirmation_id,
+                "plan_digest": presented_digest,
+                "service_name": service_name,
+                "service_scope": list(service_scope),
+            }
+
         if self._current_plan_digest is None:
             raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Plan digest verification is not composed")
         authoritative_digest = self._current_plan_digest(target_id)
@@ -1075,11 +1220,21 @@ class OwnerControlPlaneService:
                 "lifecycle_state": action.state.value,
             }
         binding = self._update_binding_for(action)
-        self._update_runtime(binding)
+        runtime_res = self._update_runtime(binding)
+        runtime_outcome = result.outcome.value if hasattr(result.outcome, "value") else str(result.outcome)
+        provider_code = "update_ok"
+        evidence_ref = ""
+        if isinstance(runtime_res, dict):
+            if runtime_res.get("outcome") in ("unknown_outcome", "failed"):
+                runtime_outcome = runtime_res["outcome"]
+            provider_code = runtime_res.get("provider_code", "update_ok")
+            evidence_ref = runtime_res.get("evidence_reference", "")
         return {
             "executed": True,
             "action_id": action_id,
-            "outcome": result.outcome.value if hasattr(result.outcome, "value") else str(result.outcome),
+            "outcome": runtime_outcome,
+            "provider_code": provider_code,
+            "evidence_reference": evidence_ref,
             "lifecycle_state": action.state.value,
         }
 

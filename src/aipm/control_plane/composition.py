@@ -163,6 +163,9 @@ def compose_operator_service(
     run_sweep: bool = True,
     update_engine: object | None = None,
     executor_ipc_client: object | None = None,
+    compose_service: object | None = None,
+    service_plan_port: object | None = None,
+    service_evidence_verifier: object | None = None,
 ) -> dict:
     """Compose the canonical OwnerControlPlaneService on durable stores.
 
@@ -241,6 +244,14 @@ def compose_operator_service(
         current_plan_digest = project_plan_digest_port(plans)
         update_runtime = None
 
+    if compose_service is not None:
+        if service_evidence_verifier is None:
+            from aipm.composition.service_evidence import compose_service_evidence_verifier
+
+            service_evidence_verifier = compose_service_evidence_verifier(compose_service, project_resolver=lambda target: target)
+        if service_plan_port is None:
+            service_plan_port = lambda target, svc: compose_service.plan_service_update(target, svc, query_registries=True)
+
     service = OwnerControlPlaneService(
         authenticator=authenticator,
         sessions=sessions,
@@ -256,6 +267,8 @@ def compose_operator_service(
         executor_ipc_client=executor_ipc_client,
         current_plan_digest=current_plan_digest,
         update_runtime=update_runtime,
+        service_evidence_verifier=service_evidence_verifier,
+        service_plan_port=service_plan_port,
     )
     return {
         "database": db,
