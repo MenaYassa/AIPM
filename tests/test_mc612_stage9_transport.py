@@ -249,7 +249,7 @@ def test_full_http_success_flow(tmp_path: Path):
 
     health = client.get("/health").json()
     assert health["status"] == "available"
-    assert health["schema_version"] == 5
+    assert health["schema_version"] == 6
 
     plan = client.get("/plans/project-demo").json()
     assert plan["revision"] == 1

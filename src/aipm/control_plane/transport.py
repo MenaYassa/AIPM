@@ -584,6 +584,45 @@ def create_operator_app(
             "latest_update_action": _run(lambda: service.latest_update_action_view(project_id)),
         }
 
+    @app.get("/projects/{project_id}/registration")
+    def project_registration(project_id: str, request: Request):
+        _resolve_session(request)
+        project_id = _bounded_project_id(project_id)
+
+        from aipm.control_plane.storage.sqlite_store import (
+            ControlPlaneDatabase,
+            SQLiteProjectRegistrationStore,
+            default_database_path,
+        )
+
+        db_path = default_database_path()
+        db = ControlPlaneDatabase(db_path)
+        store = SQLiteProjectRegistrationStore(db)
+
+        registration = None
+        try:
+            registration = store.get(project_id, "production")
+            if registration is None:
+                registration = store.get(project_id, "staging")
+        except Exception:
+            pass
+
+        if registration is None:
+            return {
+                "registered": False,
+                "status": "UNREGISTERED"
+            }
+
+        return {
+            "registered": True,
+            "target_id": registration.target_id,
+            "environment": registration.environment,
+            "status": registration.status.value,
+            "runtime_mode": registration.runtime_mode,
+            "registered_at": registration.registered_at.isoformat(),
+            "registration_digest": registration.registration_digest,
+        }
+
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------

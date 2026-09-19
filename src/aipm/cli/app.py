@@ -476,10 +476,157 @@ def update(
         print(f"\n[bold red]Configuration error:[/bold red] {error}")
         print("[cyan]Use 'aipm discover' to see configured project names.\n")
         raise typer.Exit(code=1) from error
-    
+
+
+registration_app = typer.Typer(name="registration", help="Production registration management")
+app.add_typer(registration_app, name="registration")
+
+
+@registration_app.command("register")
+def register_project(
+    target_id: str = typer.Option(..., "--target-id", help="Target identifier for the project."),
+    project_path: str = typer.Option(..., "--path", help="Absolute path to the project directory."),
+    environment: str = typer.Option(..., "--environment", help="Environment (staging or production)."),
+    runtime_mode: str = typer.Option(..., "--runtime-mode", help="Runtime mode (compose or systemd)."),
+    reason: str = typer.Option(..., "--reason", help="Audit reason for registration."),
+    registered_by: str = typer.Option("operator", "--registered-by", help="Operator identifier."),
+):
+    """Register a project for production execution.
+
+    This is a host-authoritative operation that requires operator approval.
+    The registration is audited and persists across restarts.
+    """
+    from aipm.control_plane.registration_service import RegistrationService, RegistrationValidator
+    from aipm.control_plane.storage.sqlite_store import (
+        ControlPlaneDatabase,
+        SQLiteProjectRegistrationStore,
+        default_database_path,
+    )
+    from aipm.providers.compose.identity import resolve_compose_project_name
+
+    validator = RegistrationValidator(compose_identity_resolver=resolve_compose_project_name)
+    service = RegistrationService(validator=validator)
+    registration, validation_result = service.create_registration(
+        target_id=target_id,
+        project_path=project_path,
+        environment=environment,
+        runtime_mode=runtime_mode,
+        registered_by=registered_by,
+    )
+
+    if not validation_result.valid:
+        typer.echo(f"Registration validation failed: {validation_result.error_message}", err=True)
+        raise typer.Exit(code=2)
+
+    db_path = default_database_path()
+    db = ControlPlaneDatabase(db_path)
+    store = SQLiteProjectRegistrationStore(db)
+
+    try:
+        store.save(registration)
+        typer.echo(f"✓ Registered {target_id} ({environment}) at {validation_result.canonical_path}")
+        typer.echo(f"  Registration digest: {registration.registration_digest}")
+        typer.echo(f"  Reason: {reason}")
+    except Exception as exc:
+        typer.echo(f"Registration failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@registration_app.command("revoke")
+def revoke_project(
+    target_id: str = typer.Option(..., "--target-id", help="Target identifier for the project."),
+    environment: str = typer.Option(..., "--environment", help="Environment (staging or production)."),
+    reason: str = typer.Option(..., "--reason", help="Audit reason for revocation."),
+    revoked_by: str = typer.Option("operator", "--revoked-by", help="Operator identifier."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm revocation without prompt."),
+):
+    """Revoke a production registration.
+
+    This is a host-authoritative operation that requires operator approval.
+    Revocation is permanent and audited.
+    """
+    from aipm.control_plane.registration import RegistrationStatus
+    from aipm.control_plane.storage.sqlite_store import (
+        ControlPlaneDatabase,
+        SQLiteProjectRegistrationStore,
+        default_database_path,
+    )
+
+    if not yes:
+        typer.echo(f"Revoking registration for {target_id} ({environment})")
+        typer.echo(f"Reason: {reason}")
+        confirm = typer.confirm("Proceed with revocation?")
+        if not confirm:
+            typer.echo("Revocation cancelled.")
+            raise typer.Exit(code=0)
+
+    db_path = default_database_path()
+    db = ControlPlaneDatabase(db_path)
+    store = SQLiteProjectRegistrationStore(db)
+
+    try:
+        updated = store.update_status(
+            target_id=target_id,
+            environment=environment,
+            new_status=RegistrationStatus.REVOKED,
+            actor_subject=revoked_by,
+            reason=reason,
+        )
+        if updated is None:
+            typer.echo(f"Registration not found: {target_id} ({environment})", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"✓ Revoked {target_id} ({environment})")
+        typer.echo(f"  Reason: {reason}")
+    except Exception as exc:
+        typer.echo(f"Revocation failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@registration_app.command("list")
+def list_registrations(
+    environment: str = typer.Option(None, "--environment", help="Filter by environment."),
+    status: str = typer.Option(None, "--status", help="Filter by status (REGISTERED, DISABLED, REVOKED)."),
+):
+    """List all project registrations."""
+    from aipm.control_plane.registration import RegistrationStatus
+    from aipm.control_plane.storage.sqlite_store import (
+        ControlPlaneDatabase,
+        SQLiteProjectRegistrationStore,
+        default_database_path,
+    )
+
+    status_filter = None
+    if status:
+        try:
+            status_filter = RegistrationStatus[status.upper()]
+        except KeyError:
+            typer.echo(f"Invalid status: {status}. Must be one of: REGISTERED, DISABLED, REVOKED", err=True)
+            raise typer.Exit(code=2)
+
+    db_path = default_database_path()
+    db = ControlPlaneDatabase(db_path)
+    store = SQLiteProjectRegistrationStore(db)
+
+    try:
+        registrations = store.list_registrations(environment=environment, status=status_filter)
+        if not registrations:
+            typer.echo("No registrations found.")
+            return
+
+        for reg in registrations:
+            typer.echo(f"{reg.target_id} ({reg.environment}) - {reg.status.value}")
+            typer.echo(f"  Path: {reg.canonical_project_path}")
+            typer.echo(f"  Runtime: {reg.runtime_mode}")
+            typer.echo(f"  Registered: {reg.registered_at.isoformat()}")
+            if reg.revoked_at:
+                typer.echo(f"  Revoked: {reg.revoked_at.isoformat()}")
+                typer.echo(f"  Revocation reason: {reg.revocation_reason}")
+            typer.echo("")
+    except Exception as exc:
+        typer.echo(f"List failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 
-    
 if __name__ == "__main__":
     app()

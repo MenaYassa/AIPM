@@ -8,7 +8,7 @@ credentials.
 from __future__ import annotations
 
 SCHEMA_NAME = "control_plane"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA_STATEMENTS = (
     """
@@ -209,6 +209,31 @@ _SCHEMA_STATEMENTS = (
         event_hash TEXT NOT NULL,
         chain_version TEXT NOT NULL
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS project_registrations (
+        target_id TEXT NOT NULL,
+        environment TEXT NOT NULL,
+        status TEXT NOT NULL,
+        canonical_project_path TEXT NOT NULL,
+        runtime_mode TEXT NOT NULL,
+        compose_project_name TEXT,
+        registration_digest TEXT NOT NULL,
+        registration_version TEXT NOT NULL DEFAULT 'mc616-reg-v1',
+        registered_by TEXT NOT NULL,
+        registered_at TEXT NOT NULL,
+        approved_by TEXT,
+        approved_at TEXT,
+        revoked_by TEXT,
+        revoked_at TEXT,
+        revocation_reason TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (target_id, environment),
+        UNIQUE (canonical_project_path, environment)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_project_registrations_status ON project_registrations (status, environment)
     """,
 )
 

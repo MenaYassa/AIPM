@@ -80,6 +80,10 @@ class AuditEventType(str, Enum):
     ROLLBACK_SUCCEEDED = "rollback_succeeded"
     ROLLBACK_FAILED = "rollback_failed"
 
+    REGISTRATION_CREATED = "registration_created"
+    REGISTRATION_DISABLED = "registration_disabled"
+    REGISTRATION_REVOKED = "registration_revoked"
+
     SYSTEM_ERROR = "system_error"
 
 
@@ -91,6 +95,7 @@ class AuditActorRole(str, Enum):
     VERIFIER = "verifier"
     EXECUTOR = "executor"
     KILL_SWITCH_OPERATOR = "kill_switch_operator"
+    REGISTRATION_OPERATOR = "registration_operator"
     AUDITOR = "auditor"
     SYSTEM = "system"
 

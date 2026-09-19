@@ -48,6 +48,7 @@ from aipm.control_plane.models import (
 )
 from aipm.control_plane.policy import AuthorizationDecision
 from aipm.control_plane.project_plan import Environment, PlanConflict, ProjectPlan, ProjectPlanError
+from aipm.control_plane.registration import ProjectRegistration, RegistrationError, RegistrationStatus
 from aipm.control_plane.session import OwnerSession
 
 DATABASE_FILENAME = "control_plane.db"
@@ -2181,3 +2182,249 @@ def _snapshot_from_row(row: sqlite3.Row) -> PlanSnapshot:
         raise
     except (KeyError, TypeError, ValueError) as exc:
         raise _corrupt("Stored plan snapshot cannot be reconstructed") from exc
+
+
+class SQLiteProjectRegistrationStore:
+    """Authoritative store for production project registrations.
+
+    Registrations are operator-initiated, auditable declarations that a
+    specific filesystem path contains a legitimate production application
+    with known Compose/systemd provenance.
+
+    Every registration mutation generates a canonical audit event through
+    SQLiteAuditLedger. The registration table holds current state; the
+    audit ledger holds immutable history.
+    """
+
+    __slots__ = ("_db", "_audit_ledger", "_initialized")
+
+    def __init__(self, db: ControlPlaneDatabase, audit_ledger=None) -> None:
+        if not isinstance(db, ControlPlaneDatabase):
+            raise TypeError("SQLiteProjectRegistrationStore requires a ControlPlaneDatabase")
+        object.__setattr__(self, "_db", db)
+        if audit_ledger is None:
+            from aipm.control_plane.audit import SQLiteAuditLedger
+            audit_ledger = SQLiteAuditLedger(db)
+        object.__setattr__(self, "_audit_ledger", audit_ledger)
+        object.__setattr__(self, "_initialized", True)
+
+    def __setattr__(self, name, value):
+        if getattr(self, "_initialized", False):
+            raise AttributeError("SQLiteProjectRegistrationStore configuration is immutable")
+        object.__setattr__(self, name, value)
+
+    def save(self, registration: ProjectRegistration) -> ProjectRegistration:
+        if not isinstance(registration, ProjectRegistration):
+            raise RegistrationError("Invalid project registration")
+        try:
+            with self._db.transaction():
+                _insert_registration_row(self._db.connection, registration)
+                self._emit_registration_created_event(registration)
+        except sqlite3.IntegrityError as exc:
+            raise RegistrationError("Registration already exists for this target and environment") from exc
+        except sqlite3.Error as exc:
+            raise RegistrationError("Project registration cannot be stored") from exc
+        return registration
+
+    def _emit_registration_created_event(self, registration: ProjectRegistration) -> None:
+        from aipm.control_plane.audit import AuditActorRole, AuditEventDraft, AuditEventType
+        from datetime import timezone
+
+        draft = AuditEventDraft(
+            event_type=AuditEventType.REGISTRATION_CREATED,
+            occurred_at=datetime.now(timezone.utc),
+            actor_subject=registration.registered_by,
+            actor_role=AuditActorRole.REGISTRATION_OPERATOR,
+            target_id=registration.target_id,
+            environment=registration.environment,
+            lifecycle_from=None,
+            lifecycle_to="REGISTERED",
+            result_code="created",
+            reason=f"Production registration: {registration.runtime_mode} at {registration.canonical_project_path[:80]}",
+        )
+        self._audit_ledger.append_in_transaction(draft)
+
+    def _emit_status_change_event(
+        self,
+        target_id: str,
+        environment: str,
+        from_status: str,
+        to_status: str,
+        actor_subject: str,
+        reason: str | None,
+    ) -> None:
+        from aipm.control_plane.audit import AuditActorRole, AuditEventDraft, AuditEventType
+        from datetime import timezone
+
+        if to_status == "DISABLED":
+            event_type = AuditEventType.REGISTRATION_DISABLED
+            result_code = "disabled"
+        elif to_status == "REVOKED":
+            event_type = AuditEventType.REGISTRATION_REVOKED
+            result_code = "revoked"
+        else:
+            event_type = AuditEventType.LIFECYCLE_TRANSITION
+            result_code = "transition"
+
+        draft = AuditEventDraft(
+            event_type=event_type,
+            occurred_at=datetime.now(timezone.utc),
+            actor_subject=actor_subject,
+            actor_role=AuditActorRole.REGISTRATION_OPERATOR,
+            target_id=target_id,
+            environment=environment,
+            lifecycle_from=from_status,
+            lifecycle_to=to_status,
+            result_code=result_code,
+            reason=reason or "",
+        )
+        self._audit_ledger.append_in_transaction(draft)
+
+    def get(self, target_id: str, environment: str) -> ProjectRegistration | None:
+        row = self._db.connection.execute(
+            "SELECT * FROM project_registrations WHERE target_id = ? AND environment = ?",
+            (target_id, environment),
+        ).fetchone()
+        if row is None:
+            return None
+        return _registration_from_row(row)
+
+    def get_by_path(self, canonical_project_path: str, environment: str) -> ProjectRegistration | None:
+        row = self._db.connection.execute(
+            "SELECT * FROM project_registrations WHERE canonical_project_path = ? AND environment = ?",
+            (canonical_project_path, environment),
+        ).fetchone()
+        if row is None:
+            return None
+        return _registration_from_row(row)
+
+    def update_status(
+        self,
+        target_id: str,
+        environment: str,
+        new_status: RegistrationStatus,
+        actor_subject: str,
+        reason: str | None = None,
+    ) -> ProjectRegistration | None:
+        current = self.get(target_id, environment)
+        if current is None:
+            return None
+
+        now = datetime.now(timezone.utc)
+
+        update_fields = {
+            "status": new_status.value,
+            "updated_at": now.isoformat(),
+        }
+
+        if new_status == RegistrationStatus.DISABLED:
+            pass
+        elif new_status == RegistrationStatus.REVOKED:
+            update_fields["revoked_by"] = actor_subject
+            update_fields["revoked_at"] = now.isoformat()
+            update_fields["revocation_reason"] = reason or ""
+
+        try:
+            with self._db.transaction():
+                self._db.connection.execute(
+                    "UPDATE project_registrations SET status = ?, updated_at = ?, revoked_by = ?, revoked_at = ?, revocation_reason = ? "
+                    "WHERE target_id = ? AND environment = ?",
+                    (
+                        update_fields["status"],
+                        update_fields["updated_at"],
+                        update_fields.get("revoked_by"),
+                        update_fields.get("revoked_at"),
+                        update_fields.get("revocation_reason"),
+                        target_id,
+                        environment,
+                    ),
+                )
+                self._emit_status_change_event(
+                    target_id=target_id,
+                    environment=environment,
+                    from_status=current.status.value,
+                    to_status=new_status.value,
+                    actor_subject=actor_subject,
+                    reason=reason,
+                )
+        except sqlite3.Error as exc:
+            raise RegistrationError("Registration status cannot be updated") from exc
+
+        return self.get(target_id, environment)
+
+    def list_registrations(self, environment: str | None = None, status: RegistrationStatus | None = None) -> tuple[ProjectRegistration, ...]:
+        query = "SELECT * FROM project_registrations WHERE 1=1"
+        params: list[Any] = []
+
+        if environment is not None:
+            query += " AND environment = ?"
+            params.append(environment)
+
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status.value)
+
+        query += " ORDER BY registered_at DESC"
+
+        rows = self._db.connection.execute(query, params).fetchall()
+        return tuple(_registration_from_row(row) for row in rows)
+
+
+def _insert_registration_row(connection: sqlite3.Connection, registration: ProjectRegistration) -> None:
+    connection.execute(
+        "INSERT INTO project_registrations (target_id, environment, status, canonical_project_path, runtime_mode, "
+        "compose_project_name, registration_digest, registration_version, registered_by, registered_at, "
+        "approved_by, approved_at, revoked_by, revoked_at, revocation_reason, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            registration.target_id,
+            registration.environment,
+            registration.status.value,
+            registration.canonical_project_path,
+            registration.runtime_mode,
+            registration.compose_project_name,
+            registration.registration_digest,
+            registration.registration_version,
+            registration.registered_by,
+            registration.registered_at.isoformat(),
+            registration.approved_by,
+            registration.approved_at.isoformat() if registration.approved_at else None,
+            registration.revoked_by,
+            registration.revoked_at.isoformat() if registration.revoked_at else None,
+            registration.revocation_reason,
+            registration.updated_at.isoformat() if registration.updated_at else registration.registered_at.isoformat(),
+        ),
+    )
+
+
+def _registration_from_row(row: sqlite3.Row) -> ProjectRegistration:
+    try:
+        status_str = row["status"]
+        status = RegistrationStatus.REGISTERED
+        for s in RegistrationStatus:
+            if s.value == status_str:
+                status = s
+                break
+
+        return ProjectRegistration(
+            target_id=row["target_id"],
+            environment=row["environment"],
+            status=status,
+            canonical_project_path=row["canonical_project_path"],
+            runtime_mode=row["runtime_mode"],
+            compose_project_name=row["compose_project_name"],
+            registration_digest=row["registration_digest"],
+            registration_version=row["registration_version"],
+            registered_by=row["registered_by"],
+            registered_at=_parse_timestamp(row["registered_at"], name="registration timestamp"),
+            approved_by=row["approved_by"],
+            approved_at=_parse_timestamp(row["approved_at"], name="approval timestamp") if row["approved_at"] else None,
+            revoked_by=row["revoked_by"],
+            revoked_at=_parse_timestamp(row["revoked_at"], name="revocation timestamp") if row["revoked_at"] else None,
+            revocation_reason=row["revocation_reason"],
+            updated_at=_parse_timestamp(row["updated_at"], name="update timestamp") if row["updated_at"] else None,
+        )
+    except ControlPlaneError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _corrupt("Stored project registration cannot be reconstructed") from exc
