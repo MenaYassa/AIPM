@@ -1,13 +1,13 @@
 # AIPM Mission Control Status and Roadmap
 
-> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked. The preservation stash this notice previously referenced no longer exists; see the stash-loss reconciliation in `docs/CURRENT_STATUS.md`.
+> **Current-state notice — 2026-09-18:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` (`origin/main`), carrying the completed MC-6.15 selective Compose service update capability.
 
 
-**Status date:** 2026-08-28
+**Status date:** 2026-09-18
 
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
 
-**Checkpoint:** `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba` — `fix: open dashboard read-only SQLite repos without WAL sidecars`
+**Checkpoint:** `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` — `feat(control-plane): integrate selective service updates (MC-6.15-C.4)`
 
 **Remote parity:** `HEAD == origin/main == remote main`; current tracked main is synchronized. Historical Phase 4E production validation remains recorded; fresh web evidence is preserved separately.
 
@@ -54,6 +54,19 @@ The current committed checkpoint completes **MC-6.13 live read-only Phase 4E** i
 | MC-6.13 Phase 4C.2 | Telemetry-owned completed-sample boundary alignment for live evaluation; exact five-minute completeness contract unchanged. | Complete and pushed at `5e0730c` |
 | MC-6.13 Phase 4C.3 | Complete-evidence production validation confirming six points / 300 seconds / 60-second cadence, zero uncertainties, zero findings, and zero recommendations for the observed low-pressure case. | Validated |
 | MC-6.13 Phase 4E | Additive bounded `resource_history_summary` derived from preserved typed history evidence and rendered separately from findings/recommendations; no `maximum_gap` exposure. | Complete and pushed at `ead26b6` |
+| MC-6.15 | Selective Compose service updates: candidate intelligence, deterministic per-service planning, LEAF_INDEPENDENT and ATOMIC_TIGHT scope derivation, FinalExecutionGate TOCTOU verification, bounded executor IPC, mandatory `--no-deps`, independent post-mutation verification, MutationReceiptStore idempotency, fail-closed negative posture, staging proof, and regression certification. | Complete at `c3fb5a0` (Audited in C.6: PASS) |
+
+## MC-6.15 Selective Compose Service Updates
+
+MC-6.15 delivers the capability to selectively update individual Compose services (or tightly coupled dependency clusters) without mutating or restarting unrelated services across the VPS:
+
+1. **Candidate Intelligence & Planning:** Integrates registry candidate detection (`ComposeCandidateScheduler`) with deterministic planning (`ComposeServicePlanner`). Computes immutable `UpdatePlanIdentity` digests over sorted plan representations.
+2. **Scope Derivation:** Distinguishes between `LEAF_INDEPENDENT` (updating only the targeted service) and `ATOMIC_TIGHT` (updating co-dependent services in topological order). The derived execution scope is strictly server-determined and cannot be expanded or contracted by operator input.
+3. **Execution Gate & TOCTOU Proof:** `FinalExecutionGate` verifies candidate digests, current container digests, dependency scope, and health immediately before mutation, failing closed on any state drift.
+4. **Executor Boundary & Mandatory `--no-deps`:** Dispatches bounded `ExecutionRequest` over Unix domain socket to the executor. Execution uses explicit argv lists (zero shell execution) and hardcodes `docker compose up -d --no-deps <service>` per service.
+5. **Independent Verification & Idempotency:** Exit code 0 is never assumed to be success; live container state and actual image digests are inspected by an independent verifier hook. Receipts are persisted in `MutationReceiptStore`; replay of verified actions executes zero new Docker commands.
+6. **Failure & Reconciliation Posture:** Ambiguous outcomes (transport timeouts) or atomic partial failures map to `UNKNOWN_OUTCOME` / `RECONCILIATION_REQUIRED`. Blind retries and automated rollbacks are strictly forbidden. Browser request models enforce `extra = "forbid"` (HTTP 422 on injection).
+7. **Staging & Host Integrity:** Validated across 11 staging proof phases against a disposable environment with zero production container mutations. Full regression suite passed (2,153 tests: 2,152 passed, 1 skipped, 0 failed; ruff clean; release validation passed).
 
 ## Current capability surface
 

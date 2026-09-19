@@ -1,10 +1,10 @@
 # AIPM Current Status
 
-**Status date:** 2026-09-16 (supersedes earlier status dates)
+**Status date:** 2026-09-18 (supersedes earlier status dates)
 
-**Canonical repository checkpoint:** `6ba853d27ce92e908b3c4dc35c24419af8452dcb` (published `origin/main`; carries the MC-6.12 bounded systemd update runtime, the privilege broker client, and the C1–C5 update-security lineage).
+**Canonical repository checkpoint:** `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` (published `origin/main`; carries MC-6.15 selective Compose service updates, the MC-6.12 bounded systemd update runtime, the privilege broker client, and the C1–C5 update-security lineage).
 
-**Repository parity:** `HEAD` matches `origin/main` at `6ba853d27ce92e908b3c4dc35c24419af8452dcb`. Production update execution via the canonical `UpdateEngine` and compiled privilege broker was executed, verified, and reconciled in production (Steps 8B & 9).
+**Repository parity:** `HEAD` matches `origin/main` at `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3`. MC-6.15 end-to-end staging execution proof completed with PASS on disposable staging with zero production container mutations.
 
 ## Purpose of this documentThis is the canonical current-state reconciliation for the AIPM repository and Mission Control. Historical design and completion documents remain preserved as audit records, but their older checkpoint and “planned/future” wording must be interpreted through this document. The detailed read-only public inspection is preserved in [`LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md).
 
@@ -50,6 +50,37 @@ This section is the authority on the dashboard's authentication perimeter. It su
 | MC-6.12 | Complete & operational in production | Durable control-plane store, verification/rollback contracts, localhost operator transport, and bounded systemd update runtime landed. Production update execution against `aipm-dashboard.service` proven with terminal state `VERIFIED_SUCCESS` (Steps 8B & 9) |
 | MC-6.13 Phase 2/3/4A/4B/4C/4C.1/4C.2/4C.3/4D/4E | Complete through bounded read-only Phase 4E | Published advisor domain, transport, fixture/live orchestration, telemetry-owned export/adapter, boundary alignment, complete-evidence validation, and additive resource-history summary |
 | MC-6.13 Privilege Broker | Complete & operational in production | Compiled root-owned helper (`aipm-systemd-restart`), exact sudoers binding (`--unit=aipm-dashboard.service --verb=try-restart`), unprivileged `PrivilegeBrokerClient`, and two-layer `SystemdVerifier` proven in production |
+| MC-6.15 | Complete (Phases A.3–C.6) | Selective Compose service updates: candidate intelligence, deterministic per-service planning, LEAF_INDEPENDENT & ATOMIC_TIGHT scope derivation, FinalExecutionGate TOCTOU verification, bounded executor IPC, mandatory `docker compose up -d --no-deps`, independent post-mutation verification, MutationReceiptStore idempotency, fail-closed negative posture, staging proof, and regression certification. |
+
+## MC-6.15 Selective Compose Service Updates (Final Closure)
+
+### Status & Verification
+- **Status:** COMPLETE — PASS (Audited in MC-6.15-C.6)
+- **Authoritative Baseline:** Commit `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3`
+- **Staging Proof Result:** Passed 11/11 phases against disposable environment (`/tmp/opencode/aipm-c5-staging/docker-compose.yml`) with zero mutations or restarts across all 32 production containers.
+- **Regression Certification:** 2,153 tests collected (2,152 passed, 1 skipped, 0 failed), Ruff check clean, release validation passed.
+
+### Architecture & Capabilities
+1. **Compose Candidate Intelligence:** `ComposeCandidateScheduler` queries registry candidate digests with TTL caching and exposes candidates additively to the VPanel frontend without mutating running containers.
+2. **Per-Service Update Planning:** `ComposeServicePlanner` generates deterministic `ServiceUpdatePlan` instances comparing running container images against target registry candidates, classifying each service into explicit update groups.
+3. **LEAF_INDEPENDENT:** Services with no downstream dependents (or whose dependencies require no updates) are updated independently, preserving all surrounding containers.
+4. **ATOMIC_TIGHT & Derived Dependency Scope:** Co-dependent updates are strictly grouped and topologically ordered into an immutable execution scope derived directly from Compose graph topology. The scope cannot be widened or narrowed by operator input.
+5. **Deterministic Plan Identity:** `UpdatePlanIdentity` generates a canonical SHA-256 digest over normalized plan attributes. Any alteration in candidate digest, current digest, or topology changes the identity.
+6. **Authorization & Owner Confirmation:** Approval requires operator presentation of the exact plan digest (`approve_update_plan`). On authorization, an owner confirmation token is issued and bound to the action.
+7. **Snapshot / Lease / Fencing Lifecycle:** Before execution, a project state snapshot is captured, an exclusive time-bounded lease is acquired, and monotonic fencing tokens protect against split-brain execution.
+8. **FinalExecutionGate & TOCTOU Verification:** Immediately prior to execution, the gate re-evaluates current running container digests, candidate image digests, derived dependency scope, and container health, failing closed if any drift occurred since approval.
+9. **Bounded Executor IPC:** Execution requests travel across the existing Unix domain socket (`/run/aipm/executor.sock`) with SO_PEERCRED UID enforcement (UID 997). The IPC payload is bounded to scalar identifiers; zero commands, argv, paths, flags, or shell strings are transmitted.
+10. **Server-Derived Compose Project & Files:** The executor resolves Compose project paths and files strictly server-side from validated configuration, preventing path-traversal attacks.
+11. **Argv-Only Execution / No Shell:** Subprocesses are invoked using explicit argument lists (`args: list[str]`). The codebase contains zero instances of `shell=True`, `bash -c`, `sh -c`, `os.system`, or `os.popen`.
+12. **Mandatory `--no-deps` Enforcement:** Compose recreate commands hardcode `--no-deps` (`docker compose -f <file> up -d --no-deps <service>`), preventing Docker Compose from recreating untouched dependencies or siblings.
+13. **Independent Post-Mutation Verification:** Process exit code 0 is never treated as success. The adapter inspects the live container state via an independent inspector hook to verify image digest and health before reporting success.
+14. **MutationReceiptStore & Idempotency:** Executions record durable mutation receipts with monotonic sequencing. Re-executing an already verified action returns the cached terminal result with `executed=False` and zero new Docker commands.
+15. **Failure Semantics & Reconciliation:**
+    - Ambiguous outcomes (e.g., transport timeouts) map to `UNKNOWN_OUTCOME` with `provider_code="transport_failure"`.
+    - Partial failures in atomic groups map to `RECONCILIATION_REQUIRED` / `UNKNOWN_OUTCOME`.
+    - Blind retries are strictly forbidden.
+    - Automatic rollback is intentionally absent on multi-service updates to protect stateful database volumes and persistent data from cascading destruction; manual operator reconciliation is required.
+16. **Browser Security Boundary:** Browser input cannot define execution commands, image names, tags, digests, compose file locations, or service scopes. Pydantic request models enforce `extra = "forbid"`, returning HTTP 422 for unauthorized fields.
 
 ## Current Git and preservation state
 

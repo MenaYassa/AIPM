@@ -1,6 +1,6 @@
 # AIPM Mission Control MC-6 Architecture
 
-> **Current-state notice — 2026-08-28:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `1c1cc4d8839d122f46eb8a1c7592c9c504df68ba`; MC-6.12 operational execution remains blocked. The preservation stash this notice previously referenced no longer exists; see the stash-loss reconciliation in `docs/CURRENT_STATUS.md`.
+> **Current-state notice — 2026-09-18:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` (`origin/main`), carrying the completed MC-6.15 selective Compose service update capability.
 
 
 ## Status and scope
@@ -230,3 +230,30 @@ The canonical current-status record is [`docs/CURRENT_STATUS.md`](CURRENT_STATUS
 The read-only Mission Control cockpit is substantially landed and live. Fresh web inspection confirmed the dashboard, server, Docker, projects, bounded logs, incidents, history, settings posture, and read-only advisor surfaces. The advisor returned fresh aligned evidence with 18/18 coverage and six points spanning 300 seconds at 60-second cadence for CPU, memory, and disk. Live observations also show bounded stale/unavailable states, including stale MC-3 freshness, stale container resource observations, unavailable Systemd entries, and disabled/unavailable notification audit data. HTTP evidence does not establish the deployed Git commit, systemd unit contents, database ownership, producer convergence, or Cloudflare configuration; the live Settings surface reports `commit=Unknown`, `public_ingress=not_observed`, and `permanent_service=not_observed`.
 
 MC-6.12 is foundation-only, not an operational action plane. No executor, action route/UI, durable operational state, leases/fencing, production target, service account, production authorization, autonomous remediation, LLM/provider execution, or notification delivery is enabled. Database merge/delete/repair/migration/rekey operations remain unauthorized.
+
+## MC-6.15 Selective Compose Service Update Architecture
+
+MC-6.15 completes the architecture for selective, isolated updates of Docker Compose services without mutating unrelated services across the host:
+
+1. **Candidate Intelligence:** `ComposeCandidateScheduler` queries registry candidate digests with TTL caching, surfacing update availability through the read-only cockpit without mutating runtime containers.
+2. **Deterministic Plan Identity:** `ComposeServicePlanner` generates deterministic `ServiceUpdatePlan` instances comparing running container images against target registry candidates. Plans bind to an immutable `UpdatePlanIdentity` 64-hex SHA-256 digest over normalized attributes.
+3. **Execution Scope Classification:**
+   - **`LEAF_INDEPENDENT`:** Services with no downstream dependents (or whose dependencies require no updates) are isolated; only the target service is mutated.
+   - **`ATOMIC_TIGHT`:** Interdependent services requiring simultaneous co-updates are strictly grouped and topologically ordered based on Compose graph topology. The derived execution scope is immutable and cannot be altered by client input.
+4. **Control-Plane Authority & Gate Verification:**
+   - Authorization requires operator presentation of the exact plan digest (`approve_update_plan`), issuing an owner confirmation token consumed exactly once.
+   - Before execution, a project state snapshot is captured, an exclusive lease is acquired, and fencing tokens protect against split-brain execution.
+   - `FinalExecutionGate` enforces TOCTOU protection by re-verifying candidate digest, current container digest, dependency scope, and health immediately prior to mutation.
+5. **Executor Boundary & Mandatory `--no-deps`:**
+   - Execution requests pass over `/run/aipm/executor.sock` via bounded `ExecutionRequest` with SO_PEERCRED UID 997 enforcement. No commands, paths, or flags cross IPC.
+   - `ComposeExecutionAdapter` resolves Compose files and project paths strictly server-side.
+   - Subprocesses are invoked strictly using explicit argument lists (zero shell execution: no `shell=True`, `bash -c`, `os.system`, or `os.popen`).
+   - Compose recreation commands hardcode `--no-deps`: `["docker", "compose", "-f", <file>, "up", "-d", "--no-deps", <service>]`.
+6. **Independent Verification & Idempotency:**
+   - Command exit code 0 is never treated as success; an independent inspection hook verifies the running container image digest and health.
+   - Durable receipts in `MutationReceiptStore` enforce idempotency; re-executing verified actions executes zero new Docker commands.
+7. **Failure Posture:**
+   - Ambiguous states (e.g. transport timeouts) map to `UNKNOWN_OUTCOME`.
+   - Atomic partial failures map to `RECONCILIATION_REQUIRED` / `UNKNOWN_OUTCOME`.
+   - Blind retries and automatic rollbacks are strictly forbidden to protect persistent storage and volumes.
+   - Request models enforce `extra = "forbid"`, returning HTTP 422 for unauthorized browser inputs.
