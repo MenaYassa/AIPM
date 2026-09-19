@@ -324,6 +324,9 @@ def serve_operator_transport(
     with_kill_switch: bool = True,
     update_engine: object | None = None,
     executor_ipc_client: object | None = None,
+    compose_service: object | None = None,
+    service_plan_port: object | None = None,
+    service_evidence_verifier: object | None = None,
 ) -> dict:
     """Compose, sweep, then serve the operator transport on loopback only.
 
@@ -351,6 +354,9 @@ def serve_operator_transport(
         run_sweep=True,
         update_engine=update_engine,
         executor_ipc_client=executor_ipc_client,
+        compose_service=compose_service,
+        service_plan_port=service_plan_port,
+        service_evidence_verifier=service_evidence_verifier,
     )
     raw_port = port if port is not None else os.environ.get(OPERATOR_TRANSPORT_PORT_ENV, DEFAULT_OPERATOR_TRANSPORT_PORT)
     resolved_port = _bounded_port(raw_port)

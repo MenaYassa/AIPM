@@ -133,6 +133,10 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
         : '<span class="provenance-badge provenance-unverified" title="Provenance not verified against Compose identity">— unverified</span>';
       const reasonHtml = `<div class="reason-cell"><strong>${escapeHtml(svc.candidate_reason || 'unknown')}</strong>${svc.candidate_detail ? `<div class="subtle reason-detail">${escapeHtml(svc.candidate_detail)}</div>` : ''}</div>`;
 
+      const planBtn = (svc.candidate_status === 'UPDATE_AVAILABLE' || svc.candidate_status === 'OUTDATED')
+        ? `<button type="button" class="advisor-fixture-button" onclick="window.loadServicePlan('${escapeHtml(projectId)}', '${escapeHtml(svc.service_name)}')">Plan Update</button>`
+        : '<span class="subtle">—</span>';
+
       return `<tr>
         <td><strong>${escapeHtml(svc.service_name)}</strong></td>
         <td>${badge(svc.state || 'unknown', svc.state === 'running' ? 'healthy' : svc.state === 'exited' ? 'critical' : 'warning')}</td>
@@ -145,8 +149,9 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
         <td>${deps}</td>
         <td><span class="subtle">${escapeHtml(svc.freshness || 'unknown')}</span></td>
         <td>${prov}</td>
+        <td>${planBtn}</td>
       </tr>`;
-    }).join('') : '<tr><td colspan="11"><div class="empty">No services reported in this observation.</div></td></tr>';
+    }).join('') : '<tr><td colspan="12"><div class="empty">No services reported in this observation.</div></td></tr>';
 
     return `<section class="health-evidence compose-intelligence-section" id="${cid}">
       <div class="compose-section-header">
@@ -172,6 +177,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
               <th>Dependencies</th>
               <th>Freshness</th>
               <th>Provenance</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -256,7 +262,46 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     }
   }
 
-  window.handleApprove = async function(projectId, digest) {
+  async function loadServicePlan(projectId, serviceName) {
+    const panel = document.getElementById(`updatePlanPanel-${projectId}`);
+    const controls = document.getElementById(`updateControls-${projectId}`);
+    if (!panel || !controls) return;
+    panel.scrollIntoView({behavior: 'smooth'});
+    panel.innerHTML = `<div class="subtle">Loading service plan for ${escapeHtml(serviceName)}...</div>`;
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/compose-services/${encodeURIComponent(serviceName)}/plan`, {cache: 'no-store'});
+      const data = await response.json();
+      if (!data.available || !data.service_plan) {
+        panel.innerHTML = `<div class="empty">Service update plan unavailable: ${escapeHtml(data.error || 'unknown')}</div>`;
+        controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Back to Project Plan</button>`;
+        return;
+      }
+      const plan = data.service_plan;
+      const canProceed = plan.eligible === true;
+      const riskClass = canProceed ? 'healthy' : 'critical';
+      const affected = (plan.expected_mutation?.affected_services || [serviceName]).join(', ');
+      panel.innerHTML = `
+        <div style="font-weight:bold;margin-bottom:6px">Service Plan: ${escapeHtml(serviceName)}</div>
+        <div class="detail-grid">
+          <div><span class="metric-label">Status</span><span class="badge ${riskClass}">${canProceed ? 'Eligible' : 'Blocked'}</span></div>
+          <div><span class="metric-label">Atomicity</span><strong>${escapeHtml(plan.atomicity || 'isolated')}</strong></div>
+          <div><span class="metric-label">Affected</span><strong>${escapeHtml(affected)}</strong></div>
+          <div><span class="metric-label">Rollback</span><strong>${escapeHtml(plan.rollback_posture || 'supervised')}</strong></div>
+        </div>
+        ${plan.blocking_reason ? `<div class="update-reasons"><div style="color:#e74c3c"><strong>Blocked:</strong> ${escapeHtml(plan.blocking_reason)}</div></div>` : ''}
+        <div class="subtle" style="margin-top:8px">Digest: ${escapeHtml(plan.plan_digest ? plan.plan_digest.slice(0, 16) : '—')}...</div>
+      `;
+      controls.innerHTML = `
+        <button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}', '${escapeHtml(serviceName)}')">${canProceed ? `Authorize Service Update (${escapeHtml(serviceName)})` : 'Cannot Proceed'}</button>
+        <button onclick="window.loadUpdatePlan('${projectId}')" style="margin-left:8px">Cancel</button>
+      `;
+    } catch {
+      panel.innerHTML = '<div class="empty">Service plan request failed</div>';
+      controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Back to Project Plan</button>`;
+    }
+  }
+
+  window.handleApprove = async function(projectId, digest, serviceName = null) {
     const result = document.getElementById(`updateResult-${projectId}`);
     const controls = document.getElementById(`updateControls-${projectId}`);
     if (!result) return;
@@ -271,40 +316,51 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
           <div class="subtle" style="margin-bottom:8px">Enter owner secret to authorize update:</div>
           <div style="display:flex;gap:8px">
             <input type="password" id="ownerSecretInput-${projectId}" placeholder="Owner secret" style="flex:1;padding:6px;border:1px solid #ccc;border-radius:3px" autocomplete="off" />
-            <button onclick="window.handleLogin('${projectId}', '${digest}')" style="background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:3px;cursor:pointer">Authenticate</button>
+            <button onclick="window.handleLogin('${projectId}', '${digest}', ${serviceName ? `'${escapeHtml(serviceName)}'` : 'null'})" style="background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:3px;cursor:pointer">Authenticate</button>
           </div>
           <div id="loginError-${projectId}" style="color:#e74c3c;margin-top:6px;font-size:0.9em"></div>
         </div>`;
-      controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Cancel</button>`;
+      controls.innerHTML = `<button onclick="${serviceName ? `window.loadServicePlan('${projectId}', '${escapeHtml(serviceName)}')` : `window.loadUpdatePlan('${projectId}')`}">Cancel</button>`;
       return;
     }
     try {
-      const response = await fetch(`/api/projects/${projectId}/update/approve`, {
+      const rawKey = serviceName
+        ? `dashboard-${projectId}-${serviceName}-${digest.slice(0, 24)}`
+        : `dashboard-${projectId}-${digest.slice(0, 32)}`;
+      const idempotencyKey = rawKey.replace(/[^A-Za-z0-9_.:@-]/g, '_');
+      const requestPayload = {update_plan_digest: digest, idempotency_key: idempotencyKey};
+      if (serviceName) {
+        requestPayload.service_name = serviceName;
+      }
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/update/approve`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
         credentials: 'include',
-        body: JSON.stringify({update_plan_digest: digest, idempotency_key: `dashboard-${projectId}-${Date.now()}`})
+        body: JSON.stringify(requestPayload)
       });
       const data = await response.json();
       if (data.status === 'ok' && data.update_approval) {
         const approval = data.update_approval;
+        const scopeLabel = approval.service_name ? `Service: ${escapeHtml(approval.service_name)}` : 'Project';
         if (approval.confirmation_required) {
-          result.innerHTML = `<div style="border:1px solid #f39c12;padding:8px;margin-top:8px;background:#fef5e7"><div><strong>Confirmation Required</strong></div><div class="subtle">Action: ${escapeHtml(approval.action_id)}</div></div>`;
+          result.innerHTML = `<div style="border:1px solid #f39c12;padding:8px;margin-top:8px;background:#fef5e7"><div><strong>Confirmation Required</strong> (${scopeLabel})</div><div class="subtle">Action: ${escapeHtml(approval.action_id)}</div></div>`;
           controls.innerHTML = `<button onclick="window.handleExecute('${projectId}', '${approval.action_id}')">Execute Update</button>`;
         } else {
-          result.innerHTML = `<div style="color:#27ae60">Authorized: ${escapeHtml(approval.action_id)}</div>`;
+          result.innerHTML = `<div style="color:#27ae60">Authorized: ${escapeHtml(approval.action_id)} (${scopeLabel})</div>`;
         }
       } else {
         result.innerHTML = `<div style="color:#e74c3c">Failed: ${escapeHtml(data.error || 'unknown')}</div>`;
-        controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Retry</button>`;
+        const retryCall = serviceName ? `window.loadServicePlan('${projectId}', '${escapeHtml(serviceName)}')` : `window.loadUpdatePlan('${projectId}')`;
+        controls.innerHTML = `<button onclick="${retryCall}">Retry</button>`;
       }
     } catch {
       result.innerHTML = '<div style="color:#e74c3c">Request failed</div>';
-      controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Retry</button>`;
+      const retryCall = serviceName ? `window.loadServicePlan('${projectId}', '${escapeHtml(serviceName)}')` : `window.loadUpdatePlan('${projectId}')`;
+      controls.innerHTML = `<button onclick="${retryCall}">Retry</button>`;
     }
   };
 
-  window.handleLogin = async function(projectId, digest) {
+  window.handleLogin = async function(projectId, digest, serviceName = null) {
     const input = document.getElementById(`ownerSecretInput-${projectId}`);
     const errorDiv = document.getElementById(`loginError-${projectId}`);
     if (!input || !errorDiv) return;
@@ -333,7 +389,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
         // Reset cached CSRF token so next call reacquires it
         csrfToken = null;
         // Resume authorization workflow now that session is established
-        window.handleApprove(projectId, digest);
+        window.handleApprove(projectId, digest, serviceName);
       } else {
         const data = await response.json().catch(() => ({}));
         errorDiv.textContent = data.error === 'unauthenticated' ? 'Invalid secret' : 'Authentication failed';
@@ -393,6 +449,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
   };
 
   window.loadUpdatePlan = loadUpdatePlan;
+  window.loadServicePlan = loadServicePlan;
 
   function projectCard(project, local = false) {
     const health = project.health || {};

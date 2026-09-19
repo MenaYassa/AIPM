@@ -49,6 +49,9 @@ select = ["E9", "F821", "F541"]
 [project.scripts]
 aipm = "aipm.cli.app:app"
 
+[tool.pytest.ini_options]
+pythonpath = [".", "src"]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

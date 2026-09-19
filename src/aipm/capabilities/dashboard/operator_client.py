@@ -34,6 +34,7 @@ _ID_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}"
 _ALLOWED_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("POST", re.compile(r"^/login$")),
     ("POST", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/approval$")),
+    ("POST", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/compose-services/{_ID_SEGMENT}/approval$")),
     ("POST", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/execute$")),
     ("GET", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/status$")),
     ("GET", re.compile(rf"^/actions/{_ID_SEGMENT}$")),

@@ -150,6 +150,7 @@ def run(
     from datetime import datetime, timedelta, timezone
 
     from aipm.control_plane.executor_ipc import (
+        CAPABILITY_EXECUTE_SERVICE_UPDATE,
         CAPABILITY_EXECUTE_UPDATE_PLAN,
         ExecutorIPCServer,
     )
@@ -207,11 +208,37 @@ def run(
             typer.echo(f"Update audit directory is not writable: {audit_dir} ({exc})", err=True)
             raise typer.Exit(code=2) from exc
         engine = UpdateEngine(audit_service=_make_audit_service(audit_dir))
-        update_handler = compose_executor_update_handler(engine=engine, receipts=receipts)
+        compose_provider = getattr(engine, "compose_provider", None)
+        if compose_provider is not None:
+            from aipm.services.compose.execution_adapter import ComposeExecutionAdapter
+            from aipm.services.compose.intelligence import ComposeIntelligenceService
+
+            compose_intel = ComposeIntelligenceService(compose_provider=compose_provider)
+
+            def _service_inspector(project_name: str, service_name: str):
+                try:
+                    proj = engine.project_service.get_project(project_name)
+                    obs = compose_intel.observe(proj, query_registries=False)
+                    return obs.services.get(service_name)
+                except Exception:
+                    return None
+
+            compose_adapter = ComposeExecutionAdapter(
+                project_resolver=engine.project_service.get_project,
+                runner=engine.runner,
+                inspector=_service_inspector,
+            )
+        else:
+            compose_adapter = None
+        update_handler = compose_executor_update_handler(
+            engine=engine,
+            compose_adapter=compose_adapter,
+            receipts=receipts,
+        )
 
     def handler(request):
         """Bridge IPC requests to the capability-backed executors."""
-        if request.capability_id == CAPABILITY_EXECUTE_UPDATE_PLAN:
+        if request.capability_id in (CAPABILITY_EXECUTE_UPDATE_PLAN, CAPABILITY_EXECUTE_SERVICE_UPDATE):
             if update_handler is None:
                 from aipm.control_plane.executor_ipc import ExecutionResponse
                 return ExecutionResponse(outcome="refused", provider_code="capability_not_enabled", action_id=request.action_id, evidence_reference="")
@@ -315,6 +342,7 @@ def serve_operator_transport(
 
     update_engine = None
     executor_ipc_client = None
+    compose_service = None
     if enable_update_plane:
         if update_audit_dir is None or update_backup_dir is None:
             typer.echo(
@@ -325,6 +353,7 @@ def serve_operator_transport(
         from pathlib import Path as _Path
 
         from aipm.services.backup.engine import BackupEngine
+        from aipm.services.compose.service import ComposeService
         from aipm.services.update.engine import UpdateEngine
 
         for label, dir_path, probe_name in (
@@ -348,6 +377,27 @@ def serve_operator_transport(
             audit_service=_make_audit_service(update_audit_dir),
             backup_engine=BackupEngine(update_backup_dir),
         )
+        compose_provider = getattr(update_engine, "compose_provider", None)
+        service_evidence_verifier = None
+        service_plan_port = None
+        if compose_provider is not None:
+            from aipm.composition.service_evidence import compose_service_evidence_verifier
+
+            compose_service = ComposeService(provider=compose_provider)
+            project_service = getattr(update_engine, "project_service", None)
+            if project_service is not None:
+                def _resolve_project(target):
+                    return project_service.get_project(target) if isinstance(target, str) else target
+
+                service_evidence_verifier = compose_service_evidence_verifier(
+                    compose_service,
+                    project_resolver=_resolve_project,
+                )
+                service_plan_port = lambda target, svc: compose_service.plan_service_update(
+                    _resolve_project(target),
+                    svc,
+                    query_registries=True,
+                )
         if executor_socket_path is None:
             from aipm.control_plane.executor_ipc import EXECUTOR_SOCKET_PATH
 
@@ -364,6 +414,9 @@ def serve_operator_transport(
             port=port,
             update_engine=update_engine,
             executor_ipc_client=executor_ipc_client,
+            compose_service=compose_service,
+            service_plan_port=service_plan_port,
+            service_evidence_verifier=service_evidence_verifier,
         )
     except Exception as exc:
         typer.echo(f"Operator transport refused to start: {exc}", err=True)
