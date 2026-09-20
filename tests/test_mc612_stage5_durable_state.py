@@ -406,6 +406,7 @@ def test_concurrent_creation_attempts_produce_exactly_one_action(tmp_path: Path)
         state=LifecycleState.CONFIRMATION_REQUIRED,
         requester_subject=identity.requester_subject,
         idempotency_key="idem-001",
+        action_protocol="mc616d2-v1",
         created_at=decision.decided_at,
         expires_at=decision.expires_at,
         version=2,

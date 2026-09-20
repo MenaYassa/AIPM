@@ -356,6 +356,7 @@ def test_16_newest_action_wins_regardless_of_operation():
             state=state,
             requester_subject="owner",
             idempotency_key=f"idem-{action_id}",
+            action_protocol="mc616d2-v1",
             created_at=created_at,
             expires_at=created_at + timedelta(hours=1),
             plan_revision=1,

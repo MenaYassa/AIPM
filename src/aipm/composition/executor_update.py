@@ -80,9 +80,12 @@ def compose_ipc_update_runtime(client):
             contract_digest=binding.contract_digest,
             lease_id=binding.lease_id,
             fencing_token=binding.fencing_token,
+            action_protocol=binding.action_protocol,
             plan_digest=binding.plan_digest,
             confirmation_id=binding.confirmation_id,
             service_scope=service_scope,
+            registration_id=getattr(binding, "registration_id", None),
+            registration_digest=getattr(binding, "registration_digest", None),
         )
         try:
             response = client.send(request)

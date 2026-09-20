@@ -24,6 +24,7 @@ from aipm.control_plane.service import OwnerControlPlaneService
 from aipm.control_plane.session import OwnerSessionStore
 from aipm.control_plane.storage import (
     ControlPlaneDatabase,
+    SCHEMA_VERSION,
     SQLiteActionRepository,
     SQLiteProjectPlanStore,
 )
@@ -249,7 +250,7 @@ def test_full_http_success_flow(tmp_path: Path):
 
     health = client.get("/health").json()
     assert health["status"] == "available"
-    assert health["schema_version"] == 6
+    assert health["schema_version"] == db.schema_version() == SCHEMA_VERSION
 
     plan = client.get("/plans/project-demo").json()
     assert plan["revision"] == 1

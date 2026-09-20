@@ -110,6 +110,7 @@ class OwnerControlPlaneService:
         "_service_evidence_verifier",
         "_service_plan_port",
         "_service_evidence_store",
+        "_registrations",
         "_clock",
         "_initialized",
     )
@@ -133,6 +134,7 @@ class OwnerControlPlaneService:
         executor_ipc_client=None,
         service_evidence_verifier=None,
         service_plan_port=None,
+        registrations=None,
         clock=None,
     ) -> None:
         if not isinstance(authenticator, OwnerAuthenticator):
@@ -185,6 +187,16 @@ class OwnerControlPlaneService:
         object.__setattr__(self, "_service_evidence_verifier", service_evidence_verifier)
         object.__setattr__(self, "_service_plan_port", service_plan_port)
         object.__setattr__(self, "_service_evidence_store", {})
+        reg_store = registrations
+        if reg_store is None and hasattr(repository, "_db"):
+            try:
+                from aipm.control_plane.storage.sqlite_store import SQLiteProjectRegistrationStore
+                reg_store = SQLiteProjectRegistrationStore(repository._db)
+            except Exception:
+                reg_store = None
+        elif reg_store is None and hasattr(repository, "registrations"):
+            reg_store = repository.registrations
+        object.__setattr__(self, "_registrations", reg_store)
         object.__setattr__(self, "_clock", clock or (lambda: datetime.now(timezone.utc)))
         object.__setattr__(self, "_initialized", True)
 
@@ -953,6 +965,13 @@ class OwnerControlPlaneService:
             if service_scope is not None and service_scope != stored_ev.derived_execution_scope:
                 raise ControlPlaneError(PlanningErrorCode.STATE_CONFLICT, "Service scope does not match authorized evidence")
             service_scope = stored_ev.derived_execution_scope
+        registration_id = None
+        registration_digest = None
+        if self._registrations is not None:
+            reg = self._registrations.get(action.scope.target_id, action.scope.environment)
+            if reg is not None:
+                registration_id = reg.registration_id
+                registration_digest = reg.registration_digest
         return UpdateExecutionBinding(
             project_name=action.scope.target_id,
             plan_digest=plan_digest,
@@ -961,7 +980,10 @@ class OwnerControlPlaneService:
             contract_digest=evidence["contract_digest"],
             lease_id=lease.lease_id,
             fencing_token=lease.fencing_token,
+            action_protocol=action.action_protocol,
             service_scope=service_scope,
+            registration_id=registration_id,
+            registration_digest=registration_digest,
         )
 
     def _assert_binding_digest(self, decision, presented_digest: str) -> None:
@@ -1386,6 +1408,7 @@ class OwnerControlPlaneService:
             expires_at=decision.expires_at,
             rollback_of_action_id=(lifecycle_refs or {}).get("rollback_of_action_id"),
             snapshot_id=(lifecycle_refs or {}).get("snapshot_id"),
+            action_protocol="mc616d2-v1",
         )
         planned = advance_lifecycle(lifecycle, LifecycleState.PLANNED, now=decision.decided_at)
         confirmation_required = advance_lifecycle(planned, LifecycleState.CONFIRMATION_REQUIRED, now=decision.decided_at)

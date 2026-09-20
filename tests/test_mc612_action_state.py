@@ -82,6 +82,7 @@ def decision_and_lifecycle(**request_overrides):
         state=LifecycleState.REQUESTED,
         requester_subject=identity.requester_subject,
         idempotency_key=plan.request.idempotency_key,
+        action_protocol="mc616d2-v1",
         created_at=decision.decided_at,
         expires_at=decision.expires_at,
     )

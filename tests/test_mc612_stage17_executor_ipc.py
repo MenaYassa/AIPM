@@ -32,6 +32,7 @@ def make_request(**overrides):
         "contract_digest": "d" * 64,
         "lease_id": "l" * 32,
         "fencing_token": 1,
+        "action_protocol": "mc616d2-v1",
     }
     values.update(overrides)
     return ExecutionRequest(**values)
@@ -106,7 +107,8 @@ def test_request_rejects_non_object():
 def test_request_rejects_too_many_fields():
     payload = {f"field{i}": "v" for i in range(20)}
     payload.update({"action_id": "a" * 64, "capability_id": "c", "target_id": "t",
-                    "contract_digest": "d" * 64, "lease_id": "l" * 32, "fencing_token": 1})
+                    "contract_digest": "d" * 64, "lease_id": "l" * 32, "fencing_token": 1,
+                    "action_protocol": "mc616d2-v1"})
     with pytest.raises(ExecutorIPCError, match="Too many"):
         ExecutionRequest.from_json(json.dumps(payload))
 

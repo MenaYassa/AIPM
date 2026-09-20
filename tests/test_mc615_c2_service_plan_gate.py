@@ -466,13 +466,14 @@ def test_multiarch_provenance_invalid_rejected():
 # ---------------------------------------------------------------------------
 
 class _FakeAction:
-    def __init__(self, action_id: str, version: int = 1, state="leased", decision_id: str = "decision-01"):
+    def __init__(self, action_id: str, version: int = 1, state="leased", decision_id: str = "decision-01", action_protocol: str = "mc616d2-v1"):
         from aipm.control_plane.models import LifecycleState
         self.action_id = action_id
         self.version = version
         self.state = LifecycleState(state)
         self.decision_id = decision_id
         self.scope = type("Scope", (), {"policy_version": "policy-v1", "target_id": "searxng-stack"})()
+        self.action_protocol = action_protocol
 
     def is_expired(self, now):
         return False
@@ -839,6 +840,7 @@ def test_update_execution_binding_rejects_invalid_scope():
             contract_digest="d" * 64,
             lease_id="e" * 32,
             fencing_token=1,
+            action_protocol="mc616d2-v1",
             service_scope=["searxng"],  # list instead of tuple
         )
 
@@ -852,6 +854,7 @@ def test_update_execution_binding_rejects_invalid_scope():
             contract_digest="d" * 64,
             lease_id="e" * 32,
             fencing_token=1,
+            action_protocol="mc616d2-v1",
             service_scope=("",),  # empty service name
         )
 

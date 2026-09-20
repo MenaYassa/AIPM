@@ -285,6 +285,7 @@ def test_11_arbitrary_image_tag_rejected():
         "contract_digest": CONTRACT_DIGEST,
         "lease_id": LEASE_ID,
         "fencing_token": FENCING_TOKEN,
+        "action_protocol": "mc616d2-v1",
         "plan_digest": PLAN_DIGEST,
         "confirmation_id": CONFIRMATION_ID,
         "service_scope": ["searxng"],
@@ -354,6 +355,7 @@ def test_17_missing_service_scope_rejected_for_service_update():
         "contract_digest": CONTRACT_DIGEST,
         "lease_id": LEASE_ID,
         "fencing_token": FENCING_TOKEN,
+        "action_protocol": "mc616d2-v1",
         "plan_digest": PLAN_DIGEST,
         "confirmation_id": CONFIRMATION_ID,
     }
@@ -382,6 +384,7 @@ def test_18_unknown_ipc_outcome_remains_reconciliation_unknown(tmp_path: Path):
         contract_digest=CONTRACT_DIGEST,
         lease_id=LEASE_ID,
         fencing_token=FENCING_TOKEN,
+        action_protocol="mc616d2-v1",
         plan_digest=PLAN_DIGEST,
         confirmation_id=CONFIRMATION_ID,
         service_scope=("searxng",),
@@ -645,6 +648,7 @@ def test_live_unix_socket_ipc_roundtrip_with_receipts(tmp_path: Path):
             contract_digest=CONTRACT_DIGEST,
             lease_id=LEASE_ID,
             fencing_token=FENCING_TOKEN,
+            action_protocol="mc616d2-v1",
             service_scope=("searxng",),
         )
 

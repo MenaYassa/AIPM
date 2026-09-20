@@ -355,7 +355,10 @@ class UpdateExecutionBinding:
     contract_digest: str
     lease_id: str
     fencing_token: int
+    action_protocol: str
     service_scope: tuple[str, ...] | None = None
+    registration_id: str | None = None
+    registration_digest: str | None = None
 
     def __post_init__(self) -> None:
         _bounded_string(self.project_name, name="project identity", maximum=MAX_TARGET_ID, pattern=_SAFE_ID)
@@ -366,9 +369,16 @@ class UpdateExecutionBinding:
         _bounded_string(self.lease_id, name="lease identity", maximum=32, pattern=re.compile(r"^[0-9a-f]{32}$"))
         if not isinstance(self.fencing_token, int) or isinstance(self.fencing_token, bool) or self.fencing_token < 1:
             raise ValueError("Invalid execution fencing token")
+        # AD-01: Validate action_protocol is present and recognized
+        if not isinstance(self.action_protocol, str) or self.action_protocol not in ("legacy-v1", "mc616d2-v1"):
+            raise ValueError(f"Invalid action_protocol: must be 'legacy-v1' or 'mc616d2-v1', got {self.action_protocol!r}")
         if self.service_scope is not None:
             if not isinstance(self.service_scope, tuple) or not all(isinstance(s, str) and s for s in self.service_scope):
                 raise ValueError("Invalid service execution scope")
+        if self.registration_id is not None:
+            _bounded_string(self.registration_id, name="registration identity", maximum=MAX_TARGET_ID, pattern=_SAFE_ID)
+        if self.registration_digest is not None:
+            _bounded_string(self.registration_digest, name="registration digest", maximum=64, pattern=re.compile(r"^[0-9a-f]{64}$"))
 
 
 # MC-6.12 Stage 2 non-executing lifecycle foundation.
@@ -464,6 +474,8 @@ class ActionLifecycle:
     itself (explicit single-owner confirmation). In DISTINCT_APPROVAL mode the
     confirmer must be a different subject. Neither mode confers execution
     authority; execution states exist as reserved transition targets only.
+
+    AD-01: action_protocol is immutable and assigned by Control Plane at creation.
     """
 
     action_id: str
@@ -473,6 +485,7 @@ class ActionLifecycle:
     scope: ActionScope
     state: LifecycleState
     requester_subject: str
+    action_protocol: str
     confirmation_kind: ConfirmationKind = ConfirmationKind.OWNER_CONFIRMATION
     approver_subject: str | None = None
     idempotency_key: str = ""
@@ -537,6 +550,11 @@ class ActionLifecycle:
         object.__setattr__(self, "expires_at", expires)
         if not isinstance(self.version, int) or self.version < 0:
             raise LifecycleError("Invalid lifecycle version")
+        # AD-01: Validate action_protocol
+        if not isinstance(self.action_protocol, str) or not self.action_protocol:
+            raise LifecycleError("Invalid action protocol")
+        if self.action_protocol not in ("legacy-v1", "mc616d2-v1"):
+            raise LifecycleError(f"Unsupported action protocol: {self.action_protocol}")
         if not isinstance(self.plan_revision, int) or self.plan_revision < 0:
             raise LifecycleError("Invalid plan revision")
 

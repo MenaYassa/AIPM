@@ -227,6 +227,15 @@ class ControlPlaneDatabase:
                 for statement in statements:
                     self._connection.execute(statement)
                 self._apply_column_migrations()
+                # Apply migrations sequentially
+                if row is not None:
+                    current_version = int(row[0])
+                    if current_version == 6:
+                        self._apply_registration_v7_migration()
+                        current_version = 7
+                    if current_version == 7:
+                        self._apply_action_protocol_v8_migration()
+                        current_version = 8
                 self._connection.execute(
                     "INSERT INTO control_plane_schema_meta (schema_name, schema_version, migrated_at) VALUES (?, ?, ?)"
                     " ON CONFLICT(schema_name) DO UPDATE SET schema_version = excluded.schema_version,"
@@ -250,6 +259,218 @@ class ControlPlaneDatabase:
             for name, declaration in columns:
                 if name not in existing:
                     self._connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+
+    def _apply_registration_v7_migration(self) -> None:
+        """Migrate project_registrations from v6 (target_id PK) to v7 (registration_id PK).
+
+        This migration:
+        - Adds registration_id column with generated UUIDs for existing rows
+        - Reconstructs the table with registration_id as PRIMARY KEY
+        - Preserves all existing registration data
+        - Adds partial unique index for active registration uniqueness
+        """
+        import uuid
+
+        # Check if migration is needed
+        existing_cols = {row[1] for row in self._connection.execute("PRAGMA table_info(project_registrations)")}
+        if "registration_id" in existing_cols:
+            # Already migrated
+            return
+
+        # Transactionally migrate the table
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            # 1. Create temporary table with new schema
+            self._connection.execute("""
+                CREATE TABLE project_registrations_v7 (
+                    registration_id TEXT PRIMARY KEY,
+                    target_id TEXT NOT NULL,
+                    environment TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    canonical_project_path TEXT NOT NULL,
+                    runtime_mode TEXT NOT NULL,
+                    compose_project_name TEXT,
+                    registration_digest TEXT NOT NULL,
+                    registration_version TEXT NOT NULL DEFAULT 'mc616-reg-v1',
+                    registered_by TEXT NOT NULL,
+                    registered_at TEXT NOT NULL,
+                    approved_by TEXT,
+                    approved_at TEXT,
+                    revoked_by TEXT,
+                    revoked_at TEXT,
+                    revocation_reason TEXT,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
+            # 2. Copy existing data, generating registration_id for each row
+            existing_rows = self._connection.execute("SELECT * FROM project_registrations").fetchall()
+            for row in existing_rows:
+                registration_id = str(uuid.uuid4())
+                self._connection.execute("""
+                    INSERT INTO project_registrations_v7 (
+                        registration_id, target_id, environment, status, canonical_project_path,
+                        runtime_mode, compose_project_name, registration_digest, registration_version,
+                        registered_by, registered_at, approved_by, approved_at, revoked_by,
+                        revoked_at, revocation_reason, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    registration_id,
+                    row["target_id"],
+                    row["environment"],
+                    row["status"],
+                    row["canonical_project_path"],
+                    row["runtime_mode"],
+                    row["compose_project_name"],
+                    row["registration_digest"],
+                    row["registration_version"],
+                    row["registered_by"],
+                    row["registered_at"],
+                    row["approved_by"],
+                    row["approved_at"],
+                    row["revoked_by"],
+                    row["revoked_at"],
+                    row["revocation_reason"],
+                    row["updated_at"],
+                ))
+
+            # 3. Drop old table
+            self._connection.execute("DROP TABLE project_registrations")
+
+            # 4. Rename new table
+            self._connection.execute("ALTER TABLE project_registrations_v7 RENAME TO project_registrations")
+
+            # 5. Create partial unique index for active registrations
+            self._connection.execute("""
+                CREATE UNIQUE INDEX idx_project_registrations_active_target
+                ON project_registrations (target_id, environment)
+                WHERE status IN ('REGISTERED', 'DISABLED')
+            """)
+
+            # 6. Create lookup index
+            self._connection.execute("""
+                CREATE INDEX idx_project_registrations_target
+                ON project_registrations (target_id, environment)
+            """)
+
+            # 7. Create status index
+            self._connection.execute("""
+                CREATE INDEX idx_project_registrations_status
+                ON project_registrations (status, environment)
+            """)
+
+            self._connection.execute("COMMIT")
+        except Exception:
+            self._connection.execute("ROLLBACK")
+            raise
+
+    def _apply_action_protocol_v8_migration(self) -> None:
+        """Migrate actions from v7 to v8: add action_protocol column with NOT NULL constraint.
+
+        AD-01: Existing actions are classified as 'legacy-v1' (pre-MC-6.16-D2).
+        New actions created after migration receive 'mc616d2-v1' from Control Plane.
+
+        This migration:
+        - Reconstructs actions table with action_protocol TEXT NOT NULL
+        - Classifies all existing actions as 'legacy-v1' (trustworthy pre-cutover classification)
+        - Preserves all existing columns, data, indexes, and constraints
+        - Transactional and idempotent
+        """
+
+        # Check if migration is needed - validate complete v8 schema
+        table_info = list(self._connection.execute("PRAGMA table_info(actions)"))
+        existing_cols = {row[1]: row for row in table_info}
+
+        if "action_protocol" in existing_cols:
+            # Column exists - verify it satisfies v8 contract
+            protocol_col = existing_cols["action_protocol"]
+            col_type = protocol_col[2]  # type
+            not_null = protocol_col[3]  # notnull (1 = NOT NULL, 0 = nullable)
+
+            if col_type.upper() != "TEXT" or not_null != 1:
+                # Partial migration: column exists but doesn't satisfy v8 contract
+                from aipm.control_plane.models import ControlPlaneError, PlanningErrorCode
+                raise ControlPlaneError(
+                    PlanningErrorCode.STORAGE_CORRUPT,
+                    f"Partial v7→v8 migration detected: action_protocol exists but invalid (type={col_type}, notnull={not_null}). "
+                    "Manual intervention required: drop and recreate control-plane database or repair schema."
+                )
+
+            # Valid v8 schema - migration already complete
+            return
+
+        # Transactionally reconstruct table with NOT NULL constraint
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            # 1. Create new table with action_protocol TEXT NOT NULL
+            self._connection.execute("""
+                CREATE TABLE actions_new (
+                    action_id TEXT PRIMARY KEY,
+                    decision_id TEXT NOT NULL REFERENCES authorization_decisions(decision_id),
+                    idempotency_key TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    environment TEXT NOT NULL,
+                    plan_id TEXT NOT NULL,
+                    plan_revision INTEGER NOT NULL,
+                    plan_digest TEXT NOT NULL,
+                    target_digest TEXT NOT NULL,
+                    requester_subject TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    lifecycle_state TEXT NOT NULL,
+                    confirmation_kind TEXT NOT NULL,
+                    approver_subject TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    rollback_of_action_id TEXT,
+                    snapshot_id TEXT,
+                    outcome TEXT,
+                    contract_version TEXT,
+                    capability_version TEXT,
+                    contract_digest TEXT,
+                    action_protocol TEXT NOT NULL,
+                    UNIQUE (target_id, operation, idempotency_key)
+                )
+            """)
+
+            # 2. Copy all existing actions, classifying them as legacy-v1
+            self._connection.execute("""
+                INSERT INTO actions_new
+                SELECT action_id, decision_id, idempotency_key, operation, target_id, environment,
+                       plan_id, plan_revision, plan_digest, target_digest, requester_subject,
+                       policy_version, lifecycle_state, confirmation_kind, approver_subject,
+                       created_at, updated_at, expires_at, version, rollback_of_action_id,
+                       snapshot_id, outcome, contract_version, capability_version, contract_digest,
+                       'legacy-v1' AS action_protocol
+                FROM actions
+            """)
+
+            # 3. Verify all rows copied
+            old_count = self._connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
+            new_count = self._connection.execute("SELECT COUNT(*) FROM actions_new").fetchone()[0]
+            if old_count != new_count:
+                raise sqlite3.Error(f"Migration failed: row count mismatch ({old_count} != {new_count})")
+
+            # 4. Verify no NULL protocols
+            null_count = self._connection.execute("SELECT COUNT(*) FROM actions_new WHERE action_protocol IS NULL").fetchone()[0]
+            if null_count > 0:
+                raise sqlite3.Error(f"Migration failed: {null_count} actions have NULL action_protocol")
+
+            # 5. Drop old table and rename new table
+            self._connection.execute("DROP TABLE actions")
+            self._connection.execute("ALTER TABLE actions_new RENAME TO actions")
+
+            # 6. Recreate index (dropped with old table)
+            self._connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_actions_target_state ON actions (target_id, lifecycle_state)
+            """)
+
+            self._connection.execute("COMMIT")
+        except Exception:
+            self._connection.execute("ROLLBACK")
+            raise
 
     def _seed_kill_switch_defaults(self) -> None:
         try:
@@ -349,6 +570,9 @@ def _lifecycle_from_row(row: sqlite3.Row) -> ActionLifecycle:
         if not isinstance(row["version"], int) or row["version"] < 0:
             raise _corrupt("Invalid stored action version")
         _identity_from_row(row)
+        action_protocol = row["action_protocol"]
+        if not action_protocol or not isinstance(action_protocol, str):
+            raise _corrupt("Missing or invalid action_protocol")
         lifecycle = ActionLifecycle(
             action_id=row["action_id"],
             plan_id=row["plan_id"],
@@ -367,6 +591,7 @@ def _lifecycle_from_row(row: sqlite3.Row) -> ActionLifecycle:
             created_at=_parse_timestamp(row["created_at"], name="action timestamp"),
             expires_at=_parse_timestamp(row["expires_at"], name="action expiry"),
             version=int(row["version"]),
+            action_protocol=action_protocol,
         )
     except ControlPlaneError:
         raise
@@ -602,8 +827,8 @@ class SQLiteActionRepository:
             "INSERT INTO actions (action_id, decision_id, idempotency_key, operation, target_id, environment, plan_id,"
             " plan_revision, plan_digest, target_digest, requester_subject, policy_version, lifecycle_state,"
             " confirmation_kind, approver_subject, created_at, updated_at, expires_at, version,"
-            " rollback_of_action_id, snapshot_id, outcome)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " rollback_of_action_id, snapshot_id, outcome, action_protocol)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 lifecycle.action_id,
                 decision.decision_id,
@@ -627,6 +852,7 @@ class SQLiteActionRepository:
                 lifecycle.rollback_of_action_id,
                 lifecycle.snapshot_id,
                 "mutation_not_started",
+                lifecycle.action_protocol,  # AD-01: Control Plane-assigned protocol
             ),
         )
 
@@ -2281,9 +2507,28 @@ class SQLiteProjectRegistrationStore:
         self._audit_ledger.append_in_transaction(draft)
 
     def get(self, target_id: str, environment: str) -> ProjectRegistration | None:
+        """Get the active registration (REGISTERED or DISABLED) for a target.
+
+        Returns None if no active registration exists. Historical REVOKED registrations
+        are not returned by this method.
+        """
         row = self._db.connection.execute(
-            "SELECT * FROM project_registrations WHERE target_id = ? AND environment = ?",
+            "SELECT * FROM project_registrations WHERE target_id = ? AND environment = ? AND status IN ('REGISTERED', 'DISABLED') "
+            "ORDER BY registered_at DESC LIMIT 1",
             (target_id, environment),
+        ).fetchone()
+        if row is None:
+            return None
+        return _registration_from_row(row)
+
+    def get_by_registration_id(self, registration_id: str) -> ProjectRegistration | None:
+        """Get a registration by its unique registration_id.
+
+        This can return REVOKED registrations for historical lookup.
+        """
+        row = self._db.connection.execute(
+            "SELECT * FROM project_registrations WHERE registration_id = ?",
+            (registration_id,),
         ).fetchone()
         if row is None:
             return None
@@ -2328,15 +2573,14 @@ class SQLiteProjectRegistrationStore:
             with self._db.transaction():
                 self._db.connection.execute(
                     "UPDATE project_registrations SET status = ?, updated_at = ?, revoked_by = ?, revoked_at = ?, revocation_reason = ? "
-                    "WHERE target_id = ? AND environment = ?",
+                    "WHERE registration_id = ?",
                     (
                         update_fields["status"],
                         update_fields["updated_at"],
                         update_fields.get("revoked_by"),
                         update_fields.get("revoked_at"),
                         update_fields.get("revocation_reason"),
-                        target_id,
-                        environment,
+                        current.registration_id,
                     ),
                 )
                 self._emit_status_change_event(
@@ -2350,7 +2594,8 @@ class SQLiteProjectRegistrationStore:
         except sqlite3.Error as exc:
             raise RegistrationError("Registration status cannot be updated") from exc
 
-        return self.get(target_id, environment)
+        # AD-03: Return updated registration via registration_id (works for all statuses including REVOKED)
+        return self.get_by_registration_id(current.registration_id)
 
     def list_registrations(self, environment: str | None = None, status: RegistrationStatus | None = None) -> tuple[ProjectRegistration, ...]:
         query = "SELECT * FROM project_registrations WHERE 1=1"
@@ -2372,11 +2617,12 @@ class SQLiteProjectRegistrationStore:
 
 def _insert_registration_row(connection: sqlite3.Connection, registration: ProjectRegistration) -> None:
     connection.execute(
-        "INSERT INTO project_registrations (target_id, environment, status, canonical_project_path, runtime_mode, "
+        "INSERT INTO project_registrations (registration_id, target_id, environment, status, canonical_project_path, runtime_mode, "
         "compose_project_name, registration_digest, registration_version, registered_by, registered_at, "
         "approved_by, approved_at, revoked_by, revoked_at, revocation_reason, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
+            registration.registration_id,
             registration.target_id,
             registration.environment,
             registration.status.value,
@@ -2407,6 +2653,7 @@ def _registration_from_row(row: sqlite3.Row) -> ProjectRegistration:
                 break
 
         return ProjectRegistration(
+            registration_id=row["registration_id"],
             target_id=row["target_id"],
             environment=row["environment"],
             status=status,

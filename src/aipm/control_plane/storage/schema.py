@@ -8,7 +8,7 @@ credentials.
 from __future__ import annotations
 
 SCHEMA_NAME = "control_plane"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 _SCHEMA_STATEMENTS = (
     """
@@ -80,6 +80,7 @@ _SCHEMA_STATEMENTS = (
         contract_version TEXT,
         capability_version TEXT,
         contract_digest TEXT,
+        action_protocol TEXT NOT NULL,
         UNIQUE (target_id, operation, idempotency_key)
     )
     """,
@@ -212,6 +213,7 @@ _SCHEMA_STATEMENTS = (
     """,
     """
     CREATE TABLE IF NOT EXISTS project_registrations (
+        registration_id TEXT PRIMARY KEY,
         target_id TEXT NOT NULL,
         environment TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -227,10 +229,16 @@ _SCHEMA_STATEMENTS = (
         revoked_by TEXT,
         revoked_at TEXT,
         revocation_reason TEXT,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (target_id, environment),
-        UNIQUE (canonical_project_path, environment)
+        updated_at TEXT NOT NULL
     )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_registrations_active_target
+    ON project_registrations (target_id, environment)
+    WHERE status IN ('REGISTERED', 'DISABLED')
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_project_registrations_target ON project_registrations (target_id, environment)
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_project_registrations_status ON project_registrations (status, environment)

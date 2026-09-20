@@ -14,6 +14,7 @@ architectural boundaries (control_plane does not import providers).
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -284,6 +285,8 @@ class RegistrationService:
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
 
+        registration_id = str(uuid.uuid4())
+
         registration_digest = compute_registration_digest(
             target_id=target_id,
             canonical_project_path=str(validation_result.canonical_path),
@@ -295,6 +298,7 @@ class RegistrationService:
         )
 
         registration = ProjectRegistration(
+            registration_id=registration_id,
             target_id=target_id,
             environment=environment,
             status=RegistrationStatus.REGISTERED,

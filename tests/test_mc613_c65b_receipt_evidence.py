@@ -303,6 +303,7 @@ def _legacy_request():
         contract_digest="d" * 64,
         lease_id="l" * 32,
         fencing_token=1,
+        action_protocol="legacy-v1",
     )
 
 

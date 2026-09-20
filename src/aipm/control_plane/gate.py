@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from aipm.control_plane.executor import ExecutionContract
 from aipm.control_plane.models import LifecycleState
+from aipm.control_plane.verification import ExecutionOutcome
+from aipm.control_plane.registration import RegistrationStatus, verify_registration_digest
 from aipm.control_plane.audit.sanitize import bounded_reference
 
 GATE_VERSION = "mc612-execution-gate-v1"
@@ -72,6 +74,36 @@ class GateCode(enum.Enum):
     HEALTH_CONTRACT_MISMATCH = "health_contract_mismatch"
     LEASE_INVALID = "lease_invalid"
     CONFIRMATION_INVALID = "confirmation_invalid"
+    # MC-6.16-D2.2 Gate B: Action protocol enforcement:
+    ACTION_PROTOCOL_MISSING = "action_protocol_missing"
+    ACTION_PROTOCOL_INVALID = "action_protocol_invalid"
+    ACTION_PROTOCOL_MISMATCH = "action_protocol_mismatch"
+    LEGACY_MUTATION_BLOCKED = "legacy_mutation_blocked"
+    RECONCILIATION_INELIGIBLE = "reconciliation_ineligible"
+    # MC-6.16-D2.2 Gate B3: Registration gate codes:
+    REGISTRATION_MISSING = "registration_missing"
+    REGISTRATION_ID_MISSING = "registration_id_missing"
+    REGISTRATION_DIGEST_MISSING = "registration_digest_missing"
+    REGISTRATION_REVOKED = "registration_revoked"
+    REGISTRATION_DISABLED = "registration_disabled"
+    REGISTRATION_INACTIVE = "registration_inactive"
+    REGISTRATION_ID_MISMATCH = "registration_id_mismatch"
+    REGISTRATION_DIGEST_MISMATCH = "registration_digest_mismatch"
+    REGISTRATION_TARGET_MISMATCH = "registration_target_mismatch"
+    REGISTRATION_ENVIRONMENT_MISMATCH = "registration_environment_mismatch"
+
+
+class OperationCategory(str, enum.Enum):
+    """Operation taxonomy: MUTATION vs RECONCILIATION vs PASSIVE_OBSERVATION.
+
+    Explicitly distinguish operation categories to enforce protocol semantics:
+    - MUTATION: State-changing mutation; legacy actions MUST NOT perform these.
+    - RECONCILIATION: State-observing read-back for UNKNOWN_OUTCOME actions.
+    - PASSIVE_OBSERVATION: Read-only queries, status inspection.
+    """
+    MUTATION = "mutation"
+    RECONCILIATION = "reconciliation"
+    PASSIVE_OBSERVATION = "passive_observation"
 
 
 def verify_service_evidence(
@@ -161,6 +193,7 @@ class ExecutionGateDecision:
     target_id: str
     evaluated_at: datetime
     gate_version: str = GATE_VERSION
+    action_protocol: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "action_id", bounded_reference(self.action_id, field="action id"))
@@ -168,6 +201,8 @@ class ExecutionGateDecision:
         object.__setattr__(self, "capability_version", bounded_reference(self.capability_version, field="capability version", maximum=64))
         object.__setattr__(self, "contract_digest", bounded_reference(self.contract_digest, field="contract digest", maximum=64))
         object.__setattr__(self, "target_id", bounded_reference(self.target_id, field="target id"))
+        if self.action_protocol is not None:
+            object.__setattr__(self, "action_protocol", bounded_reference(self.action_protocol, field="action protocol", maximum=32))
         if self.allowed != (self.reason is GateCode.ALLOWED):
             raise ValueError("Gate decision allowed/reason disagree")
 
@@ -185,15 +220,16 @@ class ExecutionGateDecision:
             "target_id": self.target_id,
             "evaluated_at": self.evaluated_at.isoformat(),
             "gate_version": self.gate_version,
+            "action_protocol": self.action_protocol,
         }
 
 
 class FinalExecutionGate:
     """Single authoritative pre-execution check; re-reads current world state."""
 
-    __slots__ = ("_actions", "_plans", "_confirmations", "_snapshots", "_kill_switches", "_capability_registry", "_service_evidence_verifier", "_initialized")
+    __slots__ = ("_actions", "_plans", "_confirmations", "_snapshots", "_kill_switches", "_capability_registry", "_service_evidence_verifier", "_registrations", "_initialized")
 
-    def __init__(self, *, actions, plans, confirmations, snapshots=None, kill_switches=None, capability_registry: CapabilityRegistry | None = None, service_evidence_verifier=None) -> None:
+    def __init__(self, *, actions, plans, confirmations, snapshots=None, kill_switches=None, capability_registry: CapabilityRegistry | None = None, service_evidence_verifier=None, registrations=None) -> None:
         if actions is None or not hasattr(actions, "get_action"):
             raise TypeError("gate requires the action repository")
         if plans is None or not hasattr(plans, "read"):
@@ -207,6 +243,16 @@ class FinalExecutionGate:
         object.__setattr__(self, "_kill_switches", kill_switches)
         object.__setattr__(self, "_capability_registry", capability_registry or __import__("aipm.control_plane.capabilities_registry", fromlist=["DEFAULT_CAPABILITY_REGISTRY"]).DEFAULT_CAPABILITY_REGISTRY)
         object.__setattr__(self, "_service_evidence_verifier", service_evidence_verifier)
+        reg_store = registrations
+        if reg_store is None and hasattr(actions, "_db"):
+            try:
+                from aipm.control_plane.storage.sqlite_store import SQLiteProjectRegistrationStore
+                reg_store = SQLiteProjectRegistrationStore(actions._db)
+            except Exception:
+                reg_store = None
+        elif reg_store is None and hasattr(actions, "registrations"):
+            reg_store = actions.registrations
+        object.__setattr__(self, "_registrations", reg_store)
         object.__setattr__(self, "_initialized", True)
 
     def __setattr__(self, name, value):
@@ -214,11 +260,52 @@ class FinalExecutionGate:
             raise AttributeError("FinalExecutionGate configuration is immutable")
         object.__setattr__(self, name, value)
 
-    def evaluate(self, contract: "ExecutionContract", *, now: datetime | None = None, service_evidence: Any | None = None, service_scope: tuple[str, ...] | None = None) -> ExecutionGateDecision:
+    def _is_reconciliation_eligible(self, action: Any) -> bool:
+        """Check if action has a durable reconciliation-eligible state or outcome.
+
+        Reconciliation is valid only when:
+        1. Action lifecycle state is RECONCILIATION_REQUIRED, OR
+        2. Action durable outcome is UNKNOWN_OUTCOME.
+        """
+        state = getattr(action, "state", None)
+        if state is LifecycleState.RECONCILIATION_REQUIRED or state == "reconciliation_required":
+            return True
+        if hasattr(state, "value") and state.value == "reconciliation_required":
+            return True
+
+        outcome = getattr(action, "outcome", None)
+        if outcome in ("unknown_outcome", ExecutionOutcome.UNKNOWN_OUTCOME):
+            return True
+        if hasattr(outcome, "value") and outcome.value == "unknown_outcome":
+            return True
+
+        if hasattr(self._actions, "outcome_for_action"):
+            action_id = getattr(action, "action_id", None)
+            if action_id:
+                repo_outcome = self._actions.outcome_for_action(action_id)
+                if repo_outcome in ("unknown_outcome", ExecutionOutcome.UNKNOWN_OUTCOME):
+                    return True
+                if hasattr(repo_outcome, "value") and repo_outcome.value == "unknown_outcome":
+                    return True
+
+        return False
+
+    def evaluate(
+        self,
+        contract: "ExecutionContract",
+        *,
+        now: datetime | None = None,
+        service_evidence: Any | None = None,
+        service_scope: tuple[str, ...] | None = None,
+        operation_category: OperationCategory = OperationCategory.MUTATION,
+        execution_binding: Any | None = None,
+        expected_protocol: str | None = None,
+    ) -> ExecutionGateDecision:
         """Re-read current world state and produce a typed gate decision."""
 
         moment = contract.expires_at if contract.expires_at.tzinfo is not None else contract.expires_at.replace(tzinfo=timezone.utc)
         evaluated_at = now if now is not None and now.tzinfo is not None else (now.replace(tzinfo=timezone.utc) if now else datetime.now(timezone.utc))
+        current_protocol: str | None = None
 
         def deny(reason: GateCode) -> ExecutionGateDecision:
             return ExecutionGateDecision(
@@ -231,6 +318,7 @@ class FinalExecutionGate:
                 kill_switch_epoch=contract.kill_switch_epoch,
                 target_id=contract.target_id,
                 evaluated_at=evaluated_at,
+                action_protocol=current_protocol,
             )
 
         try:
@@ -244,6 +332,120 @@ class FinalExecutionGate:
                 return deny(GateCode.STALE_ACTION_VERSION)
             if action.is_expired(evaluated_at):
                 return deny(GateCode.ACTION_EXPIRED)
+
+            # 1b. Action protocol enforcement (MC-6.16-D2.2 Gate B / AD-01)
+            protocol = getattr(action, "action_protocol", None)
+            if not protocol:
+                return deny(GateCode.ACTION_PROTOCOL_MISSING)
+            if not isinstance(protocol, str) or protocol not in ("legacy-v1", "mc616d2-v1"):
+                return deny(GateCode.ACTION_PROTOCOL_INVALID)
+            current_protocol = protocol
+
+            # Validate against expected protocol or execution binding if provided
+            req_protocol = expected_protocol
+            if execution_binding is not None:
+                binding_protocol = getattr(execution_binding, "action_protocol", None)
+                if req_protocol is not None and req_protocol != binding_protocol:
+                    return deny(GateCode.ACTION_PROTOCOL_MISMATCH)
+                req_protocol = binding_protocol
+
+            if req_protocol is not None and req_protocol != protocol:
+                return deny(GateCode.ACTION_PROTOCOL_MISMATCH)
+
+            # Operation taxonomy check: MUTATION vs RECONCILIATION vs PASSIVE_OBSERVATION
+            try:
+                op_cat = OperationCategory(operation_category)
+            except (ValueError, TypeError):
+                return deny(GateCode.INTERNAL_ERROR)
+
+            if protocol == "legacy-v1" and op_cat is OperationCategory.MUTATION:
+                return deny(GateCode.LEGACY_MUTATION_BLOCKED)
+
+            if op_cat is OperationCategory.RECONCILIATION:
+                if not self._is_reconciliation_eligible(action):
+                    return deny(GateCode.RECONCILIATION_INELIGIBLE)
+
+            # 1c. Modern mutation registration enforcement (MC-6.16-D2.2 Gate B3)
+            # Execution-binding boundary:
+            # Registration enforcement is scoped to modern mutations where an UpdateExecutionBinding
+            # is present, because internal MC-6.12 UPDATE_PROJECT_PLAN gate calls do not carry an
+            # UpdateExecutionBinding.
+            #
+            # When an execution binding is present for a modern mutation, registration verification
+            # is mandatory:
+            # - missing binding registration_id => deny (REGISTRATION_ID_MISSING)
+            # - missing binding registration_digest => deny (REGISTRATION_DIGEST_MISSING)
+            # - missing authoritative registration => deny (REGISTRATION_MISSING)
+            # - revoked registration => deny (REGISTRATION_REVOKED)
+            # - disabled registration => deny (REGISTRATION_DISABLED)
+            # - inactive registration => deny (REGISTRATION_INACTIVE)
+            # - registration ID mismatch => deny (REGISTRATION_ID_MISMATCH)
+            # - registration digest mismatch => deny (REGISTRATION_DIGEST_MISMATCH)
+            # - target mismatch => deny (REGISTRATION_TARGET_MISMATCH)
+            # - environment mismatch => deny (REGISTRATION_ENVIRONMENT_MISMATCH)
+            # - tampered authoritative registration => deny (REGISTRATION_DIGEST_MISMATCH)
+            if protocol == "mc616d2-v1" and op_cat is OperationCategory.MUTATION:
+                if execution_binding is not None:
+                    binding_reg_id = getattr(execution_binding, "registration_id", None)
+                    if not binding_reg_id:
+                        return deny(GateCode.REGISTRATION_ID_MISSING)
+
+                    binding_reg_digest = getattr(execution_binding, "registration_digest", None)
+                    if not binding_reg_digest:
+                        return deny(GateCode.REGISTRATION_DIGEST_MISSING)
+
+                    if self._registrations is None:
+                        return deny(GateCode.REGISTRATION_MISSING)
+
+                    # Lookup authoritative registration for contract target and environment
+                    target_id = contract.target_id
+                    environment = contract.environment
+
+                    authoritative_reg = self._registrations.get(target_id, environment)
+
+                    if authoritative_reg is None:
+                        # Check if a registration exists by ID (e.g. historical REVOKED or target/env mismatch)
+                        reg_by_id = None
+                        if hasattr(self._registrations, "get_by_registration_id"):
+                            reg_by_id = self._registrations.get_by_registration_id(binding_reg_id)
+
+                        if reg_by_id is not None:
+                            status_val = reg_by_id.status.value if hasattr(reg_by_id.status, "value") else str(reg_by_id.status)
+                            if status_val == "REVOKED":
+                                return deny(GateCode.REGISTRATION_REVOKED)
+                            if status_val == "DISABLED":
+                                return deny(GateCode.REGISTRATION_DISABLED)
+                            if reg_by_id.target_id != target_id:
+                                return deny(GateCode.REGISTRATION_TARGET_MISMATCH)
+                            if reg_by_id.environment != environment:
+                                return deny(GateCode.REGISTRATION_ENVIRONMENT_MISMATCH)
+
+                        return deny(GateCode.REGISTRATION_MISSING)
+
+                    # Registration lifecycle check
+                    status_val = authoritative_reg.status.value if hasattr(authoritative_reg.status, "value") else str(authoritative_reg.status)
+                    if status_val == "REVOKED":
+                        return deny(GateCode.REGISTRATION_REVOKED)
+                    if status_val == "DISABLED":
+                        return deny(GateCode.REGISTRATION_DISABLED)
+                    if not authoritative_reg.is_active():
+                        return deny(GateCode.REGISTRATION_INACTIVE)
+
+                    # Environment and target isolation
+                    if authoritative_reg.environment != environment:
+                        return deny(GateCode.REGISTRATION_ENVIRONMENT_MISMATCH)
+                    if authoritative_reg.target_id != target_id:
+                        return deny(GateCode.REGISTRATION_TARGET_MISMATCH)
+
+                    # Binding match
+                    if binding_reg_id != authoritative_reg.registration_id:
+                        return deny(GateCode.REGISTRATION_ID_MISMATCH)
+                    if binding_reg_digest != authoritative_reg.registration_digest:
+                        return deny(GateCode.REGISTRATION_DIGEST_MISMATCH)
+
+                    # Registration digest integrity verification (tamper detection)
+                    if not verify_registration_digest(authoritative_reg):
+                        return deny(GateCode.REGISTRATION_DIGEST_MISMATCH)
 
             # 2. Contract digest matches durable binding
             stored = self._actions.get_contract_evidence(action_id=contract.action_id)
@@ -384,6 +586,7 @@ class FinalExecutionGate:
                 kill_switch_epoch=contract.kill_switch_epoch,
                 target_id=contract.target_id,
                 evaluated_at=evaluated_at,
+                action_protocol=protocol,
             )
         except (TypeError, ValueError, AttributeError) as exc:
             return ExecutionGateDecision(

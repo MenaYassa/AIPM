@@ -109,6 +109,10 @@ class ExecutionRequest:
 
     MC-6.15-C.3: ``service_scope`` carries the already-authorized canonical
     derived execution scope for Compose service updates.
+
+    MC-6.16-D2.2: ``action_protocol`` carries the trusted action protocol
+    from the Control Plane ActionLifecycle, transmitted as immutable
+    execution evidence. Must be exactly 'legacy-v1' or 'mc616d2-v1'.
     """
 
     action_id: str
@@ -117,11 +121,16 @@ class ExecutionRequest:
     contract_digest: str
     lease_id: str
     fencing_token: int
+    action_protocol: str
     plan_digest: str | None = None
     confirmation_id: str | None = None
     service_scope: tuple[str, ...] | None = None
+    registration_id: str | None = None
+    registration_digest: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.action_protocol, str) or self.action_protocol not in ("legacy-v1", "mc616d2-v1"):
+            raise ExecutorIPCError(f"Invalid action_protocol: must be 'legacy-v1' or 'mc616d2-v1', got {self.action_protocol!r}")
         if self.service_scope is not None:
             validated = validate_service_scope(self.service_scope)
             if validated != self.service_scope:
@@ -135,7 +144,7 @@ class ExecutionRequest:
             raise ExecutorIPCError("Malformed JSON request") from exc
         if not isinstance(payload, dict):
             raise ExecutorIPCError("Request must be a JSON object")
-        required = {"action_id", "capability_id", "target_id", "contract_digest", "lease_id", "fencing_token"}
+        required = {"action_id", "capability_id", "target_id", "contract_digest", "lease_id", "fencing_token", "action_protocol"}
         if not required.issubset(payload):
             missing = required - set(payload)
             raise ExecutorIPCError(f"Missing required fields: {missing}")
@@ -144,6 +153,8 @@ class ExecutionRequest:
         plan_digest = payload.get("plan_digest")
         confirmation_id = payload.get("confirmation_id")
         service_scope_raw = payload.get("service_scope")
+        registration_id = payload.get("registration_id")
+        registration_digest = payload.get("registration_digest")
         capability_id = payload["capability_id"]
         if capability_id in (CAPABILITY_EXECUTE_UPDATE_PLAN, CAPABILITY_EXECUTE_SERVICE_UPDATE):
             if not isinstance(plan_digest, str) or not plan_digest:
@@ -156,11 +167,15 @@ class ExecutionRequest:
         for name, value, size in (
             ("plan_digest", plan_digest, 64),
             ("confirmation_id", confirmation_id, 32),
+            ("registration_digest", registration_digest, 64),
         ):
             if value is None:
                 continue
             if not isinstance(value, str) or len(value) != size or not set(value) <= _HEX:
                 raise ExecutorIPCError(f"Invalid {name}")
+        if registration_id is not None:
+            if not isinstance(registration_id, str) or not registration_id or len(registration_id) > 128:
+                raise ExecutorIPCError("Invalid registration_id")
         service_scope: tuple[str, ...] | None = None
         if service_scope_raw is not None:
             service_scope = validate_service_scope(service_scope_raw)
@@ -177,6 +192,9 @@ class ExecutionRequest:
         fencing_token = payload["fencing_token"]
         if not isinstance(fencing_token, int) or isinstance(fencing_token, bool):
             raise ExecutorIPCError("Invalid fencing_token")
+        action_protocol = payload["action_protocol"]
+        if not isinstance(action_protocol, str) or action_protocol not in ("legacy-v1", "mc616d2-v1"):
+            raise ExecutorIPCError(f"Invalid action_protocol: must be 'legacy-v1' or 'mc616d2-v1', got {action_protocol!r}")
 
         return cls(
             action_id=action_id,
@@ -185,9 +203,12 @@ class ExecutionRequest:
             contract_digest=contract_digest,
             lease_id=lease_id,
             fencing_token=fencing_token,
+            action_protocol=action_protocol,
             plan_digest=plan_digest if isinstance(plan_digest, str) else None,
             confirmation_id=confirmation_id if isinstance(confirmation_id, str) else None,
             service_scope=service_scope,
+            registration_id=registration_id if isinstance(registration_id, str) else None,
+            registration_digest=registration_digest if isinstance(registration_digest, str) else None,
         )
 
     def to_json(self) -> bytes:
@@ -198,6 +219,7 @@ class ExecutionRequest:
             "contract_digest": self.contract_digest,
             "lease_id": self.lease_id,
             "fencing_token": self.fencing_token,
+            "action_protocol": self.action_protocol,
         }
         # Legacy frames stay byte-compatible with the deployed executor.
         if self.plan_digest is not None:
@@ -206,6 +228,10 @@ class ExecutionRequest:
             payload["confirmation_id"] = self.confirmation_id
         if self.service_scope is not None:
             payload["service_scope"] = list(self.service_scope)
+        if self.registration_id is not None:
+            payload["registration_id"] = self.registration_id
+        if self.registration_digest is not None:
+            payload["registration_digest"] = self.registration_digest
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 

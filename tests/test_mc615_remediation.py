@@ -93,6 +93,7 @@ def test_executor_handler_routes_service_update_capability(tmp_path, monkeypatch
         contract_digest="c" * 64,
         fencing_token="f" * 16,
         lease_id="l" * 16,
+        action_protocol="mc616d2-v1",
     )
     resp = srv.handler(req)
     assert resp.outcome == "success"

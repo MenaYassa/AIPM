@@ -91,6 +91,7 @@ def _binding():
         contract_digest="c" * 64,
         lease_id="e" * 32,
         fencing_token=7,
+        action_protocol="mc616d2-v1",
     )
 
 
@@ -115,6 +116,7 @@ def _request(**overrides):
         "contract_digest": "c" * 64,
         "lease_id": "l" * 32,
         "fencing_token": 1,
+        "action_protocol": "mc616d2-v1",
         "plan_digest": "b" * 64,
         "confirmation_id": "d" * 32,
     }

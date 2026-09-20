@@ -218,6 +218,7 @@ def test_duplicate_registration_rejected(registration_store):
     """Duplicate registrations should be rejected."""
     now = datetime.now(timezone.utc)
     registration = ProjectRegistration(
+        registration_id="550e8400-e29b-41d4-a716-446655440200",  # AD-03: Fixed test UUID
         target_id="duplicate-test",
         environment="production",
         status=RegistrationStatus.REGISTERED,
@@ -241,6 +242,7 @@ def test_production_staging_isolation(registration_store):
     now = datetime.now(timezone.utc)
 
     prod_registration = ProjectRegistration(
+        registration_id="550e8400-e29b-41d4-a716-446655440201",  # AD-03: Fixed test UUID
         target_id="multi-env-test",
         environment="production",
         status=RegistrationStatus.REGISTERED,
@@ -253,6 +255,7 @@ def test_production_staging_isolation(registration_store):
     )
 
     staging_registration = ProjectRegistration(
+        registration_id="550e8400-e29b-41d4-a716-446655440202",  # AD-03: Fixed test UUID
         target_id="multi-env-test",
         environment="staging",
         status=RegistrationStatus.REGISTERED,
@@ -280,6 +283,7 @@ def test_revoked_to_registered_transition_prevented(registration_store):
     """Revoked registrations should not be allowed to transition back to registered."""
     now = datetime.now(timezone.utc)
     registration = ProjectRegistration(
+        registration_id="550e8400-e29b-41d4-a716-446655440203",  # AD-03: Fixed test UUID
         target_id="lifecycle-test",
         environment="production",
         status=RegistrationStatus.REGISTERED,
@@ -313,6 +317,7 @@ def test_registration_audit_event_emitted(db):
 
     now = datetime.now(timezone.utc)
     registration = ProjectRegistration(
+        registration_id="550e8400-e29b-41d4-a716-446655440204",  # AD-03: Fixed test UUID
         target_id="audit-test",
         environment="production",
         status=RegistrationStatus.REGISTERED,
@@ -348,6 +353,7 @@ def test_revocation_audit_event_emitted(db):
 
     now = datetime.now(timezone.utc)
     registration = ProjectRegistration(
+        registration_id="550e8400-e29b-41d4-a716-446655440205",  # AD-03: Fixed test UUID
         target_id="revoke-audit-test",
         environment="production",
         status=RegistrationStatus.REGISTERED,

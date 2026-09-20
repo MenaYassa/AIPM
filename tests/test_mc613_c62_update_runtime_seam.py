@@ -496,6 +496,7 @@ def _ipc_request(**overrides):
         "contract_digest": "d" * 64,
         "lease_id": "l" * 32,
         "fencing_token": 1,
+        "action_protocol": "mc616d2-v1",
     }
     values.update(overrides)
     return ExecutionRequest(**values)

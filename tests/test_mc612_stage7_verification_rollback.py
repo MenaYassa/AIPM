@@ -631,6 +631,7 @@ def test_execution_states_are_now_backed_but_still_guarded():
         requester_subject="local-owner",
         approver_subject="local-owner",
         idempotency_key="idem-001",
+        action_protocol="mc616d2-v1",
         created_at=NOW,
         expires_at=NOW + timedelta(minutes=15),
     )

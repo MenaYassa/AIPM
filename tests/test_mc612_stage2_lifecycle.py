@@ -21,6 +21,7 @@ def lifecycle(**overrides):
         "state": LifecycleState.REQUESTED,
         "requester_subject": "local-owner",
         "idempotency_key": "idem-001",
+        "action_protocol": "mc616d2-v1",
         "created_at": NOW,
         "expires_at": NOW + timedelta(minutes=15),
     }
@@ -109,3 +110,21 @@ def test_lifecycle_rejects_unsupported_operation_and_bad_digest():
         lifecycle(operation="other")
     with pytest.raises(LifecycleError):
         lifecycle(plan_digest="not-a-digest")
+
+
+def test_lifecycle_rejects_missing_action_protocol():
+    """ActionLifecycle construction without an explicit action_protocol must be rejected."""
+    values = {
+        "action_id": "action-001",
+        "plan_id": "plan-001",
+        "plan_digest": "a" * 64,
+        "operation": OperationKind.UPDATE_PROJECT_PLAN,
+        "scope": ActionScope("project-demo", "staging", "policy-v1"),
+        "state": LifecycleState.REQUESTED,
+        "requester_subject": "local-owner",
+        "idempotency_key": "idem-001",
+        "created_at": NOW,
+        "expires_at": NOW + timedelta(minutes=15),
+    }
+    with pytest.raises(TypeError, match="action_protocol"):
+        ActionLifecycle(**values)

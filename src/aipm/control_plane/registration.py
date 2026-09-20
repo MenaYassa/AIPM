@@ -26,6 +26,7 @@ class RegistrationError(Exception):
 
 @dataclass(frozen=True)
 class ProjectRegistration:
+    registration_id: str
     target_id: str
     environment: str
     status: RegistrationStatus
@@ -119,3 +120,44 @@ def compute_file_hash(file_path: str) -> str:
         return hasher.hexdigest()
     except (OSError, IOError) as exc:
         raise RegistrationError(f"Unable to hash file {file_path}: {exc}") from exc
+
+
+def verify_registration_digest(
+    registration: ProjectRegistration,
+    compose_file_hashes: list[str] | None = None,
+) -> bool:
+    """Verify that a registration's digest is valid and matches its facts.
+
+    Validates:
+    1. Digest is structurally valid (64 lowercase hex characters).
+    2. If compose_file_hashes are available (either on the object or passed in),
+       recomputes the canonical digest using compute_registration_digest and
+       verifies exact match.
+    """
+    digest = getattr(registration, "registration_digest", None)
+    if not isinstance(digest, str) or len(digest) != 64:
+        return False
+    if not all(c in "0123456789abcdef" for c in digest):
+        return False
+
+    hashes = getattr(registration, "compose_file_hashes", None)
+    if compose_file_hashes is not None:
+        hashes = compose_file_hashes
+
+    if hashes is not None:
+        reg_at = getattr(registration, "registered_at", None)
+        reg_at_iso = reg_at.isoformat() if hasattr(reg_at, "isoformat") else str(reg_at)
+        expected = compute_registration_digest(
+            target_id=registration.target_id,
+            canonical_project_path=registration.canonical_project_path,
+            runtime_mode=registration.runtime_mode,
+            environment=registration.environment,
+            compose_project_name=registration.compose_project_name,
+            compose_file_hashes=hashes,
+            registered_at_iso=reg_at_iso,
+            registration_version=getattr(registration, "registration_version", "mc616-reg-v1"),
+        )
+        if digest != expected:
+            return False
+
+    return True
