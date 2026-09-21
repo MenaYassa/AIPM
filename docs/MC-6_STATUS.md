@@ -1,15 +1,15 @@
 # AIPM Mission Control Status and Roadmap
 
-> **Current-state notice — 2026-09-18:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` (`origin/main`), carrying the completed MC-6.15 selective Compose service update capability.
+> **Current-state notice — 2026-09-20:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `a47da59120a04af6191e3dd98931e07a93dbdb16` (`origin/main`), carrying the completed MC-6.16-D2.2 execution registration gate capability and MC-6.15 selective Compose service update capability.
 
 
-**Status date:** 2026-09-18
+**Status date:** 2026-09-20
 
 **Repository:** [MenaYassa/AIPM](https://github.com/MenaYassa/AIPM)
 
-**Checkpoint:** `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` — `feat(control-plane): integrate selective service updates (MC-6.15-C.4)`
+**Checkpoint:** `a47da59120a04af6191e3dd98931e07a93dbdb16` — `MC-6.16-D2.2 enforce execution registration gates`
 
-**Remote parity:** `HEAD == origin/main == remote main`; current tracked main is synchronized. Historical Phase 4E production validation remains recorded; fresh web evidence is preserved separately.
+**Remote parity:** `HEAD == origin/main == remote main`; current tracked main is synchronized. Implementation is published to GitHub; production VPS deployment has NOT occurred and production execution remains fail-closed.
 
 ## Executive summary
 
@@ -55,6 +55,18 @@ The current committed checkpoint completes **MC-6.13 live read-only Phase 4E** i
 | MC-6.13 Phase 4C.3 | Complete-evidence production validation confirming six points / 300 seconds / 60-second cadence, zero uncertainties, zero findings, and zero recommendations for the observed low-pressure case. | Validated |
 | MC-6.13 Phase 4E | Additive bounded `resource_history_summary` derived from preserved typed history evidence and rendered separately from findings/recommendations; no `maximum_gap` exposure. | Complete and pushed at `ead26b6` |
 | MC-6.15 | Selective Compose service updates: candidate intelligence, deterministic per-service planning, LEAF_INDEPENDENT and ATOMIC_TIGHT scope derivation, FinalExecutionGate TOCTOU verification, bounded executor IPC, mandatory `--no-deps`, independent post-mutation verification, MutationReceiptStore idempotency, fail-closed negative posture, staging proof, and regression certification. | Complete at `c3fb5a0` (Audited in C.6: PASS) |
+| MC-6.16-C / D2.1 | Production registration foundation: `ProjectRegistration` model, SQLite store, immutable UUID4 `registration_id` primary key, unique active index, deterministic SHA-256 digests, and transactional v6→v7 migration. | Complete & published at `151d101` (NOT deployed) |
+| MC-6.16-D2.2 | Execution registration gate enforcement: `action_protocol` classification (`legacy-v1` vs `mc616d2-v1`), model default removed, transactional v7→v8 migration, `UpdateExecutionBinding` propagation, and authoritative `FinalExecutionGate` anti-forgery enforcement across 28 files and 200/200 integration tests. | Complete & published at `a47da59` (NOT deployed) |
+
+## MC-6.16 Execution Registration Gates (Published / Not Deployed)
+
+MC-6.16 enforces authoritative production registration identity and protocol boundary controls on all execution mutations:
+
+1. **Publication vs Deployment:** Published on GitHub `origin/main` at `a47da59120a04af6191e3dd98931e07a93dbdb16`. Live deployment to production VPS services has NOT occurred. All production execution remains strictly fail-closed.
+2. **Registration Authority:** Requires explicit, active `ProjectRegistration` records with immutable UUID4 `registration_id` and tamper-evident SHA-256 digests.
+3. **Action Protocol Classification:** Separates legacy actions (`legacy-v1`) from modern registration-bound actions (`mc616d2-v1`). Legacy mutations are unconditionally blocked from execution.
+4. **Execution-Binding Propagation:** `UpdateExecutionBinding` resolves registration identity and digest from the registration store, propagating them over IPC to the executor without caller substitution.
+5. **Authoritative Gate Enforcement:** `FinalExecutionGate` evaluates active registration status and digest integrity immediately prior to mutation, failing closed if registration is missing, disabled, revoked, or tampered. Internal MC-6.12 CAS plan gate updates without execution binding evaluate cleanly.
 
 ## MC-6.15 Selective Compose Service Updates
 

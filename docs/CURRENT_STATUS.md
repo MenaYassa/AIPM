@@ -1,10 +1,10 @@
 # AIPM Current Status
 
-**Status date:** 2026-09-18 (supersedes earlier status dates)
+**Status date:** 2026-09-20 (supersedes earlier status dates)
 
-**Canonical repository checkpoint:** `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` (published `origin/main`; carries MC-6.15 selective Compose service updates, the MC-6.12 bounded systemd update runtime, the privilege broker client, and the C1–C5 update-security lineage).
+**Canonical repository checkpoint:** `a47da59120a04af6191e3dd98931e07a93dbdb16` (published `origin/main`; carries MC-6.16-D2.2 execution registration gates, action protocol classification, schema v8, production registration foundation, MC-6.15 selective Compose service updates, the MC-6.12 bounded systemd update runtime, the privilege broker client, and the C1–C5 update-security lineage).
 
-**Repository parity:** `HEAD` matches `origin/main` at `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3`. MC-6.15 end-to-end staging execution proof completed with PASS on disposable staging with zero production container mutations.
+**Repository parity:** `HEAD` matches `origin/main` at `a47da59120a04af6191e3dd98931e07a93dbdb16`. MC-6.16-D2.2 execution registration gate verification completed with PASS (200/200 integration tests passing, Ruff clean, zero whitespace warnings). **PUBLISHED TO GITHUB; NOT DEPLOYED TO PRODUCTION RUNTIME.**
 
 ## Purpose of this documentThis is the canonical current-state reconciliation for the AIPM repository and Mission Control. Historical design and completion documents remain preserved as audit records, but their older checkpoint and “planned/future” wording must be interpreted through this document. The detailed read-only public inspection is preserved in [`LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md).
 
@@ -51,6 +51,29 @@ This section is the authority on the dashboard's authentication perimeter. It su
 | MC-6.13 Phase 2/3/4A/4B/4C/4C.1/4C.2/4C.3/4D/4E | Complete through bounded read-only Phase 4E | Published advisor domain, transport, fixture/live orchestration, telemetry-owned export/adapter, boundary alignment, complete-evidence validation, and additive resource-history summary |
 | MC-6.13 Privilege Broker | Complete & operational in production | Compiled root-owned helper (`aipm-systemd-restart`), exact sudoers binding (`--unit=aipm-dashboard.service --verb=try-restart`), unprivileged `PrivilegeBrokerClient`, and two-layer `SystemdVerifier` proven in production |
 | MC-6.15 | Complete (Phases A.3–C.6) | Selective Compose service updates: candidate intelligence, deterministic per-service planning, LEAF_INDEPENDENT & ATOMIC_TIGHT scope derivation, FinalExecutionGate TOCTOU verification, bounded executor IPC, mandatory `docker compose up -d --no-deps`, independent post-mutation verification, MutationReceiptStore idempotency, fail-closed negative posture, staging proof, and regression certification. |
+| MC-6.16-C / D2.1 | Complete & published in repository | Production registration foundation (`151d101`): `ProjectRegistration` model, SQLite store, UUID4 `registration_id` primary key, unique active partial index, deterministic registration digests with tamper verification, and transactional v6→v7 database migration. Published on `main`; NOT deployed. |
+| MC-6.16-D2.2 | Complete & published in repository | Execution registration gate enforcement (`a47da59`): `action_protocol` classification (`legacy-v1` vs `mc616d2-v1`), model default removed, transactional v7→v8 migration, `UpdateExecutionBinding` propagation, and authoritative `FinalExecutionGate` anti-forgery enforcement across 28 files and 200/200 integration tests. Published on `main`; NOT deployed. |
+
+## MC-6.16-D2.2 Execution Registration Gate Enforcement (Published / Not Deployed)
+
+### Status & Verification
+- **Repository Status:** COMPLETE — PASS (Published to `origin/main` at `a47da59120a04af6191e3dd98931e07a93dbdb16`)
+- **Deployment Status:** **NOT DEPLOYED**. Live production runtime on the host VPS remains on the previously verified pre-MC-6.16 build. No service restarts, container re-deployments, or live database migrations have been executed on the production host. Production execution remains strictly **FAIL-CLOSED**.
+- **Integration Test Certification:** 200/200 integration tests passed (`test_mc616d2_b1_ipc_transport.py`, `test_mc616d2_b2_gate_protocol.py`, `test_mc616d2_b3_gate_registration.py`, `test_mc616d2_v7_v8_migration.py`, `test_mc616_production_registration.py`, `test_mc612_stage2_lifecycle.py`, `test_mc612_stage7_verification_rollback.py`, `test_mc612_stage8_executor.py`, `test_mc612_stage9_transport.py`, `test_mc613_c2_transport_updates.py`).
+- **Static Analysis & Formatting:** `ruff check .` clean (0 errors); `git diff --check` clean (0 whitespace warnings).
+
+### Key Architectural Invariants
+1. **Registration Identity & Authority (AD-03):** `ProjectRegistration` defines an immutable UUID4 `registration_id` as primary key. An active partial unique index (`ON project_registrations (target_id, environment) WHERE status IN ('REGISTERED', 'DISABLED')`) guarantees at most one active registration per target/environment. Historical revoked registrations are permanently preserved and cannot authorize actions.
+2. **Action Protocol Classification (AD-01):** `ActionLifecycle.action_protocol` has no model default; direct construction without explicit protocol fails immediately (`TypeError`). The trusted Control Plane explicitly assigns `"mc616d2-v1"` at action creation. Database rehydration strictly validates protocol presence and fails closed on corrupt/missing data.
+3. **Transactional Database Migrations:**
+   - **v6→v7:** Reconstructs `project_registrations` with `registration_id TEXT PRIMARY KEY`, backfilling UUIDs for existing rows while preserving all audit facts.
+   - **v7→v8:** Transactionally rebuilds `actions` with `action_protocol TEXT NOT NULL` inside an immediate transaction, classifying pre-existing actions as `legacy-v1`. Idempotent and fails closed on partial states.
+4. **Execution-Binding Propagation:** `UpdateExecutionBinding` binds `action_protocol`, `registration_id`, and `registration_digest` authoritatively resolved from the registration store by target and environment. These values cross IPC to the executor without caller substitution.
+5. **Authoritative FinalExecutionGate Enforcement:**
+   - Modern mutations (`action_protocol == "mc616d2-v1"`) with an execution binding strictly require an active, matching, untampered registration. Fails closed on missing, revoked, disabled, inactive, or mismatched target/environment/digest registrations.
+   - Legacy mutations (`legacy-v1` + `MUTATION`) remain unconditionally denied (`LEGACY_MUTATION_BLOCKED`).
+   - Genuine legacy reconciliations retain B2.1 semantics (permitted only for durable `RECONCILIATION_REQUIRED` states or `UNKNOWN_OUTCOME`).
+   - Execution-binding boundary contract: internal MC-6.12 CAS plan gate updates without execution binding evaluate purely against the plan gate without forcing production registration checks.
 
 ## MC-6.15 Selective Compose Service Updates (Final Closure)
 

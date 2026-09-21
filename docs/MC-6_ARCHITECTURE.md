@@ -1,6 +1,6 @@
 # AIPM Mission Control MC-6 Architecture
 
-> **Current-state notice — 2026-09-18:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` (`origin/main`), carrying the completed MC-6.15 selective Compose service update capability.
+> **Current-state notice — 2026-09-20:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `a47da59120a04af6191e3dd98931e07a93dbdb16` (`origin/main`), carrying the completed MC-6.16-D2.2 execution registration gate capability and MC-6.15 selective Compose service update capability.
 
 
 ## Status and scope
@@ -257,3 +257,56 @@ MC-6.15 completes the architecture for selective, isolated updates of Docker Com
    - Atomic partial failures map to `RECONCILIATION_REQUIRED` / `UNKNOWN_OUTCOME`.
    - Blind retries and automatic rollbacks are strictly forbidden to protect persistent storage and volumes.
    - Request models enforce `extra = "forbid"`, returning HTTP 422 for unauthorized browser inputs.
+
+## MC-6.16 Execution Registration Authority and Action Protocol Architecture
+
+MC-6.16 establishes authoritative production registration identity, explicit action protocol classification, and tamper-resistant execution gate enforcement across the control and execution planes:
+
+### 1. Registration Identity & Store Architecture (AD-03 / MC-6.16-C)
+- **Model & Identity:** `ProjectRegistration` models a validated deployment target with an immutable UUID4 `registration_id` as primary key. Targets without an explicit `registration_id` fail validation immediately.
+- **Partial Unique Index:** SQLite store enforces active uniqueness via:
+  `CREATE UNIQUE INDEX idx_project_registrations_active_target ON project_registrations(target_id, environment) WHERE status IN ('REGISTERED', 'DISABLED')`.
+  Multiple revoked (`REVOKED`) registrations are preserved indefinitely for audit history, but cannot be reused or authorize execution.
+- **Deterministic Digest:** Every registration generates a canonical SHA-256 digest (`registration_digest`) computed over sorted core metadata (`target_id`, `environment`, `runtime_mode`, `project_root`, `config_path`). The store re-verifies this digest on every query and raises `RegistrationIntegrityError` if corruption or tampering is detected.
+- **State Transitions:** Registrations transition deterministically: `PENDING_VERIFICATION` -> `REGISTERED` -> `DISABLED` -> `REVOKED`. Only `REGISTERED` authorizations permit mutation dispatch.
+
+### 2. Action Protocol Classification (AD-01 / MC-6.16-D2.2)
+- **Explicit Protocol Requirement:** `ActionLifecycle.action_protocol` has no default value. Instantiating an action without an explicit protocol raises `TypeError`.
+- **Classification Taxonomy:**
+  - `"mc616d2-v1"`: Modern, registration-aware actions issued by the trusted Control Plane.
+  - `"legacy-v1"`: Pre-existing actions created before MC-6.16 registration gate enforcement.
+- **Operational Taxonomy:**
+  - `MUTATION`: State-altering updates (e.g. `SERVICE_RESTART`, `IMAGE_PULL`, `CONTAINER_RECREATE`). Legacy mutations are strictly forbidden (`LEGACY_MUTATION_BLOCKED`).
+  - `RECONCILIATION`: Recovery passes for failed or ambiguous actions (`UNKNOWN_OUTCOME`, `RECONCILIATION_REQUIRED`).
+  - `PASSIVE_OBSERVATION`: Read-only queries, evaluations, or inspections that never alter host state.
+
+### 3. Transactional Database Schema Migrations (v6 -> v7 -> v8)
+- **v6 -> v7 Migration:** Safely migrates `project_registrations` table from composite natural keys to `registration_id TEXT PRIMARY KEY`, backfilling UUIDs for existing rows while preserving all audit facts.
+- **v7 -> v8 Migration:** Transactionally rebuilds the `actions` table with `action_protocol TEXT NOT NULL` inside an immediate transaction:
+  - Copies existing rows, assigning `"legacy-v1"` to pre-existing actions.
+  - Enforces NOT NULL at the physical SQLite schema layer.
+  - Fully idempotent: re-running against v8 returns immediately without changes.
+
+### 4. End-to-End Chain of Custody & Execution-Binding Propagation
+The execution authorization pipeline strictly adheres to the chain:
+```text
+ProjectRegistration
+  |--> ActionLifecycle (action_protocol: "mc616d2-v1")
+        |--> UpdateExecutionBinding (registration_id, registration_digest, action_protocol)
+              |--> FinalExecutionGate (registration identity & digest verification)
+                    |--> ExecutionRequest (bounded IPC to Executor)
+```
+- `UpdateExecutionBinding` captures the registration identity and digest authoritatively resolved by target and environment from the registration store.
+- These values are propagated across IPC to the executor without caller substitution.
+
+### 5. FinalExecutionGate Authoritative Registration Enforcement
+Prior to executing any mutation, `FinalExecutionGate` re-queries the registration store and evaluates:
+1. **Registration Presence:** Fails closed (`REGISTRATION_NOT_FOUND`) if no registration exists for the target/environment.
+2. **Registration Status:** Fails closed if the registration is `REVOKED`, `DISABLED`, or `PENDING_VERIFICATION`.
+3. **Identity Binding:** Fails closed (`REGISTRATION_MISMATCH`) if the binding's `registration_id` does not match the active registration record.
+4. **Anti-Tamper Digest Verification:** Fails closed (`REGISTRATION_TAMPERED`) if the bound digest differs from the live registration store digest.
+5. **Boundary Contract:** Internal MC-6.12 CAS plan gate updates without execution bindings evaluate cleanly against the plan gate without forcing production registration checks.
+
+### 6. Verification and Deployment State
+- **Verification:** 200/200 integration tests passing, including full registration lifecycle and anti-forgery gate suites.
+- **Operational Deployment State:** This architecture is **PUBLISHED to GitHub main** at commit `a47da59120a04af6191e3dd98931e07a93dbdb16`. It is **NOT DEPLOYED** to the live production VPS services (`aipm-dashboard.service`, `aipm-telemetry.service`). Production execution remains strictly fail-closed.

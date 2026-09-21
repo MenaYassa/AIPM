@@ -1,6 +1,6 @@
 # AIPM Mission Control
 
-> **Current-state notice — 2026-09-18:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `c3fb5a00ad4d352be91aa5f6b0fc1949c7b8ead3` (`origin/main`), carrying the completed MC-6.15 selective Compose service update capability.
+> **Current-state notice — 2026-09-20:** This document is retained as part of the AIPM documentation record. Its historical design or milestone narrative remains valid as historical context, but current completion, publication, deployment, and live-observation claims are superseded by [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) and [`docs/LIVE_VPANEL_READONLY_FINDINGS.md`](LIVE_VPANEL_READONLY_FINDINGS.md). The current tracked repository is synchronized at `a47da59120a04af6191e3dd98931e07a93dbdb16` (`origin/main`), carrying the completed MC-6.16-D2.2 execution registration gate capability and MC-6.15 selective Compose service update capability.
 
 
 Mission Control is the Handbook 2.0 capability of AIPM. MC-1.5 keeps the current interface and JSON contract while moving infrastructure inspection into typed, read-only AIPM telemetry services.

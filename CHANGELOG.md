@@ -8,6 +8,11 @@ The project follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 No version tags exist in this repository, so no work has yet been part of a tagged release; everything below is unreleased by that definition. No unreleased features are claimed beyond the published commits cited.
 
+### Added — Mission Control execution registration gates and production foundation
+
+- **Execution registration gate enforcement (MC-6.16-D2.2)** (2026-09-20, `a47da59` — "MC-6.16-D2.2 enforce execution registration gates"): Enforced strict registration identity and protocol boundary controls on all execution mutations across 28 files (+3362/-23 lines). Action protocol (`action_protocol`) model default removed to require explicit assignment (`"mc616d2-v1"` for modern control plane, `"legacy-v1"` for pre-existing actions). Database schema transactionally upgraded to v8 with physical NOT NULL enforcement. Execution-binding propagation added to `UpdateExecutionBinding` with authoritative registration ID and digest. `FinalExecutionGate` enforces that modern mutations fail closed on missing, disabled, revoked, inactive, or tampered registrations, while legacy mutations are unconditionally blocked (`LEGACY_MUTATION_BLOCKED`). CAS plan gate updates without execution binding evaluate cleanly. Certified by 200/200 integration tests passing and clean static analysis. Published to GitHub repository `main`; NOT deployed to production VPS runtime.
+- **Production registration foundation (MC-6.16-C / D2.1)** (2026-09-20, `151d101` — "feat(control-plane): add production registration foundation"): Added `ProjectRegistration` model with immutable UUID4 `registration_id` primary key, SQLite registration store with active target/environment partial unique index (`WHERE status IN ('REGISTERED', 'DISABLED')`), deterministic canonical SHA-256 digest computation with anti-tamper verification, and transactional v6→v7 database migration. Published to GitHub repository `main`; NOT deployed to production VPS runtime.
+
 ### Added — safe `aipm update` transaction workstream
 
 Repository-level implementation of the production roadmap's safe `aipm update` transaction, in published `main` order. All of this work is repository evidence only: implemented and tested in the repository, not deployed, with no live-VPS validation and no production execution.
