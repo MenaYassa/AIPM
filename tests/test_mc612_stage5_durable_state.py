@@ -128,7 +128,7 @@ def test_database_is_created_with_versioned_schema_and_safe_permissions(tmp_path
     db = ControlPlaneDatabase(db_path(tmp_path))
     try:
         assert db.journal_mode() == "delete"
-        assert db.schema_version() == SCHEMA_VERSION == 6  # v6 adds project_registrations table
+        assert db.schema_version() == SCHEMA_VERSION == 8  # v8 adds action_protocol column
         assert stat.S_IMODE(os.stat(db.path).st_mode) == 0o600
         assert stat.S_IMODE(os.stat(db.path.parent).st_mode) == 0o700
         names = {row[0] for row in db.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}

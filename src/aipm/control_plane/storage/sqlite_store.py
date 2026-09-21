@@ -230,10 +230,10 @@ class ControlPlaneDatabase:
                 # Apply migrations sequentially
                 if row is not None:
                     current_version = int(row[0])
-                    if current_version == 6:
+                    if current_version < 7:
                         self._apply_registration_v7_migration()
                         current_version = 7
-                    if current_version == 7:
+                    if current_version < 8:
                         self._apply_action_protocol_v8_migration()
                         current_version = 8
                 self._connection.execute(
