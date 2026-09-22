@@ -1006,5 +1006,413 @@ def test_sequential_migration_v5_v6_v7_v8_state_proof(temp_db_path):
     db_from_v5.close()
 
 
+def create_v5_database_with_confirmations(db_path: str, num_actions: int = 2):
+    """Create a genuine v5 database with actions AND referencing confirmations."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    conn.execute("""
+        CREATE TABLE control_plane_schema_meta (
+            schema_name TEXT PRIMARY KEY,
+            schema_version INTEGER NOT NULL,
+            migrated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        """
+        INSERT INTO control_plane_schema_meta (schema_name, schema_version, migrated_at)
+        VALUES ('control_plane', 5, ?)
+    """,
+        (datetime.now(timezone.utc).isoformat(),),
+    )
+
+    conn.execute("""
+        CREATE TABLE authorization_decisions (
+            decision_id TEXT PRIMARY KEY,
+            action_id TEXT NOT NULL,
+            allowed INTEGER NOT NULL,
+            code TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            environment TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            principal_subject TEXT NOT NULL,
+            confirmation_required INTEGER NOT NULL,
+            confirmation_kind TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            plan_revision INTEGER NOT NULL,
+            plan_digest TEXT NOT NULL,
+            target_digest TEXT NOT NULL,
+            request_canonical TEXT NOT NULL,
+            decided_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE actions (
+            action_id TEXT PRIMARY KEY,
+            decision_id TEXT NOT NULL REFERENCES authorization_decisions(decision_id),
+            idempotency_key TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            environment TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            plan_revision INTEGER NOT NULL,
+            plan_digest TEXT NOT NULL,
+            target_digest TEXT NOT NULL,
+            requester_subject TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            lifecycle_state TEXT NOT NULL,
+            confirmation_kind TEXT NOT NULL,
+            approver_subject TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            rollback_of_action_id TEXT,
+            snapshot_id TEXT,
+            outcome TEXT,
+            contract_version TEXT,
+            capability_version TEXT,
+            contract_digest TEXT,
+            UNIQUE (target_id, operation, idempotency_key)
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE confirmations (
+            confirmation_id TEXT PRIMARY KEY,
+            decision_id TEXT NOT NULL,
+            action_id TEXT NOT NULL REFERENCES actions(action_id),
+            plan_id TEXT NOT NULL,
+            plan_digest TEXT NOT NULL,
+            target_revision INTEGER NOT NULL,
+            target_digest TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            requester_subject TEXT NOT NULL,
+            confirmed_by_subject TEXT,
+            confirmation_kind TEXT NOT NULL,
+            request_canonical TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            state TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX idx_actions_target_state ON actions (target_id, lifecycle_state)
+    """)
+
+    now = datetime.now(timezone.utc)
+    for i in range(num_actions):
+        action_id = f"action_v5_{i}_" + "a" * (64 - len(f"action_v5_{i}_"))
+        decision_id = f"decision_v5_{i}_" + "d" * (64 - len(f"decision_v5_{i}_"))
+        conf_id = f"conf_v5_{i}_" + "c" * (64 - len(f"conf_v5_{i}_"))
+
+        conn.execute(
+            """
+            INSERT INTO authorization_decisions (
+                decision_id, action_id, allowed, code, operation, target_id, environment,
+                policy_version, principal_subject, confirmation_required, confirmation_kind,
+                plan_id, plan_revision, plan_digest, target_digest, request_canonical,
+                decided_at, expires_at
+            ) VALUES (?, ?, 1, 'ALLOWED', 'update', ?, 'staging', 'v1', 'test_subject', 1,
+                      'owner_confirmation', 'plan_id', 1, ?, ?, '{}', ?, ?)
+        """,
+            (
+                decision_id,
+                action_id,
+                f"test_project_{i}",
+                "p" * 64,
+                "t" * 64,
+                now.isoformat(),
+                (now + timedelta(hours=1)).isoformat(),
+            ),
+        )
+
+        conn.execute(
+            """
+            INSERT INTO actions (
+                action_id, decision_id, idempotency_key, operation, target_id, environment,
+                plan_id, plan_revision, plan_digest, target_digest, requester_subject,
+                policy_version, lifecycle_state, confirmation_kind, approver_subject,
+                created_at, updated_at, expires_at, version, rollback_of_action_id,
+                snapshot_id, outcome, contract_version, capability_version, contract_digest
+            ) VALUES (?, ?, ?, 'update', ?, 'staging', 'plan_id', 1, ?, ?, 'test_subject',
+                      'v1', 'requested', 'owner_confirmation', NULL, ?, ?, ?, 0, NULL,
+                      ?, NULL, NULL, NULL, NULL)
+        """,
+            (
+                action_id,
+                decision_id,
+                f"idem_key_v5_{i}",
+                f"test_project_{i}",
+                "p" * 64,
+                "t" * 64,
+                now.isoformat(),
+                now.isoformat(),
+                (now + timedelta(hours=1)).isoformat(),
+                f"snapshot_v5_{i}" if i % 2 == 0 else None,
+            ),
+        )
+
+        conn.execute(
+            """
+            INSERT INTO confirmations (
+                confirmation_id, decision_id, action_id, plan_id, plan_digest,
+                target_revision, target_digest, policy_version, requester_subject,
+                confirmed_by_subject, confirmation_kind, request_canonical, scope,
+                state, created_at, expires_at, consumed_at
+            ) VALUES (?, ?, ?, 'plan_id', ?, 1, ?, 'v1', 'test_subject',
+                      NULL, 'owner_confirmation', '{}', 'update', 'pending',
+                      ?, ?, NULL)
+        """,
+            (
+                conf_id,
+                decision_id,
+                action_id,
+                "p" * 64,
+                "t" * 64,
+                now.isoformat(),
+                (now + timedelta(hours=1)).isoformat(),
+            ),
+        )
+
+    conn.commit()
+    conn.close()
+
+    import os
+    os.chmod(db_path, 0o600)
+
+
+def create_halted_production_database(db_path: str, num_actions: int = 2):
+    """Create a database in the exact halted production state:
+    - metadata = v5
+    - project_registrations table already exists with v7/v8 schema and indexes
+    - actions table is v5 (lacks action_protocol)
+    - confirmations table is present with active foreign keys referencing actions
+    """
+    create_v5_database_with_confirmations(db_path, num_actions=num_actions)
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE project_registrations (
+            registration_id TEXT PRIMARY KEY,
+            target_id TEXT NOT NULL,
+            environment TEXT NOT NULL,
+            status TEXT NOT NULL,
+            canonical_project_path TEXT NOT NULL,
+            runtime_mode TEXT NOT NULL,
+            compose_project_name TEXT,
+            registration_digest TEXT NOT NULL,
+            registration_version TEXT NOT NULL DEFAULT 'mc616-reg-v1',
+            registered_by TEXT NOT NULL,
+            registered_at TEXT NOT NULL,
+            approved_by TEXT,
+            approved_at TEXT,
+            revoked_by TEXT,
+            revoked_at TEXT,
+            revocation_reason TEXT,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE UNIQUE INDEX idx_project_registrations_active_target
+        ON project_registrations (target_id, environment)
+        WHERE status IN ('REGISTERED', 'DISABLED')
+    """)
+    conn.execute("""
+        CREATE INDEX idx_project_registrations_target
+        ON project_registrations (target_id, environment)
+    """)
+    conn.execute("""
+        CREATE INDEX idx_project_registrations_status
+        ON project_registrations (status, environment)
+    """)
+    conn.commit()
+    conn.close()
+
+    import os
+    os.chmod(db_path, 0o600)
+
+
+def test_v5_to_v8_with_populated_confirmations_foreign_keys(temp_db_path):
+    """Requirement E.1: V5->V8 migration with confirmations referencing actions succeeds under foreign_keys=ON."""
+    create_v5_database_with_confirmations(temp_db_path, num_actions=3)
+
+    db = ControlPlaneDatabase(temp_db_path)
+
+    # 1. Final schema metadata = 8
+    assert db.schema_version() == 8
+
+    # 2. Action protocol classified as legacy-v1 for all actions
+    rows = list(db.connection.execute("SELECT action_id, action_protocol FROM actions").fetchall())
+    assert len(rows) == 3
+    for r in rows:
+        assert r["action_protocol"] == "legacy-v1"
+
+    # 3. Confirmations references remain valid
+    conf_rows = list(db.connection.execute("SELECT confirmation_id, action_id FROM confirmations").fetchall())
+    assert len(conf_rows) == 3
+    action_ids = {r["action_id"] for r in rows}
+    for cr in conf_rows:
+        assert cr["action_id"] in action_ids
+
+    # 4. PRAGMA foreign_key_check returns zero rows
+    fk_violations = list(db.connection.execute("PRAGMA foreign_key_check").fetchall())
+    assert fk_violations == []
+
+    # 5. PRAGMA foreign_keys is ON
+    assert db.connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    db.close()
+
+
+def test_v5_to_v8_atomic_rollback_on_failure(temp_db_path, monkeypatch):
+    """Requirement E.2: Failure during V5->V8 rolls back atomically, leaving no project_registrations."""
+    create_v5_database_with_confirmations(temp_db_path, num_actions=2)
+
+    from aipm.control_plane.storage.sqlite_store import ControlPlaneStorageUnavailable
+
+    # Inject failure during action protocol v8 migration
+    def _failing_v8_migration(self):
+        raise RuntimeError("Injected migration failure during v8 step")
+
+    monkeypatch.setattr(ControlPlaneDatabase, "_apply_action_protocol_v8_migration", _failing_v8_migration)
+
+    with pytest.raises(ControlPlaneStorageUnavailable):
+        ControlPlaneDatabase(temp_db_path)
+
+    # Verify atomic rollback: database is exactly at v5
+    conn = sqlite3.connect(temp_db_path)
+    conn.row_factory = sqlite3.Row
+
+    # 1. project_registrations does NOT survive
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    assert "project_registrations" not in tables, "project_registrations must not survive a failed migration"
+
+    # 2. actions remains pre-v8 (no action_protocol column)
+    action_cols = {r[1] for r in conn.execute("PRAGMA table_info(actions)").fetchall()}
+    assert "action_protocol" not in action_cols, "actions must remain in pre-v8 schema without action_protocol"
+
+    # 3. schema metadata remains v5
+    meta_row = conn.execute("SELECT schema_version FROM control_plane_schema_meta WHERE schema_name = 'control_plane'").fetchone()
+    assert meta_row["schema_version"] == 5, "schema metadata must remain at v5 after failed migration"
+
+    conn.close()
+
+
+def test_halted_production_state_recovery_to_v8(temp_db_path):
+    """Requirement E.3: Database in halted production state recovers cleanly to v8."""
+    create_halted_production_database(temp_db_path, num_actions=2)
+
+    # Invariant: halted production state before opening
+    conn = sqlite3.connect(temp_db_path)
+    conn.row_factory = sqlite3.Row
+    assert conn.execute("SELECT schema_version FROM control_plane_schema_meta WHERE schema_name = 'control_plane'").fetchone()["schema_version"] == 5
+    assert "project_registrations" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    assert "action_protocol" not in {r[1] for r in conn.execute("PRAGMA table_info(actions)").fetchall()}
+    conn.close()
+
+    # Open via ControlPlaneDatabase startup path
+    db = ControlPlaneDatabase(temp_db_path)
+
+    # 1. Final schema metadata = 8
+    assert db.schema_version() == 8
+
+    # 2. actions table reconstructed with action_protocol = legacy-v1
+    act_rows = list(db.connection.execute("SELECT action_id, action_protocol FROM actions").fetchall())
+    assert len(act_rows) == 2
+    for r in act_rows:
+        assert r["action_protocol"] == "legacy-v1"
+
+    # 3. Confirmations remain valid
+    conf_rows = list(db.connection.execute("SELECT confirmation_id, action_id FROM confirmations").fetchall())
+    assert len(conf_rows) == 2
+    action_ids = {r["action_id"] for r in act_rows}
+    for cr in conf_rows:
+        assert cr["action_id"] in action_ids
+
+    # 4. PRAGMA foreign_key_check returns zero rows
+    assert db.connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+    # 5. PRAGMA foreign_keys is ON
+    assert db.connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    db.close()
+
+
+def test_fresh_v0_to_v8_initialization(temp_db_path):
+    """Requirement E.4: Fresh v0->v8 database initialization creates full v8 schema cleanly."""
+    assert not temp_db_path.exists()
+
+    db = ControlPlaneDatabase(temp_db_path)
+
+    # 1. Final schema version = 8
+    assert db.schema_version() == 8
+
+    # 2. actions table has action_protocol TEXT NOT NULL
+    action_cols = {r[1]: r for r in db.connection.execute("PRAGMA table_info(actions)").fetchall()}
+    assert "action_protocol" in action_cols
+    assert action_cols["action_protocol"][2].upper() == "TEXT"
+    assert action_cols["action_protocol"][3] == 1
+
+    # 3. project_registrations table exists with registration_id PK
+    reg_cols = {r[1]: r for r in db.connection.execute("PRAGMA table_info(project_registrations)").fetchall()}
+    assert "registration_id" in reg_cols
+    assert reg_cols["registration_id"][5] == 1
+
+    # 4. PRAGMA foreign_key_check returns zero rows
+    assert db.connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+    # 5. PRAGMA foreign_keys is ON
+    assert db.connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    db.close()
+
+
+def test_foreign_keys_pragma_guaranteed_on_success_and_failure(temp_db_path, monkeypatch):
+    """Requirement E.5: PRAGMA foreign_keys is strictly ON after both successful and failed migrations."""
+    # Subtest 1: Success path
+    create_v5_database_with_confirmations(temp_db_path, num_actions=1)
+    db_success = ControlPlaneDatabase(temp_db_path)
+    assert db_success.connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    db_success.close()
+
+    # Subtest 2: Failure path
+    temp_dir = tempfile.mkdtemp()
+    fail_db_path = Path(temp_dir) / "fail_control_plane.db"
+    create_v5_database_with_confirmations(fail_db_path, num_actions=1)
+
+    from aipm.control_plane.storage.sqlite_store import ControlPlaneStorageUnavailable
+
+    def _failing_v8(self):
+        raise RuntimeError("simulated error")
+
+    monkeypatch.setattr(ControlPlaneDatabase, "_apply_action_protocol_v8_migration", _failing_v8)
+
+    captured_connection = None
+    orig_init = ControlPlaneDatabase.__init__
+
+    def _intercepting_init(self, *args, **kwargs):
+        nonlocal captured_connection
+        try:
+            orig_init(self, *args, **kwargs)
+        finally:
+            captured_connection = getattr(self, "_connection", None)
+
+    monkeypatch.setattr(ControlPlaneDatabase, "__init__", _intercepting_init)
+
+    with pytest.raises(ControlPlaneStorageUnavailable):
+        ControlPlaneDatabase(fail_db_path)
+
+    # Ensure captured connection restored foreign_keys to ON
+    assert captured_connection is not None
+    assert captured_connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    captured_connection.close()
+    if fail_db_path.exists():
+        fail_db_path.unlink()
+    Path(temp_dir).rmdir()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

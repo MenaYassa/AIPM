@@ -208,43 +208,91 @@ class ControlPlaneDatabase:
         from aipm.control_plane.storage.schema import SCHEMA_NAME, SCHEMA_VERSION, schema_statements_for_version
 
         try:
-            with self._connection:
-                self._connection.execute(
-                    "CREATE TABLE IF NOT EXISTS control_plane_schema_meta ("
-                    " schema_name TEXT PRIMARY KEY, schema_version INTEGER NOT NULL, migrated_at TEXT NOT NULL)"
-                )
-                row = self._connection.execute(
-                    "SELECT schema_version FROM control_plane_schema_meta WHERE schema_name = ?",
-                    (SCHEMA_NAME,),
-                ).fetchone()
-                if row is None:
-                    statements = schema_statements_for_version(0)
-                else:
-                    stored_version = int(row[0])
-                    if stored_version > SCHEMA_VERSION:
-                        raise ControlPlaneStorageUnavailable("control-plane database schema is from a newer version")
-                    statements = schema_statements_for_version(stored_version)
-                for statement in statements:
+            self._connection.execute(
+                "CREATE TABLE IF NOT EXISTS control_plane_schema_meta ("
+                " schema_name TEXT PRIMARY KEY, schema_version INTEGER NOT NULL, migrated_at TEXT NOT NULL)"
+            )
+            row = self._connection.execute(
+                "SELECT schema_version FROM control_plane_schema_meta WHERE schema_name = ?",
+                (SCHEMA_NAME,),
+            ).fetchone()
+
+            if row is None:
+                # Fresh database initialization (v0 -> v8)
+                self._connection.execute("BEGIN IMMEDIATE")
+                try:
+                    for statement in schema_statements_for_version(0):
+                        self._connection.execute(statement)
+                    self._apply_column_migrations()
+                    self._connection.execute(
+                        "INSERT INTO control_plane_schema_meta (schema_name, schema_version, migrated_at) VALUES (?, ?, ?)"
+                        " ON CONFLICT(schema_name) DO UPDATE SET schema_version = excluded.schema_version,"
+                        " migrated_at = excluded.migrated_at",
+                        (SCHEMA_NAME, SCHEMA_VERSION, self._now_iso()),
+                    )
+                    self._connection.execute("COMMIT")
+                except Exception:
+                    self._connection.execute("ROLLBACK")
+                    raise
+                return
+
+            stored_version = int(row[0])
+            if stored_version > SCHEMA_VERSION:
+                raise ControlPlaneStorageUnavailable("control-plane database schema is from a newer version")
+
+            if stored_version == SCHEMA_VERSION:
+                # Already at current schema version
+                self._connection.execute("BEGIN IMMEDIATE")
+                try:
+                    for statement in schema_statements_for_version(stored_version):
+                        self._connection.execute(statement)
+                    self._apply_column_migrations()
+                    self._connection.execute("COMMIT")
+                except Exception:
+                    self._connection.execute("ROLLBACK")
+                    raise
+                return
+
+            # Migration required: stored_version < SCHEMA_VERSION
+            # SQLite requires PRAGMA foreign_keys = OFF to occur outside any active transaction
+            if self._connection.in_transaction:
+                self._connection.commit()
+            self._connection.execute("PRAGMA foreign_keys = OFF")
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                for statement in schema_statements_for_version(stored_version):
                     self._connection.execute(statement)
                 self._apply_column_migrations()
-                # Apply migrations sequentially
-                if row is not None:
-                    current_version = int(row[0])
-                    if current_version < 7:
-                        self._apply_registration_v7_migration()
-                        current_version = 7
-                    if current_version < 8:
-                        self._apply_action_protocol_v8_migration()
-                        current_version = 8
+
+                current_version = stored_version
+                if current_version < 7:
+                    self._apply_registration_v7_migration()
+                    current_version = 7
+                if current_version < 8:
+                    self._apply_action_protocol_v8_migration()
+                    current_version = 8
+
+                # Pre-commit referential integrity check
+                violations = list(self._connection.execute("PRAGMA foreign_key_check"))
+                if violations:
+                    raise sqlite3.IntegrityError(f"foreign key check failed: {violations}")
+
                 self._connection.execute(
                     "INSERT INTO control_plane_schema_meta (schema_name, schema_version, migrated_at) VALUES (?, ?, ?)"
                     " ON CONFLICT(schema_name) DO UPDATE SET schema_version = excluded.schema_version,"
                     " migrated_at = excluded.migrated_at",
                     (SCHEMA_NAME, SCHEMA_VERSION, self._now_iso()),
                 )
-        except ControlPlaneStorageUnavailable:
+                self._connection.execute("COMMIT")
+            except Exception:
+                self._connection.execute("ROLLBACK")
+                raise
+            finally:
+                self._connection.execute("PRAGMA foreign_keys = ON")
+
+        except (ControlPlaneStorageUnavailable, ControlPlaneError):
             raise
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, Exception) as exc:
             raise ControlPlaneStorageUnavailable("control-plane schema cannot be initialized") from exc
 
     def _apply_column_migrations(self) -> None:
@@ -277,92 +325,84 @@ class ControlPlaneDatabase:
             # Already migrated
             return
 
-        # Transactionally migrate the table
-        self._connection.execute("BEGIN IMMEDIATE")
-        try:
-            # 1. Create temporary table with new schema
+        # 1. Create temporary table with new schema
+        self._connection.execute("""
+            CREATE TABLE project_registrations_v7 (
+                registration_id TEXT PRIMARY KEY,
+                target_id TEXT NOT NULL,
+                environment TEXT NOT NULL,
+                status TEXT NOT NULL,
+                canonical_project_path TEXT NOT NULL,
+                runtime_mode TEXT NOT NULL,
+                compose_project_name TEXT,
+                registration_digest TEXT NOT NULL,
+                registration_version TEXT NOT NULL DEFAULT 'mc616-reg-v1',
+                registered_by TEXT NOT NULL,
+                registered_at TEXT NOT NULL,
+                approved_by TEXT,
+                approved_at TEXT,
+                revoked_by TEXT,
+                revoked_at TEXT,
+                revocation_reason TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
+        # 2. Copy existing data, generating registration_id for each row
+        existing_rows = self._connection.execute("SELECT * FROM project_registrations").fetchall()
+        for row in existing_rows:
+            registration_id = str(uuid.uuid4())
             self._connection.execute("""
-                CREATE TABLE project_registrations_v7 (
-                    registration_id TEXT PRIMARY KEY,
-                    target_id TEXT NOT NULL,
-                    environment TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    canonical_project_path TEXT NOT NULL,
-                    runtime_mode TEXT NOT NULL,
-                    compose_project_name TEXT,
-                    registration_digest TEXT NOT NULL,
-                    registration_version TEXT NOT NULL DEFAULT 'mc616-reg-v1',
-                    registered_by TEXT NOT NULL,
-                    registered_at TEXT NOT NULL,
-                    approved_by TEXT,
-                    approved_at TEXT,
-                    revoked_by TEXT,
-                    revoked_at TEXT,
-                    revocation_reason TEXT,
-                    updated_at TEXT NOT NULL
-                )
-            """)
+                INSERT INTO project_registrations_v7 (
+                    registration_id, target_id, environment, status, canonical_project_path,
+                    runtime_mode, compose_project_name, registration_digest, registration_version,
+                    registered_by, registered_at, approved_by, approved_at, revoked_by,
+                    revoked_at, revocation_reason, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                registration_id,
+                row["target_id"],
+                row["environment"],
+                row["status"],
+                row["canonical_project_path"],
+                row["runtime_mode"],
+                row["compose_project_name"],
+                row["registration_digest"],
+                row["registration_version"],
+                row["registered_by"],
+                row["registered_at"],
+                row["approved_by"],
+                row["approved_at"],
+                row["revoked_by"],
+                row["revoked_at"],
+                row["revocation_reason"],
+                row["updated_at"],
+            ))
 
-            # 2. Copy existing data, generating registration_id for each row
-            existing_rows = self._connection.execute("SELECT * FROM project_registrations").fetchall()
-            for row in existing_rows:
-                registration_id = str(uuid.uuid4())
-                self._connection.execute("""
-                    INSERT INTO project_registrations_v7 (
-                        registration_id, target_id, environment, status, canonical_project_path,
-                        runtime_mode, compose_project_name, registration_digest, registration_version,
-                        registered_by, registered_at, approved_by, approved_at, revoked_by,
-                        revoked_at, revocation_reason, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    registration_id,
-                    row["target_id"],
-                    row["environment"],
-                    row["status"],
-                    row["canonical_project_path"],
-                    row["runtime_mode"],
-                    row["compose_project_name"],
-                    row["registration_digest"],
-                    row["registration_version"],
-                    row["registered_by"],
-                    row["registered_at"],
-                    row["approved_by"],
-                    row["approved_at"],
-                    row["revoked_by"],
-                    row["revoked_at"],
-                    row["revocation_reason"],
-                    row["updated_at"],
-                ))
+        # 3. Drop old table
+        self._connection.execute("DROP TABLE project_registrations")
 
-            # 3. Drop old table
-            self._connection.execute("DROP TABLE project_registrations")
+        # 4. Rename new table
+        self._connection.execute("ALTER TABLE project_registrations_v7 RENAME TO project_registrations")
 
-            # 4. Rename new table
-            self._connection.execute("ALTER TABLE project_registrations_v7 RENAME TO project_registrations")
+        # 5. Create partial unique index for active registrations
+        self._connection.execute("""
+            CREATE UNIQUE INDEX idx_project_registrations_active_target
+            ON project_registrations (target_id, environment)
+            WHERE status IN ('REGISTERED', 'DISABLED')
+        """)
 
-            # 5. Create partial unique index for active registrations
-            self._connection.execute("""
-                CREATE UNIQUE INDEX idx_project_registrations_active_target
-                ON project_registrations (target_id, environment)
-                WHERE status IN ('REGISTERED', 'DISABLED')
-            """)
+        # 6. Create lookup index
+        self._connection.execute("""
+            CREATE INDEX idx_project_registrations_target
+            ON project_registrations (target_id, environment)
+        """)
 
-            # 6. Create lookup index
-            self._connection.execute("""
-                CREATE INDEX idx_project_registrations_target
-                ON project_registrations (target_id, environment)
-            """)
-
-            # 7. Create status index
-            self._connection.execute("""
-                CREATE INDEX idx_project_registrations_status
-                ON project_registrations (status, environment)
-            """)
-
-            self._connection.execute("COMMIT")
-        except Exception:
-            self._connection.execute("ROLLBACK")
-            raise
+        # 7. Create status index
+        self._connection.execute("""
+            CREATE INDEX idx_project_registrations_status
+            ON project_registrations (status, environment)
+        """)
 
     def _apply_action_protocol_v8_migration(self) -> None:
         """Migrate actions from v7 to v8: add action_protocol column with NOT NULL constraint.
@@ -399,78 +439,70 @@ class ControlPlaneDatabase:
             # Valid v8 schema - migration already complete
             return
 
-        # Transactionally reconstruct table with NOT NULL constraint
-        self._connection.execute("BEGIN IMMEDIATE")
-        try:
-            # 1. Create new table with action_protocol TEXT NOT NULL
-            self._connection.execute("""
-                CREATE TABLE actions_new (
-                    action_id TEXT PRIMARY KEY,
-                    decision_id TEXT NOT NULL REFERENCES authorization_decisions(decision_id),
-                    idempotency_key TEXT NOT NULL,
-                    operation TEXT NOT NULL,
-                    target_id TEXT NOT NULL,
-                    environment TEXT NOT NULL,
-                    plan_id TEXT NOT NULL,
-                    plan_revision INTEGER NOT NULL,
-                    plan_digest TEXT NOT NULL,
-                    target_digest TEXT NOT NULL,
-                    requester_subject TEXT NOT NULL,
-                    policy_version TEXT NOT NULL,
-                    lifecycle_state TEXT NOT NULL,
-                    confirmation_kind TEXT NOT NULL,
-                    approver_subject TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL,
-                    version INTEGER NOT NULL,
-                    rollback_of_action_id TEXT,
-                    snapshot_id TEXT,
-                    outcome TEXT,
-                    contract_version TEXT,
-                    capability_version TEXT,
-                    contract_digest TEXT,
-                    action_protocol TEXT NOT NULL,
-                    UNIQUE (target_id, operation, idempotency_key)
-                )
-            """)
+        # 1. Create new table with action_protocol TEXT NOT NULL
+        self._connection.execute("""
+            CREATE TABLE actions_new (
+                action_id TEXT PRIMARY KEY,
+                decision_id TEXT NOT NULL REFERENCES authorization_decisions(decision_id),
+                idempotency_key TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                environment TEXT NOT NULL,
+                plan_id TEXT NOT NULL,
+                plan_revision INTEGER NOT NULL,
+                plan_digest TEXT NOT NULL,
+                target_digest TEXT NOT NULL,
+                requester_subject TEXT NOT NULL,
+                policy_version TEXT NOT NULL,
+                lifecycle_state TEXT NOT NULL,
+                confirmation_kind TEXT NOT NULL,
+                approver_subject TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                rollback_of_action_id TEXT,
+                snapshot_id TEXT,
+                outcome TEXT,
+                contract_version TEXT,
+                capability_version TEXT,
+                contract_digest TEXT,
+                action_protocol TEXT NOT NULL,
+                UNIQUE (target_id, operation, idempotency_key)
+            )
+        """)
 
-            # 2. Copy all existing actions, classifying them as legacy-v1
-            self._connection.execute("""
-                INSERT INTO actions_new
-                SELECT action_id, decision_id, idempotency_key, operation, target_id, environment,
-                       plan_id, plan_revision, plan_digest, target_digest, requester_subject,
-                       policy_version, lifecycle_state, confirmation_kind, approver_subject,
-                       created_at, updated_at, expires_at, version, rollback_of_action_id,
-                       snapshot_id, outcome, contract_version, capability_version, contract_digest,
-                       'legacy-v1' AS action_protocol
-                FROM actions
-            """)
+        # 2. Copy all existing actions, classifying them as legacy-v1
+        self._connection.execute("""
+            INSERT INTO actions_new
+            SELECT action_id, decision_id, idempotency_key, operation, target_id, environment,
+                   plan_id, plan_revision, plan_digest, target_digest, requester_subject,
+                   policy_version, lifecycle_state, confirmation_kind, approver_subject,
+                   created_at, updated_at, expires_at, version, rollback_of_action_id,
+                   snapshot_id, outcome, contract_version, capability_version, contract_digest,
+                   'legacy-v1' AS action_protocol
+            FROM actions
+        """)
 
-            # 3. Verify all rows copied
-            old_count = self._connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
-            new_count = self._connection.execute("SELECT COUNT(*) FROM actions_new").fetchone()[0]
-            if old_count != new_count:
-                raise sqlite3.Error(f"Migration failed: row count mismatch ({old_count} != {new_count})")
+        # 3. Verify all rows copied
+        old_count = self._connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0]
+        new_count = self._connection.execute("SELECT COUNT(*) FROM actions_new").fetchone()[0]
+        if old_count != new_count:
+            raise sqlite3.Error(f"Migration failed: row count mismatch ({old_count} != {new_count})")
 
-            # 4. Verify no NULL protocols
-            null_count = self._connection.execute("SELECT COUNT(*) FROM actions_new WHERE action_protocol IS NULL").fetchone()[0]
-            if null_count > 0:
-                raise sqlite3.Error(f"Migration failed: {null_count} actions have NULL action_protocol")
+        # 4. Verify no NULL protocols
+        null_count = self._connection.execute("SELECT COUNT(*) FROM actions_new WHERE action_protocol IS NULL").fetchone()[0]
+        if null_count > 0:
+            raise sqlite3.Error(f"Migration failed: {null_count} actions have NULL action_protocol")
 
-            # 5. Drop old table and rename new table
-            self._connection.execute("DROP TABLE actions")
-            self._connection.execute("ALTER TABLE actions_new RENAME TO actions")
+        # 5. Drop old table and rename new table
+        self._connection.execute("DROP TABLE actions")
+        self._connection.execute("ALTER TABLE actions_new RENAME TO actions")
 
-            # 6. Recreate index (dropped with old table)
-            self._connection.execute("""
-                CREATE INDEX IF NOT EXISTS idx_actions_target_state ON actions (target_id, lifecycle_state)
-            """)
-
-            self._connection.execute("COMMIT")
-        except Exception:
-            self._connection.execute("ROLLBACK")
-            raise
+        # 6. Recreate index (dropped with old table)
+        self._connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_actions_target_state ON actions (target_id, lifecycle_state)
+        """)
 
     def _seed_kill_switch_defaults(self) -> None:
         try:
