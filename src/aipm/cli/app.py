@@ -343,6 +343,8 @@ def serve_operator_transport(
     update_engine = None
     executor_ipc_client = None
     compose_service = None
+    service_plan_port = None
+    service_evidence_verifier = None
     if enable_update_plane:
         if update_audit_dir is None or update_backup_dir is None:
             typer.echo(

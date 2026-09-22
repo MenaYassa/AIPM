@@ -133,6 +133,31 @@ def test_serve_operator_transport_wires_compose_service(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "compose_service" in captured_kwargs
     assert captured_kwargs["compose_service"] is not None
+    assert "service_plan_port" in captured_kwargs
+    assert "service_evidence_verifier" in captured_kwargs
+
+
+def test_serve_operator_transport_disabled_update_plane_startup_path(monkeypatch):
+    """CLI serve-operator-transport without --enable-update-plane succeeds with capability-off locals."""
+    from aipm.cli import app as app_module
+    from aipm.control_plane import composition as comp_module
+
+    captured_kwargs = {}
+
+    def _mock_serve(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {"service": None}
+
+    monkeypatch.setattr(comp_module, "serve_operator_transport", _mock_serve)
+
+    runner = CliRunner()
+    result = runner.invoke(app_module.app, ["serve-operator-transport"])
+    assert result.exit_code == 0, result.output
+    assert captured_kwargs["update_engine"] is None
+    assert captured_kwargs["executor_ipc_client"] is None
+    assert captured_kwargs["compose_service"] is None
+    assert captured_kwargs["service_plan_port"] is None
+    assert captured_kwargs["service_evidence_verifier"] is None
 
 
 def test_frontend_idempotency_and_service_plan_wiring():
