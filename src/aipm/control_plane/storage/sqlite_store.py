@@ -743,9 +743,38 @@ class SQLiteProjectPlanStore:
             " FROM project_plans WHERE target_id = ?",
             (target_id,),
         ).fetchone()
-        if row is None:
-            raise ProjectPlanError("target is not registered")
-        return self._plan_from_row(row)
+        if row is not None:
+            return self._plan_from_row(row)
+
+        # Fallback for registration-backed projects (MC-6.16)
+        try:
+            reg_row = self._db.connection.execute(
+                "SELECT target_id, environment, status, registration_digest, registered_at, updated_at"
+                " FROM project_registrations WHERE target_id = ? ORDER BY registered_at DESC LIMIT 1",
+                (target_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            reg_row = None
+
+        if reg_row is not None:
+            target, env_str, status_str, digest, reg_at_str, upd_at_str = reg_row
+            env = Environment.PRODUCTION if env_str == "production" else Environment.STAGING
+            created_at = datetime.fromisoformat(reg_at_str)
+            updated_at = datetime.fromisoformat(upd_at_str) if upd_at_str else created_at
+            enabled = (status_str == "REGISTERED")
+            return ProjectPlan(
+                target_id=target,
+                environment=env,
+                revision=1,
+                title=f"Project plan for {target}",
+                objective=f"Manage registered project {target} in {env_str}",
+                created_at=created_at,
+                updated_at=updated_at,
+                enabled=enabled,
+                canonical_digest=digest,
+            )
+
+        raise ProjectPlanError("target is not registered")
 
     def update(self, target_id: str, *, expected_revision: int, fields, now) -> ProjectPlan:
         current = self.read(target_id)
@@ -2538,17 +2567,24 @@ class SQLiteProjectRegistrationStore:
         )
         self._audit_ledger.append_in_transaction(draft)
 
-    def get(self, target_id: str, environment: str) -> ProjectRegistration | None:
-        """Get the active registration (REGISTERED or DISABLED) for a target.
+    def get(self, target_id: str, environment: str, *, include_revoked: bool = False) -> ProjectRegistration | None:
+        """Get the registration for a target.
 
-        Returns None if no active registration exists. Historical REVOKED registrations
-        are not returned by this method.
+        By default, returns None if no active registration (REGISTERED or DISABLED) exists.
+        When include_revoked=True, returns the latest registration including REVOKED.
         """
-        row = self._db.connection.execute(
-            "SELECT * FROM project_registrations WHERE target_id = ? AND environment = ? AND status IN ('REGISTERED', 'DISABLED') "
-            "ORDER BY registered_at DESC LIMIT 1",
-            (target_id, environment),
-        ).fetchone()
+        if include_revoked:
+            row = self._db.connection.execute(
+                "SELECT * FROM project_registrations WHERE target_id = ? AND environment = ? "
+                "ORDER BY registered_at DESC LIMIT 1",
+                (target_id, environment),
+            ).fetchone()
+        else:
+            row = self._db.connection.execute(
+                "SELECT * FROM project_registrations WHERE target_id = ? AND environment = ? AND status IN ('REGISTERED', 'DISABLED') "
+                "ORDER BY registered_at DESC LIMIT 1",
+                (target_id, environment),
+            ).fetchone()
         if row is None:
             return None
         return _registration_from_row(row)

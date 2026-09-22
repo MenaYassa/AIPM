@@ -311,7 +311,29 @@ class OwnerControlPlaneService:
         try:
             return self._plans.read(target_id)
         except ProjectPlanError:
-            return None
+            pass
+        if self._registrations is not None:
+            try:
+                reg = self._registrations.get(target_id, "production", include_revoked=True)
+                if reg is None:
+                    reg = self._registrations.get(target_id, "staging", include_revoked=True)
+                if reg is not None:
+                    from aipm.control_plane.project_plan import Environment, ProjectPlan
+                    env = Environment.PRODUCTION if reg.environment == "production" else Environment.STAGING
+                    return ProjectPlan(
+                        target_id=reg.target_id,
+                        environment=env,
+                        revision=1,
+                        title=f"Project plan for {reg.target_id}",
+                        objective=f"Manage registered project {reg.target_id} in {reg.environment}",
+                        created_at=reg.registered_at,
+                        updated_at=getattr(reg, "updated_at", None) or reg.registered_at,
+                        enabled=reg.is_active(),
+                        canonical_digest=reg.registration_digest,
+                    )
+            except Exception:
+                pass
+        return None
 
     def _ensure_safety_repos(self) -> None:
         """Resolve the durable snapshot/verification repositories.
@@ -910,10 +932,9 @@ class OwnerControlPlaneService:
         content through the approval channel.
         """
 
-        try:
-            plan = self._plans.read(target_id)
-        except ProjectPlanError as exc:
-            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Current plan is unavailable") from exc
+        plan = self._read_current_plan(target_id)
+        if plan is None:
+            raise ControlPlaneError(PlanningErrorCode.UNAVAILABLE_EVIDENCE, "Current plan is unavailable")
         return (("objective", plan.objective), ("title", plan.title))
 
     def _update_binding_for(self, action: ActionLifecycle) -> "UpdateExecutionBinding":
@@ -1321,11 +1342,43 @@ class OwnerControlPlaneService:
     def plan_view(self, target_id: str) -> dict | None:
         """Bounded read view of one ProjectPlan; None when unregistered."""
 
-        try:
-            plan = self._plans.read(target_id)
-        except ProjectPlanError:
+        plan = self._read_current_plan(target_id)
+        if plan is None:
             return None
         return plan.safe_dict()
+
+    def registration_view(self, target_id: str) -> dict | None:
+        """Bounded read view of one ProjectRegistration; None when unregistered."""
+
+        if self._registrations is None:
+            return None
+        try:
+            reg = self._registrations.get(target_id, "production", include_revoked=True)
+            if reg is None:
+                reg = self._registrations.get(target_id, "staging", include_revoked=True)
+            if reg is None:
+                return None
+            permits_operations = True
+            if self._kill_switches is not None:
+                permits_operations = self._kill_switches.permits_operations(reg.environment)
+            return {
+                "registered": True,
+                "registration_id": reg.registration_id,
+                "target_id": reg.target_id,
+                "environment": reg.environment,
+                "status": reg.status.value,
+                "runtime_mode": reg.runtime_mode,
+                "compose_project_name": reg.compose_project_name,
+                "canonical_project_path": reg.canonical_project_path,
+                "registered_at": reg.registered_at.isoformat() if reg.registered_at else None,
+                "registration_digest": reg.registration_digest,
+                "revoked_at": reg.revoked_at.isoformat() if getattr(reg, "revoked_at", None) else None,
+                "revocation_reason": getattr(reg, "revocation_reason", None),
+                "permits_operations": permits_operations,
+                "execution_locked": not permits_operations,
+            }
+        except Exception:
+            return None
 
     def action_view(self, action_id: str) -> dict | None:
         """Bounded read view of one action; no decision payloads."""

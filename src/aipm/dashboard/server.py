@@ -245,6 +245,23 @@ def create_app(
             )
         )
 
+    @app.get("/api/projects/{project_id}/registration")
+    async def project_registration(project_id: str, request: Request):
+        return await _proxy_response(
+            update_proxy.registration(
+                project_id,
+                session_cookie=_operator_session_cookie(request, update_proxy),
+            )
+        )
+
+    @app.get("/api/kill-switch")
+    async def kill_switch_status(request: Request):
+        return await _proxy_response(
+            update_proxy.kill_switch_status(
+                session_cookie=_operator_session_cookie(request, update_proxy),
+            )
+        )
+
     # ------------------------------------------------------------------
     # Session: public-origin authentication bootstrap and CSRF acquisition
     # ------------------------------------------------------------------

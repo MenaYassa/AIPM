@@ -43,7 +43,7 @@ MAX_ACTION_ID_LENGTH = 128
 MAX_RELAYED_TEXT_LENGTH = 256
 MAX_RELAYED_FIELDS = 16
 
-_PROJECT_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
+_PROJECT_ID_PATTERN = re.compile(r"^(?:[0-9a-f]{24}|[a-z0-9][a-z0-9_.:-]{0,127})$")
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 # Action identifiers are canonical hex/opaque identity tokens: no slashes, no
 # path separators, no whitespace, no shell metacharacters can appear.
@@ -69,6 +69,8 @@ _RELAYABLE_ERROR_CODES = frozenset(
         "stale_plan",
         "expired",
         "locked",
+        "kill_switch_engaged",
+        "kill_switch_epoch_mismatch",
         "execution_refused",
         "internal_error",
     }
@@ -87,6 +89,22 @@ _PLAN_FIELDS = ("target_id", "environment", "revision", "enabled", "canonical_di
 #: can ever cross this boundary, because everything outside this tuple is
 #: dropped before it reaches a browser.
 _STATUS_ACTION_FIELDS = ("action_id", "operation", "state", "outcome", "plan_revision", "expires_at")
+_REGISTRATION_FIELDS = (
+    "registered",
+    "registration_id",
+    "target_id",
+    "environment",
+    "status",
+    "runtime_mode",
+    "compose_project_name",
+    "canonical_project_path",
+    "registered_at",
+    "registration_digest",
+    "revoked_at",
+    "revocation_reason",
+    "permits_operations",
+    "execution_locked",
+)
 
 
 class _ProxyRejection(Exception):
@@ -227,6 +245,36 @@ class DashboardUpdateProxyApi:
             fields=None,
         )
 
+    async def registration(self, project_id: str, *, session_cookie: str | None) -> DashboardProxyResult:
+        """Relay the canonical read-only project registration projection."""
+
+        try:
+            identifier = self._project_id(project_id)
+        except _ProxyRejection as rejection:
+            return self._error(rejection.status, rejection.code, section="registration")
+        return await self._forward(
+            "GET",
+            f"/projects/{identifier}/registration",
+            session_cookie=session_cookie,
+            csrf_token=None,
+            json_body=None,
+            section="registration",
+            fields=_REGISTRATION_FIELDS,
+        )
+
+    async def kill_switch_status(self, *, session_cookie: str | None) -> DashboardProxyResult:
+        """Relay the canonical read-only kill-switch status."""
+
+        return await self._forward(
+            "GET",
+            "/kill-switch",
+            session_cookie=session_cookie,
+            csrf_token=None,
+            json_body=None,
+            section="kill_switch",
+            fields=None,
+        )
+
     # ------------------------------------------------------------------
     # Forwarding and projection
     # ------------------------------------------------------------------
@@ -269,6 +317,8 @@ class DashboardUpdateProxyApi:
             return self._error(status, self._error_code(response.payload), section=section)
         if section == "update_status":
             body = self._status_body(response.payload)
+        elif section == "kill_switch":
+            body = self._kill_switch_body(response.payload)
         else:
             body = self._whitelist(response.payload, fields or ())
         payload = {"available": True, "status": "ok", "error": None, section: body}
@@ -295,6 +345,18 @@ class DashboardUpdateProxyApi:
         if not isinstance(latest, dict):
             return None
         return self._whitelist(latest, _STATUS_ACTION_FIELDS)
+
+    def _kill_switch_body(self, payload: dict[str, Any]) -> dict[str, Any]:
+        switches = []
+        for item in payload.get("switches", []) if isinstance(payload, dict) else []:
+            if isinstance(item, dict):
+                switches.append({
+                    "environment": self._scalar(item.get("environment")),
+                    "state": self._scalar(item.get("state")),
+                    "epoch": self._scalar(item.get("epoch")),
+                    "permits_operations": bool(item.get("permits_operations")),
+                })
+        return {"switches": switches}
 
     def _whitelist(self, payload: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
         source = payload if isinstance(payload, dict) else {}
@@ -337,7 +399,11 @@ class DashboardUpdateProxyApi:
     def _project_id(value: Any) -> str:
         if not isinstance(value, str) or _PROJECT_ID_PATTERN.fullmatch(value) is None:
             raise _ProxyRejection(422, "invalid_request")
-        return value
+        try:
+            from aipm.services.project.identity_resolver import ProjectIdentityResolver
+            return ProjectIdentityResolver.resolve_target_id(value)
+        except Exception:
+            return value
 
     @staticmethod
     def _json_object(body: bytes | None) -> dict[str, Any]:

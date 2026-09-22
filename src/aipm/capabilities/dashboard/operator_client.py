@@ -23,14 +23,15 @@ CSRF_HEADER = "X-CSRF-Token"
 MAX_RESPONSE_BYTES = 16_384
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
-_PROJECT_SEGMENT = r"[0-9a-f]{24}"
+_PROJECT_SEGMENT = r"(?:[0-9a-f]{24}|[a-z0-9][a-z0-9_.:-]{0,127})"
 _ID_SEGMENT = r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}"
 
 #: The only canonical paths the dashboard proxy may ever reach. Each entry is
 #: an exact (method, path) pair: the session bootstrap (login), update
-#: approval/execute verbs, and read-only status/action projections. Rollback,
-#: confirm, snapshot, kill-switch, plan authorize, and audit verbs are absent
-#: by construction, not by convention.
+#: approval/execute verbs, read-only status/action projections, read-only
+#: project registration, and read-only kill-switch status. Rollback, confirm,
+#: snapshot, kill-switch mutation, plan authorize, and audit mutation verbs
+#: remain absent by construction, not by convention.
 _ALLOWED_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("POST", re.compile(r"^/login$")),
     ("POST", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/approval$")),
@@ -38,6 +39,8 @@ _ALLOWED_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("POST", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/execute$")),
     ("GET", re.compile(rf"^/updates/{_PROJECT_SEGMENT}/status$")),
     ("GET", re.compile(rf"^/actions/{_ID_SEGMENT}$")),
+    ("GET", re.compile(rf"^/projects/{_PROJECT_SEGMENT}/registration$")),
+    ("GET", re.compile(r"^/kill-switch$")),
 )
 
 

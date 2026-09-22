@@ -31,6 +31,7 @@ implementations, and it never binds a wildcard address.
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 from typing import Callable
 
@@ -211,9 +212,13 @@ def compose_operator_service(
             "No registered project targets; refusing to compose an empty allow-list"
         )
     planner = PlanOnlyPlanner(clock=clock, target_allow_list=targets)
+    if allowed_targets is not None:
+        scopes = frozenset({(target, _environment_for_policy()) for target in targets})
+    else:
+        scopes = _registered_scopes(plans)
     policy = AuthorizationPolicy(
         policy_version="policy-v1",
-        allowed_scopes=frozenset({(target, _environment_for_policy()) for target in targets}),
+        allowed_scopes=scopes,
     )
     confirmations = OwnerConfirmationService(clock=clock)
 
@@ -284,7 +289,7 @@ def compose_operator_service(
 
 
 def _registered_targets(plans: SQLiteProjectPlanStore) -> frozenset[str]:
-    """Enumerate registered targets from the durable plan store, fail closed.
+    """Enumerate registered targets from the durable plan store and registration store, fail closed.
 
     The plan store deliberately exposes only ``create``/``read``/``update``;
     enumeration is bounded by schema knowledge and any failure refuses
@@ -292,12 +297,46 @@ def _registered_targets(plans: SQLiteProjectPlanStore) -> frozenset[str]:
     """
 
     try:
-        rows = plans._db.connection.execute(
+        plan_rows = plans._db.connection.execute(
             "SELECT target_id FROM project_plans ORDER BY target_id LIMIT 1000"
         ).fetchall()
+        try:
+            reg_rows = plans._db.connection.execute(
+                "SELECT target_id FROM project_registrations WHERE status = 'REGISTERED' ORDER BY target_id LIMIT 1000"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            reg_rows = []
     except Exception as exc:  # noqa: BLE001 - fail closed on any storage error
         raise OperatorTransportConfigError("Registered targets cannot be enumerated") from exc
-    return frozenset(row[0] for row in rows if row and row[0])
+    return frozenset(
+        [row[0] for row in plan_rows if row and row[0]]
+        + [row[0] for row in reg_rows if row and row[0]]
+    )
+
+
+def _registered_scopes(plans: SQLiteProjectPlanStore) -> frozenset[tuple[str, str]]:
+    """Enumerate registered (target_id, environment) scopes from durable stores."""
+
+    try:
+        plan_rows = plans._db.connection.execute(
+            "SELECT target_id, environment FROM project_plans ORDER BY target_id LIMIT 1000"
+        ).fetchall()
+        try:
+            reg_rows = plans._db.connection.execute(
+                "SELECT target_id, environment FROM project_registrations WHERE status = 'REGISTERED' ORDER BY target_id LIMIT 1000"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            reg_rows = []
+    except Exception as exc:
+        raise OperatorTransportConfigError("Registered scopes cannot be enumerated") from exc
+    scopes = set()
+    for row in plan_rows:
+        if row and row[0]:
+            scopes.add((row[0], row[1] if row[1] else _environment_for_policy()))
+    for row in reg_rows:
+        if row and row[0]:
+            scopes.add((row[0], row[1] if row[1] else _environment_for_policy()))
+    return frozenset(scopes)
 
 
 def create_operator_service_app(composition: dict, *, bind: str = "127.0.0.1"):

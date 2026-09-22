@@ -176,7 +176,16 @@ class DashboardProjectApi:
     @staticmethod
     def _identifier(value: str | None) -> str | None:
         value = str(value or "").strip()
-        return value if len(value) == 24 and all(char in "0123456789abcdef" for char in value) else None
+        if len(value) == 24 and all(char in "0123456789abcdef" for char in value):
+            return value
+        try:
+            from aipm.services.project.identity_resolver import ProjectIdentityResolver
+            resolved = ProjectIdentityResolver.resolve_discovery_id(value)
+            if resolved and len(resolved) == 24 and all(char in "0123456789abcdef" for char in resolved):
+                return resolved
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _service_name(value: str | None) -> str | None:

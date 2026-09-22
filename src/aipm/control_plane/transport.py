@@ -49,11 +49,10 @@ _RATE_LIMIT_CONFIRM = 30
 _RATE_LIMIT_UPDATE_APPROVAL = 30
 _RATE_LIMIT_UPDATE_EXECUTE = 30
 
-# Dashboard project identifiers are 24 lowercase hex characters (the
-# Mission Control inventory identity). A registered staging control-plane
-# target may carry this identifier as its target_id; the transport only
-# ever resolves it against the canonical plan store via the service.
+# Dashboard discovery project identifiers are 24 lowercase hex characters.
+# Control-plane target IDs may be 24 lowercase hex characters or safe canonical target names (e.g. local-ai-packaged).
 _PROJECT_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
+_SAFE_TARGET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
 # Canonical update-plan digest binding: the operator presents the digest of
 # the update plan they reviewed; it travels inside ActionRequest.metadata so
@@ -236,9 +235,16 @@ def create_operator_app(
         return value
 
     def _bounded_project_id(value: str) -> str:
-        if not isinstance(value, str) or _PROJECT_ID_PATTERN.fullmatch(value) is None:
+        if not isinstance(value, str):
             raise _error("invalid_request", "Invalid project identifier", 422)
-        return value
+        if _PROJECT_ID_PATTERN.fullmatch(value) is not None:
+            return value
+        if _SAFE_TARGET.fullmatch(value) is not None:
+            if hasattr(service, "registration_view") and service.registration_view(value) is not None:
+                return value
+            if hasattr(service, "plan_view") and service.plan_view(value) is not None:
+                return value
+        raise _error("invalid_request", "Invalid project identifier", 422)
 
     def _update_plan_digest_pair(value) -> tuple[str, str]:
         if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
@@ -587,7 +593,13 @@ def create_operator_app(
     @app.get("/projects/{project_id}/registration")
     def project_registration(project_id: str, request: Request):
         _resolve_session(request)
-        project_id = _bounded_project_id(project_id)
+        if not isinstance(project_id, str) or _SAFE_TARGET.fullmatch(project_id) is None:
+            raise _error("invalid_request", "Invalid project identifier", 422)
+
+        if hasattr(service, "registration_view"):
+            view = _run(lambda: service.registration_view(project_id))
+            if view is not None:
+                return view
 
         from aipm.control_plane.storage.sqlite_store import (
             ControlPlaneDatabase,
@@ -601,26 +613,43 @@ def create_operator_app(
 
         registration = None
         try:
-            registration = store.get(project_id, "production")
+            registration = store.get(project_id, "production", include_revoked=True)
             if registration is None:
-                registration = store.get(project_id, "staging")
+                registration = store.get(project_id, "staging", include_revoked=True)
         except Exception:
             pass
 
         if registration is None:
             return {
                 "registered": False,
-                "status": "UNREGISTERED"
+                "status": "UNREGISTERED",
             }
+
+        permits_operations = True
+        if hasattr(service, "kill_switch_status"):
+            try:
+                ks = service.kill_switch_status()
+                for sw in ks.get("switches", []):
+                    if sw.get("environment") == registration.environment:
+                        permits_operations = bool(sw.get("permits_operations", True))
+            except Exception:
+                pass
 
         return {
             "registered": True,
+            "registration_id": registration.registration_id,
             "target_id": registration.target_id,
             "environment": registration.environment,
             "status": registration.status.value,
             "runtime_mode": registration.runtime_mode,
-            "registered_at": registration.registered_at.isoformat(),
+            "compose_project_name": registration.compose_project_name,
+            "canonical_project_path": registration.canonical_project_path,
+            "registered_at": registration.registered_at.isoformat() if registration.registered_at else None,
             "registration_digest": registration.registration_digest,
+            "revoked_at": registration.revoked_at.isoformat() if getattr(registration, "revoked_at", None) else None,
+            "revocation_reason": getattr(registration, "revocation_reason", None),
+            "permits_operations": permits_operations,
+            "execution_locked": not permits_operations,
         }
 
     # ------------------------------------------------------------------

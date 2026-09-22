@@ -22,6 +22,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
   const $ = id => document.getElementById(id);
   let selectedId = null;
   let latest = null;
+  let projectRegistration = null;
 
   const badge = (label, state) => `<span class="badge ${stateClass(state || 'unknown')}">${escapeHtml(label)}</span>`;
   const stateLabel = state => String(state || 'unknown').replaceAll('_', ' ');
@@ -238,13 +239,121 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     return `<section class="health-evidence" id="projectUpdateStatus"><h4>Control-plane update status</h4>${rows}<div class="subtle">Observation only — updates are approved through the canonical operator transport.</div></section>`;
   };
 
+  // Registration & Control Plane Binding card (MC-6.16)
+  const registrationSection = (regData, projectId) => {
+    const reg = regData?.registration;
+    const status = reg?.status || (reg?.registered ? 'REGISTERED' : 'UNREGISTERED');
+    const isRegistered = reg && reg.registered && status === 'REGISTERED';
+    const statusClass = status === 'REGISTERED' ? 'healthy' : (status === 'DISABLED' ? 'warning' : (status === 'REVOKED' ? 'critical' : 'unknown'));
+
+    const isProd = reg?.environment === 'production' || !reg;
+    const isProdLocked = isProd && (reg?.execution_locked === true || reg?.permits_operations === false);
+
+    let lockBanner = '';
+    if (isProd && isProdLocked) {
+      lockBanner = `
+        <div style="margin-top:12px;padding:10px 14px;border:1px solid #ff7f88;background:rgba(255,127,136,0.12);border-radius:10px;">
+          <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#ff7f88;">
+            <span class="badge critical">PRODUCTION EXECUTION LOCKED</span>
+            <span>Production execution is permanently disabled by control-plane safety gate.</span>
+          </div>
+          <div class="subtle" style="margin-top:4px;color:#d8e6f4;">
+            This project is bound to production. Control-plane approvals are governance records only and will NOT execute against production.
+          </div>
+        </div>
+      `;
+    }
+
+    if (!reg || !reg.registered || status === 'UNREGISTERED') {
+      return `
+        <section class="card" style="padding:16px;margin-top:16px;" id="projectRegistrationCard">
+          <div class="section-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div>
+              <h4 style="margin:0;font-size:14px;">Registration &amp; Control Plane Binding</h4>
+              <p class="subtle" style="margin:2px 0 0;">Authoritative binding between discovered runtime and control-plane authority.</p>
+            </div>
+            <span class="badge unknown">UNREGISTERED</span>
+          </div>
+          <div class="empty">This project is not registered with the control plane. Control-plane updates and approvals are unavailable for this project.</div>
+          ${lockBanner}
+        </section>
+      `;
+    }
+
+    const digestStr = reg.registration_digest ? `${reg.registration_digest.slice(0, 16)}…` : '—';
+    const regAt = reg.registered_at ? new Date(reg.registered_at).toLocaleString() : '—';
+
+    return `
+      <section class="card" style="padding:16px;margin-top:16px;" id="projectRegistrationCard">
+        <div class="section-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div>
+            <h4 style="margin:0;font-size:14px;">Registration &amp; Control Plane Binding</h4>
+            <p class="subtle" style="margin:2px 0 0;">Authoritative binding between discovered runtime and control-plane authority.</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            ${isProd && isProdLocked ? '<span class="badge critical">EXECUTION DISARMED</span>' : ''}
+            <span class="badge ${statusClass}">${escapeHtml(status)}</span>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <div><span class="metric-label">Canonical Target ID</span><strong style="font-size:14px;">${escapeHtml(reg.target_id || '—')}</strong></div>
+          <div><span class="metric-label">Discovery Project ID</span><strong style="font-size:14px;font-family:monospace;">${escapeHtml(projectId || '—')}</strong></div>
+          <div><span class="metric-label">Environment</span><strong style="font-size:14px;">${escapeHtml(reg.environment || '—')}</strong></div>
+          <div><span class="metric-label">Runtime Mode</span><strong style="font-size:14px;">${escapeHtml(reg.runtime_mode || '—')}</strong></div>
+        </div>
+        <div class="detail-grid" style="margin-top:8px;">
+          <div><span class="metric-label">Compose Project Name</span><strong style="font-size:14px;">${escapeHtml(reg.compose_project_name || '—')}</strong></div>
+          <div style="grid-column: span 2;"><span class="metric-label">Canonical Project Path</span><strong style="font-size:13px;font-family:monospace;word-break:break-all;">${escapeHtml(reg.canonical_project_path || '—')}</strong></div>
+          <div><span class="metric-label">Registered At</span><strong style="font-size:13px;">${escapeHtml(regAt)}</strong></div>
+        </div>
+        <div class="subtle" style="margin-top:10px;font-family:monospace;">Registration Digest: ${escapeHtml(digestStr)}</div>
+        ${lockBanner}
+      </section>
+    `;
+  };
+
   // Update workflow section
-  const updateWorkflowSection = projectId => `<section class="update-workflow" id="updateWorkflow-${projectId}"><h4>Update Workflow</h4><div id="updatePlanPanel-${projectId}" class="subtle">Loading plan...</div><div id="updateControls-${projectId}"></div><div id="updateResult-${projectId}"></div></section>`;
+  const updateWorkflowSection = (projectId, regData) => {
+    const reg = regData?.registration;
+    const isProd = reg?.environment === 'production' || !reg;
+    const isProdLocked = isProd && (reg?.execution_locked === true || reg?.permits_operations === false);
+
+    let lockNotice = '';
+    if (isProdLocked) {
+      lockNotice = `
+        <div style="margin-bottom:12px;padding:8px 12px;border:1px solid #ff7f88;background:rgba(255,127,136,0.1);border-radius:8px;display:flex;align-items:center;gap:8px;">
+          <span class="badge critical">LOCKED</span>
+          <span style="font-size:12px;color:#ff7f88;"><strong>Host Safety Active:</strong> Production execution is permanently disabled by control-plane safety gate.</span>
+        </div>
+      `;
+    }
+
+    return `
+      <section class="update-workflow" id="updateWorkflow-${projectId}">
+        <h4>Update Workflow</h4>
+        ${lockNotice}
+        <div id="updatePlanPanel-${projectId}" class="subtle">Loading plan...</div>
+        <div id="updateControls-${projectId}"></div>
+        <div id="updateResult-${projectId}"></div>
+      </section>
+    `;
+  };
 
   async function loadUpdatePlan(projectId) {
     const panel = document.getElementById(`updatePlanPanel-${projectId}`);
     const controls = document.getElementById(`updateControls-${projectId}`);
     if (!panel || !controls) return;
+
+    const reg = projectRegistration?.registration;
+    const isProd = reg?.environment === 'production' || !reg;
+    const isProdLocked = isProd && (reg?.execution_locked === true || reg?.permits_operations === false);
+
+    if (reg && (!reg.registered || reg.status === 'UNREGISTERED')) {
+      panel.innerHTML = '<div class="empty">This project is not registered with the control plane. Control-plane update planning and approvals are unavailable for this project.</div>';
+      controls.innerHTML = '';
+      return;
+    }
+
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/update-plan`, {cache: 'no-store'});
       const data = await response.json();
@@ -256,7 +365,16 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
       const canProceed = plan.proceed === true;
       const riskClass = plan.risk === 'blocked' ? 'critical' : plan.risk === 'reversible' ? 'healthy' : 'warning';
       panel.innerHTML = `<div class="detail-grid"><div><span class="metric-label">Risk</span><span class="badge ${riskClass}">${escapeHtml(plan.risk)}</span></div><div><span class="metric-label">Snapshot</span><strong>${plan.snapshot_required ? 'Required' : 'Not required'}</strong></div><div><span class="metric-label">Pull</span><strong>${plan.pull_required ? 'Required' : 'Not required'}</strong></div><div><span class="metric-label">Restart</span><strong>${plan.estimated_restart ? 'Expected' : 'Not expected'}</strong></div></div>${plan.reasons.length ? `<div class="update-reasons">${plan.reasons.slice(0, 5).map(r => `<div>${escapeHtml(r)}</div>`).join('')}</div>` : ''}${plan.actions.length ? `<div class="update-actions"><strong>Actions:</strong>${plan.actions.slice(0, 5).map(a => `<div>${escapeHtml(a)}</div>`).join('')}</div>` : ''}<div class="subtle" style="margin-top:8px">Digest: ${escapeHtml(plan.plan_digest.slice(0, 16))}...</div>`;
-      controls.innerHTML = `<button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}')">${canProceed ? 'Authorize Update' : 'Cannot Proceed'}</button>`;
+      if (isProdLocked) {
+        controls.innerHTML = `
+          <div style="margin-bottom:8px;padding:8px 10px;border:1px solid #ff7f88;background:rgba(255,127,136,0.1);border-radius:6px;font-size:12px;color:#ff7f88;">
+            <strong>Execution Disarmed:</strong> Production execution is permanently disabled by control-plane safety gate. Authorizing records a governance confirmation only and will NOT execute against production.
+          </div>
+          <button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}', null, true)">${canProceed ? 'Record Update Approval Only' : 'Cannot Proceed'}</button>
+        `;
+      } else {
+        controls.innerHTML = `<button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}', null, false)">${canProceed ? 'Authorize Update' : 'Cannot Proceed'}</button>`;
+      }
     } catch {
       panel.innerHTML = '<div class="empty">Plan unavailable</div>';
     }
@@ -268,6 +386,11 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     if (!panel || !controls) return;
     panel.scrollIntoView({behavior: 'smooth'});
     panel.innerHTML = `<div class="subtle">Loading service plan for ${escapeHtml(serviceName)}...</div>`;
+
+    const reg = projectRegistration?.registration;
+    const isProd = reg?.environment === 'production' || !reg;
+    const isProdLocked = isProd && (reg?.execution_locked === true || reg?.permits_operations === false);
+
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/compose-services/${encodeURIComponent(serviceName)}/plan`, {cache: 'no-store'});
       const data = await response.json();
@@ -291,17 +414,27 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
         ${plan.blocking_reason ? `<div class="update-reasons"><div style="color:#e74c3c"><strong>Blocked:</strong> ${escapeHtml(plan.blocking_reason)}</div></div>` : ''}
         <div class="subtle" style="margin-top:8px">Digest: ${escapeHtml(plan.plan_digest ? plan.plan_digest.slice(0, 16) : '—')}...</div>
       `;
-      controls.innerHTML = `
-        <button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}', '${escapeHtml(serviceName)}')">${canProceed ? `Authorize Service Update (${escapeHtml(serviceName)})` : 'Cannot Proceed'}</button>
-        <button onclick="window.loadUpdatePlan('${projectId}')" style="margin-left:8px">Cancel</button>
-      `;
+      if (isProdLocked) {
+        controls.innerHTML = `
+          <div style="margin-bottom:8px;padding:8px 10px;border:1px solid #ff7f88;background:rgba(255,127,136,0.1);border-radius:6px;font-size:12px;color:#ff7f88;">
+            <strong>Execution Disarmed:</strong> Production execution is permanently disabled by control-plane safety gate. Authorizing records a governance confirmation only.
+          </div>
+          <button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}', '${escapeHtml(serviceName)}', true)">${canProceed ? `Record Service Approval Only (${escapeHtml(serviceName)})` : 'Cannot Proceed'}</button>
+          <button onclick="window.loadUpdatePlan('${projectId}')" style="margin-left:8px">Cancel</button>
+        `;
+      } else {
+        controls.innerHTML = `
+          <button class="btn-approve" ${!canProceed ? 'disabled' : ''} onclick="window.handleApprove('${projectId}', '${plan.plan_digest}', '${escapeHtml(serviceName)}', false)">${canProceed ? `Authorize Service Update (${escapeHtml(serviceName)})` : 'Cannot Proceed'}</button>
+          <button onclick="window.loadUpdatePlan('${projectId}')" style="margin-left:8px">Cancel</button>
+        `;
+      }
     } catch {
       panel.innerHTML = '<div class="empty">Service plan request failed</div>';
       controls.innerHTML = `<button onclick="window.loadUpdatePlan('${projectId}')">Back to Project Plan</button>`;
     }
   }
 
-  window.handleApprove = async function(projectId, digest, serviceName = null) {
+  window.handleApprove = async function(projectId, digest, serviceName = null, isProdLocked = false) {
     const result = document.getElementById(`updateResult-${projectId}`);
     const controls = document.getElementById(`updateControls-${projectId}`);
     if (!result) return;
@@ -316,7 +449,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
           <div class="subtle" style="margin-bottom:8px">Enter owner secret to authorize update:</div>
           <div style="display:flex;gap:8px">
             <input type="password" id="ownerSecretInput-${projectId}" placeholder="Owner secret" style="flex:1;padding:6px;border:1px solid #ccc;border-radius:3px" autocomplete="off" />
-            <button onclick="window.handleLogin('${projectId}', '${digest}', ${serviceName ? `'${escapeHtml(serviceName)}'` : 'null'})" style="background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:3px;cursor:pointer">Authenticate</button>
+            <button onclick="window.handleLogin('${projectId}', '${digest}', ${serviceName ? `'${escapeHtml(serviceName)}'` : 'null'}, ${isProdLocked ? 'true' : 'false'})" style="background:#3498db;color:#fff;border:none;padding:6px 12px;border-radius:3px;cursor:pointer">Authenticate</button>
           </div>
           <div id="loginError-${projectId}" style="color:#e74c3c;margin-top:6px;font-size:0.9em"></div>
         </div>`;
@@ -343,13 +476,26 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
         const approval = data.update_approval;
         const scopeLabel = approval.service_name ? `Service: ${escapeHtml(approval.service_name)}` : 'Project';
         if (approval.confirmation_required) {
-          result.innerHTML = `<div style="border:1px solid #f39c12;padding:8px;margin-top:8px;background:#fef5e7"><div><strong>Confirmation Required</strong> (${scopeLabel})</div><div class="subtle">Action: ${escapeHtml(approval.action_id)}</div></div>`;
-          controls.innerHTML = `<button onclick="window.handleExecute('${projectId}', '${approval.action_id}')">Execute Update</button>`;
+          if (isProdLocked) {
+            result.innerHTML = `
+              <div style="border:1px solid #ff7f88;padding:10px;margin-top:8px;background:rgba(255,127,136,0.12);border-radius:6px;">
+                <div style="font-weight:700;color:#ff7f88;">Approval Recorded (${scopeLabel})</div>
+                <div class="subtle" style="margin-top:4px;">Action ID: ${escapeHtml(approval.action_id)} · Confirmation ID: ${escapeHtml(approval.confirmation_id || '—')}</div>
+                <div style="color:#ff7f88;margin-top:6px;font-size:12px;"><strong>Production execution is permanently disabled by control-plane kill switch. Mutating execution is blocked.</strong></div>
+              </div>
+            `;
+            controls.innerHTML = `<button disabled style="opacity:0.5;cursor:not-allowed;" title="Production execution is disarmed host-wide">Execution Blocked (Kill Switch Engaged)</button>`;
+          } else {
+            result.innerHTML = `<div style="border:1px solid #f39c12;padding:8px;margin-top:8px;background:#fef5e7"><div><strong>Confirmation Required</strong> (${scopeLabel})</div><div class="subtle">Action: ${escapeHtml(approval.action_id)}</div></div>`;
+            controls.innerHTML = `<button onclick="window.handleExecute('${projectId}', '${approval.action_id}', false)">Execute Update</button>`;
+          }
         } else {
-          result.innerHTML = `<div style="color:#27ae60">Authorized: ${escapeHtml(approval.action_id)} (${scopeLabel})</div>`;
+          result.innerHTML = `<div style="color:#27ae60">Authorized: ${escapeHtml(approval.action_id)} (${scopeLabel}) ${isProdLocked ? '— Governance Record Only' : ''}</div>`;
         }
       } else {
-        result.innerHTML = `<div style="color:#e74c3c">Failed: ${escapeHtml(data.error || 'unknown')}</div>`;
+        const err = data.error || 'unknown';
+        const isKs = err === 'locked' || err === 'kill_switch_engaged' || err === 'execution_refused';
+        result.innerHTML = `<div style="color:#e74c3c">Failed: ${escapeHtml(err)}${isKs ? ' (Control-plane execution is locked)' : ''}</div>`;
         const retryCall = serviceName ? `window.loadServicePlan('${projectId}', '${escapeHtml(serviceName)}')` : `window.loadUpdatePlan('${projectId}')`;
         controls.innerHTML = `<button onclick="${retryCall}">Retry</button>`;
       }
@@ -360,7 +506,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     }
   };
 
-  window.handleLogin = async function(projectId, digest, serviceName = null) {
+  window.handleLogin = async function(projectId, digest, serviceName = null, isProdLocked = false) {
     const input = document.getElementById(`ownerSecretInput-${projectId}`);
     const errorDiv = document.getElementById(`loginError-${projectId}`);
     if (!input || !errorDiv) return;
@@ -389,7 +535,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
         // Reset cached CSRF token so next call reacquires it
         csrfToken = null;
         // Resume authorization workflow now that session is established
-        window.handleApprove(projectId, digest, serviceName);
+        window.handleApprove(projectId, digest, serviceName, isProdLocked);
       } else {
         const data = await response.json().catch(() => ({}));
         errorDiv.textContent = data.error === 'unauthenticated' ? 'Invalid secret' : 'Authentication failed';
@@ -400,10 +546,15 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     }
   };
 
-  window.handleExecute = async function(projectId, actionId) {
+  window.handleExecute = async function(projectId, actionId, isProdLocked = false) {
     const result = document.getElementById(`updateResult-${projectId}`);
     const controls = document.getElementById(`updateControls-${projectId}`);
     if (!result) return;
+    if (isProdLocked) {
+      result.innerHTML = '<div style="color:#ff7f88;font-weight:700;">Execution blocked: Production execution is permanently disabled by control-plane kill switch.</div>';
+      if (controls) controls.innerHTML = '<button disabled style="opacity:0.5;cursor:not-allowed;">Execution Blocked</button>';
+      return;
+    }
     result.innerHTML = '<div class="subtle">Executing update...</div>';
     controls.innerHTML = '<button disabled>Executing...</button>';
     const token = await getCsrfToken();
@@ -499,7 +650,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectDetail').innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
   }
 
-  function renderDetail(data, healthData, containersData, updateData, composeData) {
+  function renderDetail(data, healthData, containersData, updateData, composeData, regData) {
     const project = data.project;
     if (!project) return clearDetail(data.error || 'Project detail unavailable.');
     const health = healthData.health || project.health || {};
@@ -508,7 +659,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     $('projectDetailState').className = `badge ${stateClass(health.status || 'unknown')}`;
     const evidence = (health.evidence || project.evidence || []).map(item => `<div class="evidence-row"><span class="badge ${stateClass(item.severity === 'warning' ? 'warning' : 'unknown')}">${escapeHtml(item.code)}</span><span>${escapeHtml(item.message)}</span></div>`).join('');
     const tree = components.length ? `<div class="component-tree">${components.map(item => `<div class="component-row"><div><strong>${escapeHtml(item.service_name || item.name)}</strong><span>${escapeHtml(item.name)} · ${escapeHtml(item.image || 'image unavailable')}</span></div><div>${badge(item.state || 'unknown', item.state === 'running' ? 'healthy' : item.state === 'exited' ? 'critical' : 'warning')} ${item.health ? badge(item.health, item.health === 'healthy' ? 'healthy' : 'critical') : '<span class="subtle">health check missing</span>'}</div></div>`).join('')}</div>` : '<div class="empty">No runtime components are associated with this project.</div>';
-    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div>${composeIntelligenceSection(composeData, project.id)}<div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>${updateStatusSection(updateData)}${updateWorkflowSection(project.id)}`;
+    $('projectDetail').innerHTML = `<div class="detail-title"><div><div class="eyebrow">Application detail</div><h3>${escapeHtml(project.display_name)}</h3><p>${escapeHtml(project.source)} · ${escapeHtml(project.confidence)} association · ${escapeHtml(project.freshness?.state || project.freshness?.status || 'unknown')}</p></div>${badge(health.status || 'unknown', health.status || 'unknown')}</div><div class="detail-grid"><div><span class="metric-label">Components</span><strong>${components.length}</strong></div><div><span class="metric-label">Running</span><strong>${health.counts?.running ?? project.runtime?.running ?? 0}</strong></div><div><span class="metric-label">Healthy</span><strong>${health.counts?.healthy ?? 0}</strong></div><div><span class="metric-label">Missing health checks</span><strong>${health.counts?.missing_health_check ?? 0}</strong></div></div><section class="health-evidence"><h4>Health evidence</h4>${healthEvidenceHtml(health)}</section><div class="detail-columns"><div><h4>Component tree</h4>${tree}</div><div><h4>Raw evidence</h4><div class="evidence-list">${evidence || '<div class="empty">No additional evidence.</div>'}</div></div></div>${registrationSection(regData, project.id)}${composeIntelligenceSection(composeData, project.id)}<div class="posture-grid"><div><h4>Git posture</h4><p>${escapeHtml(project.git?.status || 'unavailable')} · branch ${escapeHtml(project.git?.branch || 'unknown')}</p><span class="subtle">Ahead ${project.git?.ahead ?? '—'} · behind ${project.git?.behind ?? '—'} · conflicts ${project.git?.conflicted ? 'present' : 'none observed'}</span></div><div><h4>Compose posture</h4><p>${escapeHtml(project.compose?.status || 'unavailable')}</p><span class="subtle">${(project.compose?.file_names || []).map(escapeHtml).join(', ') || 'No Compose file metadata available'}</span></div></div>${updateStatusSection(updateData)}${updateWorkflowSection(project.id, regData)}`;
     bindComposeRefresh(project.id);
     // Load update plan after rendering
     setTimeout(() => loadUpdatePlan(project.id), 100);
@@ -519,7 +670,7 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     selectedId = projectId;
     document.querySelectorAll('[data-project-id]').forEach(button => button.classList.toggle('selected', button.dataset.projectId === projectId));
     try {
-      const [responses, updateData, composeData] = await Promise.all([
+      const [responses, updateData, composeData, regData] = await Promise.all([
         Promise.all([
           fetch(`/api/projects/${encodeURIComponent(projectId)}`, {cache: 'no-store'}),
           fetch(`/api/projects/${encodeURIComponent(projectId)}/health`, {cache: 'no-store'}),
@@ -535,10 +686,14 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
             if (response.status === 404) return {available: false, error: 'not_found'};
             return {available: false, error: 'unavailable'};
           })
-          .catch(() => ({available: false, error: 'network_error'}))
+          .catch(() => ({available: false, error: 'network_error'})),
+        fetch(`/api/projects/${encodeURIComponent(projectId)}/registration`, {cache: 'no-store'})
+          .then(response => (response.ok ? response.json() : {available: false, error: response.status === 404 ? 'not_found' : 'unavailable'}))
+          .catch(() => ({available: false, error: 'unavailable'}))
       ]);
       if (responses.some(response => !response.ok)) throw new Error('Project detail unavailable');
-      renderDetail(await responses[0].json(), await responses[1].json(), await responses[2].json(), updateData, composeData);
+      projectRegistration = regData;
+      renderDetail(await responses[0].json(), await responses[1].json(), await responses[2].json(), updateData, composeData, regData);
     } catch (error) {
       clearDetail('Project detail is unavailable; unaffected inventory observations remain visible.');
     }
@@ -554,5 +709,5 @@ export function createProjectController({scheduler, stateClass, escapeHtml = esc
     }
   }
 
-  return {load, selectProject, latest: () => latest, cleanup: () => {selectedId = null;}};
+  return {load, selectProject, latest: () => latest, cleanup: () => {selectedId = null; projectRegistration = null;}};
 }
